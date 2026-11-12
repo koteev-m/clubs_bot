@@ -1,0 +1,899 @@
+{
+  "status": "ACCEPTED local architecture; implemented inactive foundation; production providers remain blocked",
+  "base": "5550b944990d8c1c93c0a5012d31db209f93ea6d",
+  "writers": [
+    {
+      "id": "W01",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/security/ExposedUserRepositories.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/OnboardingSql.kt",
+        "app-bot/src/main/kotlin/com/example/bot/deprecated/legacy/web/BookingWebAppRoutes.kt"
+      ],
+      "entry": "ensureMinimalIdentity / provision / legacy ensure-user INSERT",
+      "locks": "unique telegram_user_id; implicit row/index/FK locks",
+      "fence": "users identity row + post-lock mapping reread",
+      "participation": "No remap API found. Platform maintenance never provisions a user. Raw remapping is W21.",
+      "control_foundation": {
+        "status": "EXISTING_ACTOR_FENCE",
+        "mechanism": "Unique signed TG mapping; actor NKU and post-lock mapping check in guarded mutation.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W02",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/privacy/PrivacyService.kt"
+      ],
+      "entry": "anonymizeUser / backfillUsers",
+      "locks": "implicit users row update",
+      "fence": "No Telegram mapping/owner/auth-context change",
+      "participation": "Phone/privacy columns only; no maintenance authority.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W03",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/JdbcClientOnboardingRepository.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/OnboardingSql.kt"
+      ],
+      "entry": "all onboarding mutation dispatch / command replay",
+      "locks": "actor NKU -> domain client U; client-first calendar resolver uses actor NOWAIT/savepoint",
+      "fence": "client_commands + audit; client-lock freshness",
+      "participation": "No V078 root/head locks; no maintenance authority. No change to legacy config auth.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W04",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/InvitationOperations.kt"
+      ],
+      "entry": "client invite create / confirm / acceptRecipient / revoke",
+      "locks": "actor -> client -> invitation U",
+      "fence": "client membership/grant guard; V078 client epoch trigger",
+      "participation": "Legacy invitation only; no TARGET admission.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W05",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/StaffInvitationOperations.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubPreparationOperations.kt"
+      ],
+      "entry": "staff claim / confirm / team/preparation invite assignment",
+      "locks": "actor -> client -> invitation/staff rows",
+      "fence": "LegacyClientAuthorityWrites + exact staff revoke watermark",
+      "participation": "Not a maintenance authority provider.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W06",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubStaffAccess.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubTeamOperations.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/LegacyClientAuthorityWrites.kt"
+      ],
+      "entry": "replace / team change-disable / platformRevoke / preparation grants",
+      "locks": "actor -> client -> staff/grant rows",
+      "fence": "mixed-admission/history guard under client lock",
+      "participation": "Never reuse replace for multiple TARGET sources.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W07",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientAccessOperations.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/assignments/PlatformMembershipSourceRevocation.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/assignments/PlatformMembershipSourceInvalidator.kt"
+      ],
+      "entry": "member revoke/restore / disableScopes / restoreScopes",
+      "locks": "actor -> client -> sorted admissions(club,user) -> assignments(id) -> delegations(id)",
+      "fence": "membership CAS + admission epoch/terminal sources; source/audit/receipt one TX",
+      "participation": "No platform-owner identity revoke; no new maintenance head needed for client authority.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W08",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/assignments/JdbcRoleAssignmentFoundation.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentAdmissionWriter.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentSourceWriter.kt"
+      ],
+      "entry": "issue/revoke role/delegation / full disable / explicit readmit",
+      "locks": "actor -> client -> sorted admissions -> assignments -> delegations",
+      "fence": "versions + admission epoch + terminal sources + policy/dependency checks",
+      "participation": "Inactive/unwired; platform owner explicitly excluded; no binding locks.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W09",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/promoter/PromoterAdminRepositoryImpl.kt"
+      ],
+      "entry": "setPromoterAccess / syncUserRole",
+      "locks": "mapped client U -> promoter access / legacy user_roles",
+      "fence": "mapped exact legacy compatibility guard",
+      "participation": "Unmapped legacy remains legacy; cannot authorize maintenance.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W10",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/DirectClubOperations.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubOnboardingOperations.kt"
+      ],
+      "entry": "direct first/second club / historical approved create",
+      "locks": "actor -> client -> club/mapping INSERT",
+      "fence": "V078 mapping trigger -> client -> epoch head; bootstrap fixed legacy grants",
+      "participation": "No automatic new binding scope or TARGET sources.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W11",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientLifecycleOperations.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientLimitOperations.kt"
+      ],
+      "entry": "archive/restore / allowed_clubs update",
+      "locks": "actor -> client U -> epoch head for audience predicates",
+      "fence": "V078 clients trigger (active/archive/lifecycle only)",
+      "participation": "Limit/display/time-only changes do not advance audience epoch.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W12",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/admin/AdminClubsDbRepository.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/coredata/CoreDataSeeder.kt"
+      ],
+      "entry": "club create/update/publication / core data seeding",
+      "locks": "club row/index locks; seed-only advisory_xact_lock(coredata,seed)",
+      "fence": "club existence + FK; V078 mapping cascade if delete",
+      "participation": "Publication is not maintenance admission. Seed advisory is not a maintenance lease.",
+      "control_foundation": {
+        "status": "UNCHANGED_NOT_IN_PLATFORM_AUTHORITY_PREDICATE",
+        "mechanism": "Existing client/user/storage locks and guards remain; no new maintenance authority is derived.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W13",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/BindingAudit.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/BindingControlCompatibility.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/BindingValidation.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/BindingWriter.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/JdbcInactiveBindingFoundation.kt"
+      ],
+      "entry": "Create/State/Replace/AttachReference/RetireMaterial and resolve",
+      "locks": "actor -> root U (read resolve root SHARE) -> child NOWAIT root guard",
+      "fence": "root v/g + terminal metadata + final-fence receipt + audit",
+      "participation": "Bare evidence path has no production shared lease. Must stay unwired/quiesced; not a second production maintenance entry.",
+      "control_foundation": {
+        "status": "BLOCKED_FOR_CONTROLLED_ROOT",
+        "mechanism": "Bare writer requires explicit trusted storage schema and rejects any controlled root under root U; missing post-V079 schema fails closed. Initial adoption locks root U. No alternative production entry.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W14",
+      "paths": [
+        "app-bot/src/main/kotlin/com/example/bot/plugins/target/DbControlMaintenanceLeaseSource.kt",
+        "app-bot/src/main/kotlin/com/example/bot/plugins/target/MaintenanceControlBundle.kt",
+        "app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetCommitTimeMaintenanceAdapter.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/CommitMaintenanceModel.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/ControlTransaction.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/JdbcCommitTimeBindingMaintenance.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/JdbcControlHeadLease.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/MaintenanceControlHead.kt"
+      ],
+      "entry": "guarded PLATFORM Disable/Revoke/selected retirement",
+      "locks": "required shared context -> actor -> root -> child",
+      "fence": "same-Connection canonical pre/post + CAS + repeated fresh authority + final receipt",
+      "participation": "Production lease/intent missing. App current() must become explicitly transaction-bound in future slice.",
+      "control_foundation": {
+        "status": "IMPLEMENTED_UNREGISTERED",
+        "mechanism": "Typed JDBC head lease independently verified by core before actor/root; old guarded/JVM/string-only paths reject adopted roots. Same Connection/native TX, signed authority, immutable intent/CAS and publication-bound receipts.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W15",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/ClientMappingEpochTrigger.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/ControlHeadGuardTrigger.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/ControlHeadHistoryTrigger.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/TargetMetadataGuardTrigger.kt",
+        "core-data/src/main/resources/db/migration/h2/V079__maintenance_control_heads.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V078__inactive_target_bindings.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V079__maintenance_control_heads.sql"
+      ],
+      "entry": "ordinary direct DML on bindings/materials/revisions/scope/root/receipts",
+      "locks": "child physical row may precede trigger -> root NOWAIT; service root -> child; no blocking reverse root wait",
+      "fence": "P1 trusted schema / P2 aggregate root bump; terminal/immutable metadata",
+      "participation": "Coherent storage fence, NOT signed Telegram authorization. Do not invent head lock inside child trigger (inversion).",
+      "control_foundation": {
+        "status": "DATABASE_FENCED",
+        "mechanism": "V078 root/child guards unchanged. V079 head monotonic/history + FK/identity guards; non-key raw head UPDATE conflicts with SHARE. No SQL signed-identity assertion.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W16",
+      "paths": [
+        "core-data/src/main/resources/db/migration/h2/V078__inactive_target_bindings.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V078__inactive_target_bindings.sql",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/ClientMappingEpochTrigger.kt"
+      ],
+      "entry": "clients / client_clubs raw DML + client/club FK cascades",
+      "locks": "canonical client(s sorted) -> durable epoch head; direct mapping/club rows may already be held",
+      "fence": "durable projection/head survives delete/reinsert; atomic trigger rollback",
+      "participation": "Raw out-of-order DML can deadlock/abort. No timestamp/cache shortcut. PLATFORM binding remains unbound.",
+      "control_foundation": {
+        "status": "EXISTING_MAPPING_FENCE",
+        "mechanism": "V078 canonical client/high-water triggers unchanged, ABA/cascades covered. PLATFORM mapping epoch must remain null; BRANDED is blocked.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W17",
+      "paths": [
+        "app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetIdentityVerifier.kt",
+        "app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetMaintenanceIdentity.kt",
+        "app-bot/src/main/kotlin/com/example/bot/plugins/target/MaintenanceSelectionModel.kt",
+        "app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetMaintenanceSelector.kt"
+      ],
+      "entry": "authentication/context/server-selection/business-authority provider ports",
+      "locks": "current local callbacks; tests use JVM RWL only",
+      "fence": "exact immutable connection/context; strict freshness; no cross-process fence",
+      "participation": "No runtime provider/updater exists. Business provider absent. New control-head publisher prerequisite.",
+      "control_foundation": {
+        "status": "LOCAL_COMPOSITION_ONLY",
+        "mechanism": "Explicit transaction/intent-bound ports and default-absent protected bundle source. Synthetic signed composition only; no runtime registration.",
+        "requires_future_adaptation": true,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W18",
+      "paths": [
+        "core-domain/src/main/kotlin/com/example/bot/config/AppConfig.kt",
+        "app-bot/src/main/kotlin/com/example/bot/plugins/Env.kt",
+        "app-bot/src/main/kotlin/com/example/bot/routes/ClientContextRoutes.kt",
+        "app-bot/src/main/kotlin/com/example/bot/wiring/InviteRouteWiring.kt",
+        "app-bot/src/main/kotlin/com/example/bot/telegram/NotifyDispatchConfig.kt",
+        "app-bot/src/main/kotlin/com/example/bot/deprecated/legacy/web/LegacyBookingConfig.kt"
+      ],
+      "entry": "protected owner/token/env loading / platform connection construction",
+      "locks": "process startup configuration; no shared lock/version",
+      "fence": "existing exact configured owner and live platform bot identity",
+      "participation": "No durable authoritative configuration generation. Future maintenance bundle must match fenced head on every replica; unchanged legacy routes are outside this gate.",
+      "control_foundation": {
+        "status": "PRODUCTION_BLOCKED",
+        "mechanism": "Only a default-deny synthetic metadata publisher exists. Real protected config/deploy/secret writers and replica rollout do not implement head publication; must remain disconnected.",
+        "requires_future_adaptation": true,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W19",
+      "paths": [
+        ".github/workflows/container-smoke.yml",
+        ".github/workflows/corrected-stage-release.yml",
+        ".github/workflows/db-migrate.yml",
+        ".github/workflows/deploy-ssh.yml",
+        ".github/workflows/tests.yml",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/SyntheticControlHeadPublisher.kt",
+        "scripts/deploy/aeza-initial/docker-compose.yml",
+        "scripts/deploy/aeza-initial/first-install.py",
+        "scripts/deploy/corrected-stage-release.py",
+        "scripts/deploy/quiesced-release.sh",
+        "scripts/deploy/remote-compose-release.sh",
+        "scripts/deploy/shared_staging_flock.py",
+        "scripts/dev-env.example.sh",
+        "scripts/ensure-env.sh",
+        "scripts/smoke.sh",
+        "scripts/update-telegram-ui.sh"
+      ],
+      "entry": "repo deployment/test/config consumers; external protected env/secret publication",
+      "locks": "no maintenance fence; external operators/config writers not enumerable from repo",
+      "fence": "MISSING production control publisher / operational all-writer proof",
+      "participation": "Fence-first protected bundle publication required before maintenance; no live changes in this task.",
+      "control_foundation": {
+        "status": "PRODUCTION_BLOCKED",
+        "mechanism": "Only a default-deny synthetic metadata publisher exists. Real protected config/deploy/secret writers and replica rollout do not implement head publication; must remain disconnected.",
+        "requires_future_adaptation": true,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W20",
+      "paths": [
+        "scripts/seed-demo.sql",
+        "scripts/deploy/aeza-initial/10-clubs-role.sql",
+        "core-data/src/main/resources/db/migration/h2/V2__seed.sql",
+        "core-data/src/main/resources/db/migration/h2/V061__client_context.sql",
+        "core-data/src/main/resources/db/migration/h2/V062__client_onboarding_a.sql",
+        "core-data/src/main/resources/db/migration/h2/V065__client_club_layout.sql",
+        "core-data/src/main/resources/db/migration/h2/V067__client_club_calendar.sql",
+        "core-data/src/main/resources/db/migration/h2/V068__client_club_booking_rules.sql",
+        "core-data/src/main/resources/db/migration/h2/V074__client_club_configuration.sql",
+        "core-data/src/main/resources/db/migration/h2/V075__client_club_staff.sql",
+        "core-data/src/main/resources/db/migration/h2/V077__client_role_assignment_foundation.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V2__seed.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V061__client_context.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V062__client_onboarding_a.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V065__client_club_layout.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V067__client_club_calendar.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V068__client_club_booking_rules.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V074__client_club_configuration.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V075__client_club_staff.sql",
+        "core-data/src/main/resources/db/migration/postgresql/V077__client_role_assignment_foundation.sql"
+      ],
+      "entry": "historical Flyway grant seeds / demo SQL / migration runner",
+      "locks": "Flyway schema-history/advisory migration coordination, not maintenance authority lease",
+      "fence": "historical SQL constraints; V078 guards only once installed",
+      "participation": "Do not rerun/backfill as TARGET; maintenance disabled during incompatible migration/recovery. No current task SQL migration.",
+      "control_foundation": {
+        "status": "RECOVERY_ACTIVATION_GATE",
+        "mechanism": "Additive V079 migrates populated V078 without adoption; privileged DDL/disabled guards/backup/failover remain separate quiescence/reconciliation gates.",
+        "requires_future_adaptation": true,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W21",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/security/UserTables.kt",
+        "core-data/src/main/resources/db/migration/postgresql/V1__init.sql"
+      ],
+      "entry": "raw users key/TG remap / deletion; other raw membership/grants/source SQL",
+      "locks": "implicit users U/unique/FK; raw client authority DML may bypass application client serialization",
+      "fence": "guarded maintenance actor NKU + post-lock mapping recheck; V077 is not an all-DML identity/authority guard",
+      "participation": "No remap runtime API found. Maintenance does not derive authority from client rows. Raw staff writers remain a TARGET cutover blocker.",
+      "control_foundation": {
+        "status": "BOUNDED_DB_FENCES",
+        "mechanism": "Actor mapping row lock/post-lock reread; ordinary control DML obeys V079. Raw staff SQL still blocks future TARGET cutover; no staff authority used for maintenance.",
+        "requires_future_adaptation": true,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W22",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/DurableBindingSource.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/JdbcDurableBindingSource.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/bindings/DurableBindingDecoder.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/JdbcCanonicalClientAudienceRepository.kt",
+        "core-data/src/main/kotlin/com/example/bot/data/client/ClientContextRepository.kt"
+      ],
+      "entry": "read-only sources / audience / selector",
+      "locks": "one-statement MVCC read; not a shared authority lease",
+      "fence": "snapshot pin only; private club not denied via publication",
+      "participation": "Not writers. Must not claim read-only snapshot proves commit-time authority.",
+      "control_foundation": {
+        "status": "EXPECTED_STATE_ONLY",
+        "mechanism": "No read-only snapshot or head row acts as permission or bearer authorization.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    },
+    {
+      "id": "W23",
+      "paths": [
+        "core-data/src/main/kotlin/com/example/bot/data/booking/core/BookingRepository.kt"
+      ],
+      "entry": "booking advisory_xact_lock(hold-slot namespace)",
+      "locks": "separate booking resource only",
+      "fence": "booking HOLD invariant",
+      "participation": "Irrelevant to maintenance; cannot reuse as a lease.",
+      "control_foundation": {
+        "status": "UNRELATED_LOCK",
+        "mechanism": "Booking/seed/flock namespaces are not a maintenance lease.",
+        "requires_future_adaptation": false,
+        "production_admission": false
+      }
+    }
+  ],
+  "source_sha256": {
+    ".github/workflows/container-smoke.yml": {
+      "algorithm": "SHA-256",
+      "digest": "fb24de70b2046f3fabd7b33f8fa301a24d0540fe93bf3568058dcb30277b4b36"
+    },
+    ".github/workflows/corrected-stage-release.yml": {
+      "algorithm": "SHA-256",
+      "digest": "e33bd98fe85361b784534f2e552ec22892637ec05d61431cfe27e701bcf9956c"
+    },
+    ".github/workflows/db-migrate.yml": {
+      "algorithm": "SHA-256",
+      "digest": "1163f444c4c4703ddfb2268f02b54ca63924e454041c92a378acc06c5195fbb3"
+    },
+    ".github/workflows/deploy-ssh.yml": {
+      "algorithm": "SHA-256",
+      "digest": "ad847a3ad9f5280a2a2a3c0bfe0cb018a1cf9f3298114255a4a96bd144a0607f"
+    },
+    ".github/workflows/tests.yml": {
+      "algorithm": "SHA-256",
+      "digest": "7e69f8a1cf465f1a07529e3e4d3d047c49664a8ff9985cf484543b168303d383"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/deprecated/legacy/web/BookingWebAppRoutes.kt": {
+      "algorithm": "SHA-256",
+      "digest": "408c39f5e4fc4fd8a0eb962b4a9acf3c942362a17f87ca6db13809a314e8f84e"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/deprecated/legacy/web/LegacyBookingConfig.kt": {
+      "algorithm": "SHA-256",
+      "digest": "9ff0cee924818353d33cb0913866eb4c5e921e73cb4a52c763b8fe5709d8d19b"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/Env.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a244bb6ea3f6ee354ce605855aa42915d538f60b5ba5b0c14a8f2aa8da990ba0"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/target/DbControlMaintenanceLeaseSource.kt": {
+      "algorithm": "SHA-256",
+      "digest": "15cee6532548f5e519f25c27e4f85915d0b66d19644a0a9d8ea0f93cd7a100bb"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/target/MaintenanceControlBundle.kt": {
+      "algorithm": "SHA-256",
+      "digest": "260599f2d08253f981c42dc5c127376060af3d517ff01f5015590c8df44c5521"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/target/MaintenanceSelectionModel.kt": {
+      "algorithm": "SHA-256",
+      "digest": "ee9480bb9e3aad96bc37f534c882ea0aa00d8d95d180f48820cffa38d30279cb"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetCommitTimeMaintenanceAdapter.kt": {
+      "algorithm": "SHA-256",
+      "digest": "f9b5579c890e4ca7e363fa8bc6c7654320cd984329194bbd64b23c16d9c19f50"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetIdentityVerifier.kt": {
+      "algorithm": "SHA-256",
+      "digest": "05931a70f45c383932537d7b56bc99ed7ade2ba5725b2b2c96de8387ca4089cb"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetMaintenanceIdentity.kt": {
+      "algorithm": "SHA-256",
+      "digest": "ae566ebb75d5072e9fca5df585560db400db370514f05972a234b66d54865492"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetMaintenanceSelector.kt": {
+      "algorithm": "SHA-256",
+      "digest": "b002722f41402e591ec784ca42b37b3ae3c898ea703994a59ef5d5a14b4cee24"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/routes/ClientContextRoutes.kt": {
+      "algorithm": "SHA-256",
+      "digest": "2de991a2bbe5814231e72aa2c1c59eae63fa45bec8f6e311062756f28c138123"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/telegram/NotifyDispatchConfig.kt": {
+      "algorithm": "SHA-256",
+      "digest": "c1e0cb3709d3559690e6d3480f680b4c531869e090309157024ff634754496da"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/wiring/InviteRouteWiring.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a97e99e1cda5fdc55991b22334f763f55971cd5dc137c0cdc04b4e1097ece7bd"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/admin/AdminClubsDbRepository.kt": {
+      "algorithm": "SHA-256",
+      "digest": "fe4200d44693632328e74ececaf08437a63f1b1594f980ae5d0ba3fb5c9f2322"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/booking/core/BookingRepository.kt": {
+      "algorithm": "SHA-256",
+      "digest": "46a63020fb79b3511ef502127a52edd99d0e40805e2fede4cd2f72cccbaa0976"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/ClientContextRepository.kt": {
+      "algorithm": "SHA-256",
+      "digest": "27c5d76bc0ca2bf55a6a19da53a9c56efb72e61f92a6a202ff24ea3f08518307"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/JdbcCanonicalClientAudienceRepository.kt": {
+      "algorithm": "SHA-256",
+      "digest": "5ffed5f9e31394f4653ef68e82b312d5dc07ded3e9ac1be7450d123c91e62698"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentAdmissionWriter.kt": {
+      "algorithm": "SHA-256",
+      "digest": "afc06371993262ad05f70f69ba72736c96300abbc4ae472fab1c5931a9053fe9"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentSourceWriter.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a50cb9940ebfff28096f1f6503a9b8fd1124dd8b3b8209550810cd4b86382347"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/JdbcRoleAssignmentFoundation.kt": {
+      "algorithm": "SHA-256",
+      "digest": "d76a13afc68ba0b21ad32e38d8ff5619aba359e8c8db7a3b4e13dc944dedfeef"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/PlatformMembershipSourceInvalidator.kt": {
+      "algorithm": "SHA-256",
+      "digest": "9448af82a9b77e3b494922c4a5d44364a1e19a6b195a5bd24598973a26c1dbd9"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/PlatformMembershipSourceRevocation.kt": {
+      "algorithm": "SHA-256",
+      "digest": "839c06eddec5ab8611dc7ac7eec851748f1d58a3900add61bf6a50e97895cf1a"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/BindingAudit.kt": {
+      "algorithm": "SHA-256",
+      "digest": "e4fa60549d63ea24d5cc4db772a060c0debd9600fc2e8d2ced8e58c36306958e"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/BindingControlCompatibility.kt": {
+      "algorithm": "SHA-256",
+      "digest": "f05b35792932b5a8216ad202cbe9a1493b9e7bf72d3162b6c770c9cfca2b8595"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/BindingValidation.kt": {
+      "algorithm": "SHA-256",
+      "digest": "593a45690a4e29135420eb30147b717613a1048b2fced2f42e14552b90d9ae4b"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/BindingWriter.kt": {
+      "algorithm": "SHA-256",
+      "digest": "2371704d491ab90ad5173a81bc3566259e9ddecf91c0ad7c3e1c5facb447e33f"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/ClientMappingEpochTrigger.kt": {
+      "algorithm": "SHA-256",
+      "digest": "4d267dd74a40b122f10598bc90a9841aa0dd6ce72a9a29fa794fd6ded5a446db"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/CommitMaintenanceModel.kt": {
+      "algorithm": "SHA-256",
+      "digest": "b0b4d3fa741c5c0b665a2dcc8c06c2d77d6a38a2a806278e45f929531abdd7fd"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/ControlHeadGuardTrigger.kt": {
+      "algorithm": "SHA-256",
+      "digest": "d8a2ead98193178a32845654ae8f851937d0cf45a822430f88bb5a464e958c29"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/ControlHeadHistoryTrigger.kt": {
+      "algorithm": "SHA-256",
+      "digest": "0cf8a9578809c7cf03f378bcdb55176cb735fa7ec3f9ff1fc895b49528458a03"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/ControlTransaction.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a6d3838dc9ec74a298aa3fc783b73288b78f8d0c2987c686da05667ae33fa08a"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/DurableBindingDecoder.kt": {
+      "algorithm": "SHA-256",
+      "digest": "af46c97908804ab4f27abfe27e2501445e5c3ac03fcacc63b7b91af55060c909"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/DurableBindingSource.kt": {
+      "algorithm": "SHA-256",
+      "digest": "0f35266237a18426dee1a962ae14284953d92f53f743a9a3956dded653f9f01b"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/JdbcCommitTimeBindingMaintenance.kt": {
+      "algorithm": "SHA-256",
+      "digest": "d895e23a5064b1490191e1300038271d151ddfad2a7ec8c828d62a3e6c546f15"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/JdbcControlHeadLease.kt": {
+      "algorithm": "SHA-256",
+      "digest": "1326b194cd75b590afb1ed2d15a9d182f8e3789c642cb68fb3598e2fe7c88827"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/JdbcDurableBindingSource.kt": {
+      "algorithm": "SHA-256",
+      "digest": "3e037715666e5b02300c5b060b0880570b42b207910ab6b0c0e58da3f1de739f"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/JdbcInactiveBindingFoundation.kt": {
+      "algorithm": "SHA-256",
+      "digest": "145190ff55f2e139be96f115ebc57b2a1378b0dee18429364faf94054d520137"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/MaintenanceControlHead.kt": {
+      "algorithm": "SHA-256",
+      "digest": "3d4e8e9823f9b9f5855c61920fdbb4211c2dfce816ce26d6e36d7bc72a139083"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/SyntheticControlHeadPublisher.kt": {
+      "algorithm": "SHA-256",
+      "digest": "b70cb60f3b06e649f4900567ef47522aeb94877d43efc916ff6c0f8807c3d4ba"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/bindings/TargetMetadataGuardTrigger.kt": {
+      "algorithm": "SHA-256",
+      "digest": "af0b518f7da721205fbeb481d1396fa9920cf4c98bd571eceac981e96601d6b4"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientAccessOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "6f20e67d8ba58e875af4f814bee4ac9aab1ce7f530a046d9ba89e3f7c328178e"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientLifecycleOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "4727861ace7bdc1e7acb9bfa0835850ae3591cc5ffbf9ebd538deaf8108f655c"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientLimitOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "5a5a813ec907be0a23fc4f2d86df4d37e93cb85dbe9eca3d0ef0a25d2d7799f2"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubOnboardingOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "b5400b206ad775f9601c2c5aca47da18df19e15f8e145354cccae1cb0dc6f536"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubPreparationOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a8b0d1b8eacfb4d8102cf08345fde9093f60306fda1f354406cd244b747e7864"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubStaffAccess.kt": {
+      "algorithm": "SHA-256",
+      "digest": "08a835a45d8332d98155742a89f3bd57eed5798c72439c81b7379643fac5a8d6"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubTeamOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "2fe6a0888302292bd1075d841f4c740c0054273fceb3d668d14ff5e0f195bf3f"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/DirectClubOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a8d2aecb85dca31c9e1cf4c5429affbb1bca8a89060086fc222bdef37a5f27de"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/InvitationOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "ab09203ff6466ed3d221fc05f7d16c6a4c1dce7f080412df7dce979687e4afe8"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/JdbcClientOnboardingRepository.kt": {
+      "algorithm": "SHA-256",
+      "digest": "ef49a908a4d7aa5abdaaf1ebfd0f95ee5ec1bb893c814ffaed5ade6b8b208ecf"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/LegacyClientAuthorityWrites.kt": {
+      "algorithm": "SHA-256",
+      "digest": "3f42a328dabb8e6d1aac18c2e759b2ff444506d6efd138c7d7bba9dd1c8782ba"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/OnboardingSql.kt": {
+      "algorithm": "SHA-256",
+      "digest": "fd187de019fea8d41370baaf80535e5100112eee5c6b69046c9e7c6dd05057a6"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/StaffInvitationOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "430a45d4501fa95d152537adc76cbc97844a48c3bb6d369ec5193b45ac513154"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/coredata/CoreDataSeeder.kt": {
+      "algorithm": "SHA-256",
+      "digest": "c26787cd7b9d8f8897f721a5de7829919279d64f0822378f288c8362fd2a517c"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/privacy/PrivacyService.kt": {
+      "algorithm": "SHA-256",
+      "digest": "c797c07c23ec7f5d840de8416dfa699c7249338e0fa2e6e758bf48d5abe4a5b3"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/promoter/PromoterAdminRepositoryImpl.kt": {
+      "algorithm": "SHA-256",
+      "digest": "6a8ea747b0af38f714104d5e1e6793307be981336fb7f86a86e45d1a785f92b0"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/security/ExposedUserRepositories.kt": {
+      "algorithm": "SHA-256",
+      "digest": "cd63e5c2646d7384e51c8274d72dadd076f7184beef9512f51d6bf1c98fa5bca"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/security/UserTables.kt": {
+      "algorithm": "SHA-256",
+      "digest": "aef9a5ddf033bb7bfc99f71fd714b8e195642bb7d4c6d492c72c75b855665602"
+    },
+    "core-data/src/main/resources/db/migration/h2/V061__client_context.sql": {
+      "algorithm": "SHA-256",
+      "digest": "ebeb9b9379e996d24909d552504afa2ff912df7aa853ec75db8ae95431540a4f"
+    },
+    "core-data/src/main/resources/db/migration/h2/V062__client_onboarding_a.sql": {
+      "algorithm": "SHA-256",
+      "digest": "5f7a0952fd9000ad4ab9bda5e545ef4c01a034b46df6eae9d792865081ca5e53"
+    },
+    "core-data/src/main/resources/db/migration/h2/V065__client_club_layout.sql": {
+      "algorithm": "SHA-256",
+      "digest": "45c163c0ad6abe5bc51168e78dbb69344e57236285e25c461a54f658128abbb8"
+    },
+    "core-data/src/main/resources/db/migration/h2/V067__client_club_calendar.sql": {
+      "algorithm": "SHA-256",
+      "digest": "14eb6dc54c4596a71627b289692e6c5697797cde80de6a2930e04ec964d52663"
+    },
+    "core-data/src/main/resources/db/migration/h2/V068__client_club_booking_rules.sql": {
+      "algorithm": "SHA-256",
+      "digest": "9e16c74a16efe600f6fca6c35f4c1e1e804cec1f8d0f25fd1d0cac97fbe55ad8"
+    },
+    "core-data/src/main/resources/db/migration/h2/V074__client_club_configuration.sql": {
+      "algorithm": "SHA-256",
+      "digest": "eea2e7a5d1ab7e33085e2d8e7b940564b8bec6af2b6d6ce7e793a58055879a51"
+    },
+    "core-data/src/main/resources/db/migration/h2/V075__client_club_staff.sql": {
+      "algorithm": "SHA-256",
+      "digest": "364e49fa0f6cdd561d291a5d57c790bf792493eab759debfd8a1fa35c3fc7393"
+    },
+    "core-data/src/main/resources/db/migration/h2/V077__client_role_assignment_foundation.sql": {
+      "algorithm": "SHA-256",
+      "digest": "84c4f610af6cd9dfc4d0e5db03be64c6fc9b7a6ab79592ab0b1437bd0215f1e2"
+    },
+    "core-data/src/main/resources/db/migration/h2/V078__inactive_target_bindings.sql": {
+      "algorithm": "SHA-256",
+      "digest": "8a0fd8bf9b7f3cbd03f6be464fda494b552212f2a5397648885171891df7347b"
+    },
+    "core-data/src/main/resources/db/migration/h2/V079__maintenance_control_heads.sql": {
+      "algorithm": "SHA-256",
+      "digest": "99b7a85f09fc3910686ec2bc10e453e7273a2eccaf5fa0161c925ceb6548e5e0"
+    },
+    "core-data/src/main/resources/db/migration/h2/V2__seed.sql": {
+      "algorithm": "SHA-256",
+      "digest": "79ad933ca4aad3f230c40e71fa43db4b111f50f46487d0f9920182fefd918497"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V061__client_context.sql": {
+      "algorithm": "SHA-256",
+      "digest": "2b56b810d74509cbbb528368aa89a9605a97c46089a05c89806d696bc8dc14c6"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V062__client_onboarding_a.sql": {
+      "algorithm": "SHA-256",
+      "digest": "af0bccb59f676e17c15ac9a76b2d6a8f94015a42b0f54f265f2b1f69e53f2ee0"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V065__client_club_layout.sql": {
+      "algorithm": "SHA-256",
+      "digest": "45c163c0ad6abe5bc51168e78dbb69344e57236285e25c461a54f658128abbb8"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V067__client_club_calendar.sql": {
+      "algorithm": "SHA-256",
+      "digest": "14eb6dc54c4596a71627b289692e6c5697797cde80de6a2930e04ec964d52663"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V068__client_club_booking_rules.sql": {
+      "algorithm": "SHA-256",
+      "digest": "9e16c74a16efe600f6fca6c35f4c1e1e804cec1f8d0f25fd1d0cac97fbe55ad8"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V074__client_club_configuration.sql": {
+      "algorithm": "SHA-256",
+      "digest": "eea2e7a5d1ab7e33085e2d8e7b940564b8bec6af2b6d6ce7e793a58055879a51"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V075__client_club_staff.sql": {
+      "algorithm": "SHA-256",
+      "digest": "ed059f2cfa38fb1ff52171188928f893c37a590a85907672ca1f0f82ae19b632"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V077__client_role_assignment_foundation.sql": {
+      "algorithm": "SHA-256",
+      "digest": "84c4f610af6cd9dfc4d0e5db03be64c6fc9b7a6ab79592ab0b1437bd0215f1e2"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V078__inactive_target_bindings.sql": {
+      "algorithm": "SHA-256",
+      "digest": "ee691dd0bf10c200f235f56729140e8f497126c00a143e4766b213cb4259fae2"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V079__maintenance_control_heads.sql": {
+      "algorithm": "SHA-256",
+      "digest": "bab940f3ef86e98b1dabf50c8194c469a8d9f01526893c87f4a3f522c3908a17"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V1__init.sql": {
+      "algorithm": "SHA-256",
+      "digest": "f775db40f489ff9bd234658bb210631801e3a3ba52514b143a4e12cd59d6ecf5"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V2__seed.sql": {
+      "algorithm": "SHA-256",
+      "digest": "336c40dfb80437f31841628254641c49e4f420103d62f388822645eb0c13fef1"
+    },
+    "core-domain/src/main/kotlin/com/example/bot/config/AppConfig.kt": {
+      "algorithm": "SHA-256",
+      "digest": "002cb6ffb765d914e582b7bbde26c6007ad1a78e227a0f6bfea955c246d428c6"
+    },
+    "scripts/deploy/aeza-initial/10-clubs-role.sql": {
+      "algorithm": "SHA-256",
+      "digest": "333da4091f5a3b8c20441f69ce478687f11650f5ddcae44dd4be4d00891dab21"
+    },
+    "scripts/deploy/aeza-initial/docker-compose.yml": {
+      "algorithm": "SHA-256",
+      "digest": "3d57a1c830b37f77f17a0d98bdeb92e9951a3538e57e2636a76d2dc71c39bb82"
+    },
+    "scripts/deploy/aeza-initial/first-install.py": {
+      "algorithm": "SHA-256",
+      "digest": "6b77978ac62ae49c6b58b53100e52a1584d89b8a37f5b6590298a0f75fbc78d5"
+    },
+    "scripts/deploy/corrected-stage-release.py": {
+      "algorithm": "SHA-256",
+      "digest": "c52d017fc7b4a859295dac136b9263fe6162be725945da9aa257255840b7728c"
+    },
+    "scripts/deploy/quiesced-release.sh": {
+      "algorithm": "SHA-256",
+      "digest": "1c568304d7eda7d993d932a06e1b1a7a3de0f5c7b36266bbc495ae17ef2f6a75"
+    },
+    "scripts/deploy/remote-compose-release.sh": {
+      "algorithm": "SHA-256",
+      "digest": "8f81877efe0b53acb2e518cc96cfe763fef896032a41c7cb605de813afe885c6"
+    },
+    "scripts/deploy/shared_staging_flock.py": {
+      "algorithm": "SHA-256",
+      "digest": "427c112aa23c3e995c833c9bf878460bcd580e92b1fc12ca34a56599615c5c74"
+    },
+    "scripts/dev-env.example.sh": {
+      "algorithm": "SHA-256",
+      "digest": "445afeae19d88bc3e7f2a555f8320d4d32dca3a6a9104b3aac284e618e9cbb63"
+    },
+    "scripts/ensure-env.sh": {
+      "algorithm": "SHA-256",
+      "digest": "cb49a8a16417ed5be5f0504a7556ae35403937d5620bb19df24d9ffedcfb5321"
+    },
+    "scripts/seed-demo.sql": {
+      "algorithm": "SHA-256",
+      "digest": "25fb52f7a30345c915967d8ff218c506658b0c293a041463eb9ffc8d998faf87"
+    },
+    "scripts/smoke.sh": {
+      "algorithm": "SHA-256",
+      "digest": "46b51e8ae136c6ea71e5d7e8faa3bda72ad3cf71a3cf5750817a2a295a244303"
+    },
+    "scripts/update-telegram-ui.sh": {
+      "algorithm": "SHA-256",
+      "digest": "49e7cccbefb9cbfafd47725a5e7e261243ae0e76c52b3680a23fcae2a6c8aae1"
+    }
+  },
+  "blocking_order": [
+    [
+      "head",
+      "actor"
+    ],
+    [
+      "actor",
+      "client"
+    ],
+    [
+      "actor",
+      "root"
+    ],
+    [
+      "client",
+      "admission"
+    ],
+    [
+      "admission",
+      "assignment"
+    ],
+    [
+      "assignment",
+      "delegation"
+    ],
+    [
+      "client",
+      "epoch_head"
+    ],
+    [
+      "root",
+      "child"
+    ]
+  ],
+  "nonblocking_reverse_edges": [
+    [
+      "child",
+      "root"
+    ],
+    [
+      "client",
+      "actor"
+    ]
+  ],
+  "external_boundaries": [
+    "protected configuration/secret publishers outside repository",
+    "privileged DDL, trigger disable, TRUNCATE bypass, restore/replica promotion"
+  ]
+}

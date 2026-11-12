@@ -147,6 +147,9 @@ open class ClientBookingRulesRoutesDataTest : ClientOnboardingRoutesTestBase() {
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "73"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "74"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "75"))
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "76"))
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "77"))
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "78"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect))
             withApp(source, CLOCK) {
                 val path = "$C/clubs/8801/booking-rules"

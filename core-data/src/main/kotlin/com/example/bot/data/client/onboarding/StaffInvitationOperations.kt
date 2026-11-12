@@ -95,6 +95,11 @@ internal class StaffInvitationOperations(
         body.only(listOf("token", "expectedVersion"))
         val token = body.string("token")?.takeIf { Regex("[A-Za-z0-9_-]{43}").matches(it) } ?: fail("not_found")
         if (digest(token) != row["token_hash"]) fail("not_found")
+        session.requireLegacyClubAuthorityWrite(
+            row.long("client_id"),
+            row.long("club_id"),
+            checkNotNull(session.userId),
+        )
         recipient(row, preview = true)
         if (effective(row) !in setOf("issued", "claimed", "accepted")) fail("not_found")
         val existing =
@@ -180,6 +185,7 @@ internal class StaffInvitationOperations(
         val clientId = row.long("client_id")
         val clubId = row.long("club_id")
         val userId = row.long("claimant_user_id")
+        session.requireLegacyClubAuthorityWrite(clientId, clubId, userId)
         access.protectTarget(clientId, clubId, userId)
         access.packageAllowed(clientId, clubId, row["staff_role"])
         val member = sql.row("SELECT * FROM client_memberships WHERE client_id=? AND user_id=?", clientId, userId)

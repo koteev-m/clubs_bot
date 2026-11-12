@@ -4,6 +4,7 @@ import com.example.bot.data.security.ExposedUserRolePermissionRepository
 import com.example.bot.data.security.PermissionCode
 import com.example.bot.data.security.PermissionCodes
 import com.example.bot.data.security.Role
+import com.example.bot.data.testing.freshPostgresSchema
 import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
 import com.example.bot.support.TicketSenderType
@@ -65,19 +66,7 @@ class SupportGuestOwnershipIT {
 
     @BeforeEach
     fun cleanSupportData() {
-        check(::database.isInitialized) { "database not initialised" }
-        transaction(database) {
-            exec(
-                """
-                TRUNCATE TABLE
-                    ticket_messages,
-                    tickets,
-                    users,
-                    clubs
-                RESTART IDENTITY CASCADE
-                """.trimIndent(),
-            )
-        }
+        freshPostgresSchema(postgres)
     }
 
     @AfterAll

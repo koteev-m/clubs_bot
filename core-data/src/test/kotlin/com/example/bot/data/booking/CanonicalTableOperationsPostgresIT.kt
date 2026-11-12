@@ -11,7 +11,6 @@ import org.jetbrains.exposed.sql.Database
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.postgresql.ds.PGSimpleDataSource
@@ -22,11 +21,6 @@ internal class CanonicalTableOperationsPostgresIT :
     PostgresIntegrationTest(),
     CanonicalTableOperationsContract {
     private val observer by lazy { source("observer") }
-
-    @BeforeEach
-    fun clearTenantActors() {
-        observer.connection.use { it.executeTableOpsSql("TRUNCATE clients, users RESTART IDENTITY CASCADE") }
-    }
 
     override fun fixture(block: suspend (TableOperationsFixture) -> Unit) {
         runBlocking { block(TableOperationsFixture(observer, database)) }

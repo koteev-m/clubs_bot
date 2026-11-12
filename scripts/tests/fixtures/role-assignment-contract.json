@@ -1,0 +1,2246 @@
+{
+  "schema": "CLB-role-assignment-reference-v1",
+  "synthetic_only": true,
+  "source_revision": "5550b944990d8c1c93c0a5012d31db209f93ea6d",
+  "source_sha256": {
+    "docs/product/ROLE_ASSIGNMENT_CONTRACT_PROPOSED.md": {
+      "algorithm": "SHA-256",
+      "digest": "f62c116e4855c9f307388aaa9c5ccfbc7db59739d5575429973e5ecd82b8d19c"
+    },
+    "docs/product/PRODUCT_SPEC.md": {
+      "algorithm": "SHA-256",
+      "digest": "706cc2b1af7bba84e2f6db1d33487e40ec4ec2d63ce1ce67d7b48ea367406968"
+    },
+    "docs/product/ROLE_WORKSPACES_PROPOSED.md": {
+      "algorithm": "SHA-256",
+      "digest": "4a89dff37d1a6e14d6ce450b53a36e3ebdc631ec7106bbeec3556e5c937141fe"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubStaffAccess.kt": {
+      "algorithm": "SHA-256",
+      "digest": "08a835a45d8332d98155742a89f3bd57eed5798c72439c81b7379643fac5a8d6"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubTeamOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "2fe6a0888302292bd1075d841f4c740c0054273fceb3d668d14ff5e0f195bf3f"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/StaffInvitationOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "430a45d4501fa95d152537adc76cbc97844a48c3bb6d369ec5193b45ac513154"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/InvitationOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "ab09203ff6466ed3d221fc05f7d16c6a4c1dce7f080412df7dce979687e4afe8"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientAccessOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "6f20e67d8ba58e875af4f814bee4ac9aab1ce7f530a046d9ba89e3f7c328178e"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/DirectClubOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a8d2aecb85dca31c9e1cf4c5429affbb1bca8a89060086fc222bdef37a5f27de"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubOnboardingOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "b5400b206ad775f9601c2c5aca47da18df19e15f8e145354cccae1cb0dc6f536"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubPreparationOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a8b0d1b8eacfb4d8102cf08345fde9093f60306fda1f354406cd244b747e7864"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientLifecycleOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "4727861ace7bdc1e7acb9bfa0835850ae3591cc5ffbf9ebd538deaf8108f655c"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/JdbcClientOnboardingRepository.kt": {
+      "algorithm": "SHA-256",
+      "digest": "ef49a908a4d7aa5abdaaf1ebfd0f95ee5ec1bb893c814ffaed5ade6b8b208ecf"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/OnboardingSql.kt": {
+      "algorithm": "SHA-256",
+      "digest": "fd187de019fea8d41370baaf80535e5100112eee5c6b69046c9e7c6dd05057a6"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/promoter/PromoterAdminRepositoryImpl.kt": {
+      "algorithm": "SHA-256",
+      "digest": "6a8ea747b0af38f714104d5e1e6793307be981336fb7f86a86e45d1a785f92b0"
+    },
+    "scripts/seed-demo.sql": {
+      "algorithm": "SHA-256",
+      "digest": "25fb52f7a30345c915967d8ff218c506658b0c293a041463eb9ffc8d998faf87"
+    },
+    "scripts/seed-demo.sh": {
+      "algorithm": "SHA-256",
+      "digest": "48d0a0d38f43a36e3a52e0299757db3209f537847b0762ce5cd716f6672e6b6f"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentAdmissionWriter.kt": {
+      "algorithm": "SHA-256",
+      "digest": "afc06371993262ad05f70f69ba72736c96300abbc4ae472fab1c5931a9053fe9"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentAudit.kt": {
+      "algorithm": "SHA-256",
+      "digest": "995aaa8f1d310a9ce4b75966a8ce5862409f8c70fc8e0468b4eb47aad320be22"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentAuthority.kt": {
+      "algorithm": "SHA-256",
+      "digest": "eb0e0679992ab6d25017fba8934a3f56bd16544fc2186580124d7c81a2ca9d37"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentIntent.kt": {
+      "algorithm": "SHA-256",
+      "digest": "5cc0f057dd2c8dde667908952a9fa002dc0be9be53a21a755d48a0ca7f9f81c7"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentLifecycle.kt": {
+      "algorithm": "SHA-256",
+      "digest": "bb5d70383f9f28d7c309bbc1441f8d1861437c8739141f655c8a9e224beed11c"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentModel.kt": {
+      "algorithm": "SHA-256",
+      "digest": "00e8adb3c88b46db6b1f79c519ab488672f68e271746aac9d8b53dfc9136a7d1"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentPolicies.kt": {
+      "algorithm": "SHA-256",
+      "digest": "977d8a5ee0f7724a142d8f3dd3016d3286ff63692b9206c00c93d271866d15e0"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentProviders.kt": {
+      "algorithm": "SHA-256",
+      "digest": "3d8a3d7251eb6c0868d49771f368fadbb6e473e4357a5e3e11b5ff23b8db9874"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentSnapshot.kt": {
+      "algorithm": "SHA-256",
+      "digest": "9edbaac1437a502d05c7065286c064ab927bf71dbb83839e261c422f778779d4"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentSourceWriter.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a50cb9940ebfff28096f1f6503a9b8fd1124dd8b3b8209550810cd4b86382347"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/JdbcRoleAssignmentFoundation.kt": {
+      "algorithm": "SHA-256",
+      "digest": "d76a13afc68ba0b21ad32e38d8ff5619aba359e8c8db7a3b4e13dc944dedfeef"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/LegacyClientAuthorityWrites.kt": {
+      "algorithm": "SHA-256",
+      "digest": "3f42a328dabb8e6d1aac18c2e759b2ff444506d6efd138c7d7bba9dd1c8782ba"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/PlatformMembershipSourceRevocation.kt": {
+      "algorithm": "SHA-256",
+      "digest": "839c06eddec5ab8611dc7ac7eec851748f1d58a3900add61bf6a50e97895cf1a"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/PlatformMembershipSourceInvalidator.kt": {
+      "algorithm": "SHA-256",
+      "digest": "9448af82a9b77e3b494922c4a5d44364a1e19a6b195a5bd24598973a26c1dbd9"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/PlatformMembershipSourceAudit.kt": {
+      "algorithm": "SHA-256",
+      "digest": "dc366d31cb123d4948bdbfd198c1b86badaf0089bf6d76069a439aa1a0cf2c73"
+    },
+    "core-data/src/main/resources/db/migration/h2/V077__client_role_assignment_foundation.sql": {
+      "algorithm": "SHA-256",
+      "digest": "84c4f610af6cd9dfc4d0e5db03be64c6fc9b7a6ab79592ab0b1437bd0215f1e2"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V077__client_role_assignment_foundation.sql": {
+      "algorithm": "SHA-256",
+      "digest": "84c4f610af6cd9dfc4d0e5db03be64c6fc9b7a6ab79592ab0b1437bd0215f1e2"
+    }
+  },
+  "state": {
+    "now": 100,
+    "platform_owner": 999,
+    "invitation_high_water": 1000,
+    "clients": {
+      "101": true,
+      "102": true
+    },
+    "clubs": {
+      "1001": 101,
+      "1002": 101,
+      "1003": 101,
+      "1004": 101,
+      "1005": 101,
+      "2001": 102
+    },
+    "memberships": {
+      "101/1": {
+        "active": true,
+        "version": 1
+      },
+      "101/2": {
+        "active": true,
+        "version": 1
+      },
+      "101/3": {
+        "active": true,
+        "version": 1
+      },
+      "101/7": {
+        "active": true,
+        "version": 1
+      },
+      "101/10": {
+        "active": true,
+        "version": 1
+      },
+      "102/7": {
+        "active": true,
+        "version": 1
+      }
+    },
+    "fences": {
+      "101/1001/1": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1002/1": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1003/1": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1004/1": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1005/1": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1001/2": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1002/2": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1003/2": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1004/2": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1005/2": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1001/3": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1002/3": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1003/3": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1004/3": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1005/3": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1001/7": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1002/7": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1003/7": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1004/7": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1005/7": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1001/10": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1002/10": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1003/10": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1004/10": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "101/1005/10": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      },
+      "102/2001/7": {
+        "active": true,
+        "epoch": 1,
+        "version": 1,
+        "mode": "TARGET"
+      }
+    },
+    "policies": {
+      "cm-v1": {
+        "role": "CLUB_MANAGER",
+        "permissions": [
+          "client.club.calendar.read",
+          "client.club.calendar.write",
+          "client.club.profile.read",
+          "client.club.profile.write",
+          "client.staff.delegate.calendar",
+          "client.staff.delegate.profile",
+          "client.staff.assign.manager",
+          "client.staff.assign.entry_manager",
+          "client.staff.assign.finance_manager",
+          "client.staff.assign.promoter",
+          "client.staff.revoke.lower",
+          "client.staff.disable.club"
+        ]
+      },
+      "nw-v1": {
+        "role": "NETWORK_MANAGER",
+        "permissions": [
+          "client.staff.assign.club_manager",
+          "client.staff.revoke.club_manager",
+          "reports.read"
+        ]
+      },
+      "floor-v1": {
+        "role": "FLOOR_MANAGER",
+        "permissions": [
+          "night.read",
+          "tables.read",
+          "tables.seat"
+        ]
+      },
+      "entry-v1": {
+        "role": "ENTRANCE_MANAGER",
+        "permissions": [
+          "night.read",
+          "entry.scan"
+        ]
+      },
+      "fin-v1": {
+        "role": "FINANCE_MANAGER",
+        "permissions": [
+          "finance.report.read"
+        ]
+      },
+      "promo-v1": {
+        "role": "PROMOTER",
+        "permissions": [
+          "booking.promoter.create",
+          "booking.promoter.own.read"
+        ]
+      }
+    },
+    "assignments": {
+      "issuer-cm": {
+        "user": 2,
+        "client": 101,
+        "club": 1001,
+        "role": "CLUB_MANAGER",
+        "policy": "cm-v1",
+        "policy_hash": "b7abc200ba93b72f7b449a71394705f0a4cb818990f290705a5595b41c056396",
+        "selector": {
+          "kind": "CLUB"
+        },
+        "status": "ACTIVE",
+        "version": 1,
+        "epoch": 1
+      },
+      "issuer-nw": {
+        "user": 3,
+        "client": 101,
+        "club": 1001,
+        "role": "NETWORK_MANAGER",
+        "policy": "nw-v1",
+        "policy_hash": "446bb55362476c7d980fca0b1cf0f523458fbe67c38e451e24610e97440102b2",
+        "selector": {
+          "kind": "CLUB"
+        },
+        "status": "ACTIVE",
+        "version": 1,
+        "epoch": 1
+      },
+      "a-manager": {
+        "user": 7,
+        "client": 101,
+        "club": 1001,
+        "role": "FLOOR_MANAGER",
+        "policy": "floor-v1",
+        "policy_hash": "ab545b89678eda24c7d7bf2b1ecfec338d087dd7fc3a4144d243cff900e4ffbe",
+        "selector": {
+          "kind": "CLUB"
+        },
+        "status": "ACTIVE",
+        "version": 1,
+        "epoch": 1
+      },
+      "other-client-fin": {
+        "user": 7,
+        "client": 102,
+        "club": 2001,
+        "role": "FINANCE_MANAGER",
+        "policy": "fin-v1",
+        "policy_hash": "9ea8bd280468b38808330864df0d145f98a4d05db9eaf698486b74f234e78db2",
+        "selector": {
+          "kind": "CLUB"
+        },
+        "status": "ACTIVE",
+        "version": 1,
+        "epoch": 1
+      },
+      "issuer-cm-1002": {
+        "user": 2,
+        "client": 101,
+        "club": 1002,
+        "role": "CLUB_MANAGER",
+        "policy": "cm-v1",
+        "policy_hash": "b7abc200ba93b72f7b449a71394705f0a4cb818990f290705a5595b41c056396",
+        "selector": {
+          "kind": "CLUB"
+        },
+        "status": "ACTIVE",
+        "version": 1,
+        "epoch": 1
+      },
+      "issuer-cm-1003": {
+        "user": 2,
+        "client": 101,
+        "club": 1003,
+        "role": "CLUB_MANAGER",
+        "policy": "cm-v1",
+        "policy_hash": "b7abc200ba93b72f7b449a71394705f0a4cb818990f290705a5595b41c056396",
+        "selector": {
+          "kind": "CLUB"
+        },
+        "status": "ACTIVE",
+        "version": 1,
+        "epoch": 1
+      }
+    },
+    "delegations": {},
+    "compat": {},
+    "ownership": [
+      {
+        "user": 1,
+        "client": 101,
+        "clubs": [
+          1001,
+          1002,
+          1003,
+          1004,
+          1005
+        ],
+        "verified": true
+      }
+    ],
+    "receipts": {},
+    "audits": []
+  },
+  "cases": [
+    {
+      "id": "one-role",
+      "operations": [],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "two-independent-roles",
+      "operations": [],
+      "expected_permissions": [
+        "entry.scan",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [],
+      "overrides": {
+        "assignments": {
+          "b-entry": {
+            "user": 7,
+            "client": 101,
+            "club": 1001,
+            "role": "ENTRANCE_MANAGER",
+            "policy": "entry-v1",
+            "policy_hash": "f5664daec9f235c5a2b3556f75e29a80ac1891da424852b04e5791afabe79531",
+            "selector": {
+              "kind": "CLUB"
+            },
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "role-plus-delegation",
+      "operations": [],
+      "expected_permissions": [
+        "client.club.calendar.read",
+        "client.club.calendar.write",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [],
+      "overrides": {
+        "delegations": {
+          "d-calendar": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "issuer_id": "issuer-cm",
+            "recipient_id": "a-manager",
+            "permission": "client.club.calendar.write",
+            "policy_hash": "75dc85be7b1cf7327d291309a7fc4c3a80cea22a666db3911aeeb25638c64ce3",
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1,
+            "issuer_epoch": 1,
+            "expires_at": null
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "two-role-sources-revoke-one-permission-remains",
+      "operations": [
+        {
+          "kind": "REVOKE_ROLE",
+          "command_ref": "revoke-a",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "a-manager",
+          "source_version": 1
+        }
+      ],
+      "expected_permissions": [
+        "entry.scan",
+        "night.read"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "assignments": {
+          "b-entry": {
+            "user": 7,
+            "client": 101,
+            "club": 1001,
+            "role": "ENTRANCE_MANAGER",
+            "policy": "entry-v1",
+            "policy_hash": "f5664daec9f235c5a2b3556f75e29a80ac1891da424852b04e5791afabe79531",
+            "selector": {
+              "kind": "CLUB"
+            },
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "revoke-second-role-keeps-first",
+      "operations": [
+        {
+          "kind": "REVOKE_ROLE",
+          "command_ref": "revoke-a",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "b-entry",
+          "source_version": 1
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "assignments": {
+          "b-entry": {
+            "user": 7,
+            "client": 101,
+            "club": 1001,
+            "role": "ENTRANCE_MANAGER",
+            "policy": "entry-v1",
+            "policy_hash": "f5664daec9f235c5a2b3556f75e29a80ac1891da424852b04e5791afabe79531",
+            "selector": {
+              "kind": "CLUB"
+            },
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "revoke-only-delegation",
+      "operations": [
+        {
+          "kind": "REVOKE_DELEGATION",
+          "command_ref": "revoke-d",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "d-calendar",
+          "source_version": 1
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "delegations": {
+          "d-calendar": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "issuer_id": "issuer-cm",
+            "recipient_id": "a-manager",
+            "permission": "client.club.calendar.write",
+            "policy_hash": "75dc85be7b1cf7327d291309a7fc4c3a80cea22a666db3911aeeb25638c64ce3",
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1,
+            "issuer_epoch": 1,
+            "expires_at": null
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "two-delegation-sources-revoke-one-keeps-permission",
+      "operations": [
+        {
+          "kind": "REVOKE_DELEGATION",
+          "command_ref": "revoke-d",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "d-one",
+          "source_version": 1
+        }
+      ],
+      "expected_permissions": [
+        "client.club.calendar.read",
+        "client.club.calendar.write",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "delegations": {
+          "d-one": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "issuer_id": "issuer-cm",
+            "recipient_id": "a-manager",
+            "permission": "client.club.calendar.write",
+            "policy_hash": "75dc85be7b1cf7327d291309a7fc4c3a80cea22a666db3911aeeb25638c64ce3",
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1,
+            "issuer_epoch": 1,
+            "expires_at": null
+          },
+          "d-two": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "issuer_id": "issuer-cm",
+            "recipient_id": "a-manager",
+            "permission": "client.club.calendar.write",
+            "policy_hash": "75dc85be7b1cf7327d291309a7fc4c3a80cea22a666db3911aeeb25638c64ce3",
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1,
+            "issuer_epoch": 1,
+            "expires_at": null
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "full-disable-keeps-other-client",
+      "operations": [
+        {
+          "kind": "DISABLE",
+          "command_ref": "disable",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1
+        }
+      ],
+      "expected_permissions": [],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "delegations": {
+          "d-calendar": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "issuer_id": "issuer-cm",
+            "recipient_id": "a-manager",
+            "permission": "client.club.calendar.write",
+            "policy_hash": "75dc85be7b1cf7327d291309a7fc4c3a80cea22a666db3911aeeb25638c64ce3",
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1,
+            "issuer_epoch": 1,
+            "expires_at": null
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7",
+        "102/2001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "fresh-readmission-never-reactivates-old-ids",
+      "operations": [
+        {
+          "kind": "DISABLE",
+          "command_ref": "disable",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1
+        },
+        {
+          "kind": "ADMIT",
+          "command_ref": "admit",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 2,
+          "expected_version": 2,
+          "invitation_protocol": "TARGET_V1",
+          "invitation_epoch": 2,
+          "confirmed": true,
+          "claimed_user": 7,
+          "new_id": "new-manager",
+          "policy": "floor-v1",
+          "regrant_ack": [
+            "night.read",
+            "tables.read",
+            "tables.seat"
+          ]
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "delegations": {
+          "d-calendar": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "issuer_id": "issuer-cm",
+            "recipient_id": "a-manager",
+            "permission": "client.club.calendar.write",
+            "policy_hash": "75dc85be7b1cf7327d291309a7fc4c3a80cea22a666db3911aeeb25638c64ce3",
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1,
+            "issuer_epoch": 1,
+            "expires_at": null
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "revoked-grant-needs-new-explicit-ack",
+      "operations": [
+        {
+          "kind": "DELEGATE",
+          "command_ref": "delegate",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "issuer_id": "issuer-cm",
+          "recipient_id": "a-manager",
+          "issuer_version": 1,
+          "recipient_version": 1,
+          "permission": "client.club.calendar.write",
+          "new_id": "d-new"
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "EXPLICIT_REGRANT_ACK_REQUIRED"
+      ],
+      "overrides": {
+        "compat": {
+          "old-calendar": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "permission": "client.club.calendar.write",
+            "classification": "KEEP_OPAQUE_COMPAT",
+            "active": false,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "explicit-regrant-new-source-old-tombstone-stays-revoked",
+      "operations": [
+        {
+          "kind": "DELEGATE",
+          "command_ref": "delegate",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "issuer_id": "issuer-cm",
+          "recipient_id": "a-manager",
+          "issuer_version": 1,
+          "recipient_version": 1,
+          "permission": "client.club.calendar.write",
+          "new_id": "d-new",
+          "regrant_ack": [
+            "client.club.calendar.write"
+          ]
+        }
+      ],
+      "expected_permissions": [
+        "client.club.calendar.read",
+        "client.club.calendar.write",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "compat": {
+          "old-calendar": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "permission": "client.club.calendar.write",
+            "classification": "KEEP_OPAQUE_COMPAT",
+            "active": false,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "inactive-membership-no-target-authority",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-entry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "b-entry",
+          "policy": "entry-v1"
+        }
+      ],
+      "expected_permissions": [],
+      "expected_outcomes": [
+        "TARGET_MEMBERSHIP_OR_MAPPING_DENIED"
+      ],
+      "overrides": {
+        "memberships": {
+          "101/7": {
+            "active": false,
+            "version": 2
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "role-change-after-concurrent-revoke-fails",
+      "operations": [
+        {
+          "kind": "REVOKE_ROLE",
+          "command_ref": "revoke-a",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "a-manager",
+          "source_version": 1
+        },
+        {
+          "kind": "REPLACE",
+          "command_ref": "replace",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "a-manager",
+          "source_version": 1,
+          "new_id": "new-entry",
+          "policy": "entry-v1",
+          "regrant_ack": [
+            "night.read"
+          ]
+        }
+      ],
+      "expected_permissions": [],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "STALE_FENCE_CONFLICT"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "revoke-stale-source-after-role-change-keeps-new-source",
+      "operations": [
+        {
+          "kind": "REPLACE",
+          "command_ref": "replace",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "a-manager",
+          "source_version": 1,
+          "new_id": "new-entry",
+          "policy": "entry-v1",
+          "regrant_ack": [
+            "night.read"
+          ]
+        },
+        {
+          "kind": "REVOKE_ROLE",
+          "command_ref": "revoke-a",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "a-manager",
+          "source_version": 1
+        }
+      ],
+      "expected_permissions": [
+        "entry.scan",
+        "night.read"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "STALE_FENCE_CONFLICT"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "two-concurrent-role-grants-conflict-then-fresh-retry",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-entry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "b-entry",
+          "policy": "entry-v1"
+        },
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-fin",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "c-fin",
+          "policy": "fin-v1"
+        },
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-fin-retry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 2,
+          "new_id": "c-fin",
+          "policy": "fin-v1"
+        }
+      ],
+      "expected_permissions": [
+        "entry.scan",
+        "finance.report.read",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "STALE_FENCE_CONFLICT",
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "promoter-three-of-five-clubs",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "promo-1001",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 10,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "prom-1001",
+          "policy": "promo-v1"
+        },
+        {
+          "kind": "GRANT",
+          "command_ref": "promo-1002",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 10,
+          "client": 101,
+          "club": 1002,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "prom-1002",
+          "policy": "promo-v1"
+        },
+        {
+          "kind": "GRANT",
+          "command_ref": "promo-1003",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 10,
+          "client": 101,
+          "club": 1003,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "prom-1003",
+          "policy": "promo-v1"
+        }
+      ],
+      "expected_permissions": [
+        "booking.promoter.create",
+        "booking.promoter.own.read"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "COMMITTED_IN_MODEL_ONLY",
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/10",
+        "101/1002/10",
+        "101/1003/10",
+        "101/1004/10",
+        "101/1005/10"
+      ],
+      "risks": []
+    },
+    {
+      "id": "manager-calendar-write-separate-delegation",
+      "operations": [
+        {
+          "kind": "DELEGATE",
+          "command_ref": "delegate",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "issuer_id": "issuer-cm",
+          "recipient_id": "a-manager",
+          "issuer_version": 1,
+          "recipient_version": 1,
+          "permission": "client.club.calendar.write",
+          "new_id": "d-new"
+        }
+      ],
+      "expected_permissions": [
+        "client.club.calendar.read",
+        "client.club.calendar.write",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "financial-read-does-not-cross-club",
+      "operations": [],
+      "expected_permissions": [
+        "finance.report.read",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [],
+      "overrides": {
+        "assignments": {
+          "fin-a": {
+            "user": 7,
+            "client": 101,
+            "club": 1001,
+            "role": "FINANCE_MANAGER",
+            "policy": "fin-v1",
+            "policy_hash": "9ea8bd280468b38808330864df0d145f98a4d05db9eaf698486b74f234e78db2",
+            "selector": {
+              "kind": "CLUB"
+            },
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7",
+        "101/1002/7",
+        "102/2001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "audit-failure-rolls-back-source-and-receipt",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-entry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "b-entry",
+          "policy": "entry-v1",
+          "audit_failure": true
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "AUDIT_FAILURE_ROLLBACK"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "receipt-failure-rolls-back-source-and-audit",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-entry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "b-entry",
+          "policy": "entry-v1",
+          "receipt_failure": true
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "RECEIPT_FAILURE_ROLLBACK"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "legacy-writer-on-mixed-assignments-fails-closed",
+      "operations": [
+        {
+          "kind": "LEGACY_WRITE",
+          "command_ref": "legacy",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1
+        }
+      ],
+      "expected_permissions": [
+        "entry.scan",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "LEGACY_WRITER_BLOCKED_IN_TARGET"
+      ],
+      "overrides": {
+        "assignments": {
+          "b-entry": {
+            "user": 7,
+            "client": 101,
+            "club": 1001,
+            "role": "ENTRANCE_MANAGER",
+            "policy": "entry-v1",
+            "policy_hash": "f5664daec9f235c5a2b3556f75e29a80ac1891da424852b04e5791afabe79531",
+            "selector": {
+              "kind": "CLUB"
+            },
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "old-command-replay-does-not-resurrect-revoked-source",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-entry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "b-entry",
+          "policy": "entry-v1"
+        },
+        {
+          "kind": "REVOKE_ROLE",
+          "command_ref": "revoke-a",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 2,
+          "source_id": "b-entry",
+          "source_version": 1
+        },
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-entry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "b-entry",
+          "policy": "entry-v1"
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "COMMITTED_IN_MODEL_ONLY",
+        "CURRENT_STATE_REPLAY_NO_EXECUTION"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "replay-after-issuer-loses-authority-denied",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-entry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "b-entry",
+          "policy": "entry-v1"
+        },
+        {
+          "kind": "REVOKE_ROLE",
+          "command_ref": "remove-issuer",
+          "invitation_id": 1001,
+          "actor": 1,
+          "user": 2,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "issuer-cm",
+          "source_version": 1
+        },
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-entry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "b-entry",
+          "policy": "entry-v1"
+        }
+      ],
+      "expected_permissions": [
+        "entry.scan",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "COMMITTED_IN_MODEL_ONLY",
+        "CURRENT_MANAGEMENT_AUTHORITY_DENIED"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "platform-revoke-restore-membership-only",
+      "operations": [
+        {
+          "kind": "PLATFORM_REVOKE",
+          "command_ref": "platform-revoke",
+          "invitation_id": 1001,
+          "actor": 999,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1
+        },
+        {
+          "kind": "MEMBERSHIP_RESTORE",
+          "command_ref": "membership-restore",
+          "invitation_id": 1001,
+          "actor": 999,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 2,
+          "expected_version": 2
+        }
+      ],
+      "expected_permissions": [],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "delegations": {
+          "d-calendar": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "issuer_id": "issuer-cm",
+            "recipient_id": "a-manager",
+            "permission": "client.club.calendar.write",
+            "policy_hash": "75dc85be7b1cf7327d291309a7fc4c3a80cea22a666db3911aeeb25638c64ce3",
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1,
+            "issuer_epoch": 1,
+            "expires_at": null
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7",
+        "102/2001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "old-staff-invitation-cannot-readmit",
+      "operations": [
+        {
+          "kind": "DISABLE",
+          "command_ref": "disable",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1
+        },
+        {
+          "kind": "ADMIT",
+          "command_ref": "old-admit",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 2,
+          "expected_version": 2,
+          "invitation_protocol": "LEGACY_STAFF",
+          "invitation_epoch": 1,
+          "confirmed": true,
+          "claimed_user": 7,
+          "new_id": "new-manager",
+          "policy": "floor-v1",
+          "regrant_ack": [
+            "night.read",
+            "tables.read",
+            "tables.seat"
+          ]
+        }
+      ],
+      "expected_permissions": [],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "NEW_TARGET_ADMISSION_REQUIRED"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "terminal-source-id-cannot-be-reused",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "reuse",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "a-manager",
+          "policy": "floor-v1",
+          "regrant_ack": [
+            "night.read",
+            "tables.read",
+            "tables.seat"
+          ]
+        }
+      ],
+      "expected_permissions": [],
+      "expected_outcomes": [
+        "SOURCE_ID_TERMINAL_OR_EXISTS"
+      ],
+      "overrides": {
+        "assignments": {
+          "a-manager": {
+            "user": 7,
+            "client": 101,
+            "club": 1001,
+            "role": "FLOOR_MANAGER",
+            "policy": "floor-v1",
+            "policy_hash": "ab545b89678eda24c7d7bf2b1ecfec338d087dd7fc3a4144d243cff900e4ffbe",
+            "selector": {
+              "kind": "CLUB"
+            },
+            "status": "REVOKED",
+            "version": 2,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "manager-self-escalation-denied",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "self",
+          "invitation_id": 1001,
+          "actor": 7,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "self-cm",
+          "policy": "cm-v1"
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "CURRENT_MANAGEMENT_AUTHORITY_DENIED"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "foreign-source-id-cannot-be-revoked",
+      "operations": [
+        {
+          "kind": "REVOKE_ROLE",
+          "command_ref": "revoke-a",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "other-client-fin",
+          "source_version": 1
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "EXACT_SOURCE_OWNERSHIP_REQUIRED"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "policy-version-drift-does-not-expand-existing-assignments",
+      "operations": [],
+      "expected_permissions": [],
+      "expected_outcomes": [],
+      "overrides": {
+        "policies": {
+          "floor-v1": {
+            "role": "FLOOR_MANAGER",
+            "permissions": [
+              "night.read",
+              "tables.read",
+              "tables.seat",
+              "finance.report.read"
+            ]
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": [
+        "POLICY_HASH_DRIFT_FAIL_CLOSED"
+      ]
+    },
+    {
+      "id": "empty-financial-shift-set-is-not-unlimited",
+      "operations": [],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [],
+      "overrides": {
+        "assignments": {
+          "fin-empty": {
+            "user": 7,
+            "client": 101,
+            "club": 1001,
+            "role": "FINANCE_MANAGER",
+            "policy": "fin-v1",
+            "policy_hash": "9ea8bd280468b38808330864df0d145f98a4d05db9eaf698486b74f234e78db2",
+            "selector": {
+              "kind": "SHIFT_SET",
+              "ids": []
+            },
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": [
+        "EMPTY_SELECTOR_FAIL_CLOSED"
+      ]
+    },
+    {
+      "id": "release-rollback-preview-after-revoke-does-not-restore",
+      "operations": [
+        {
+          "kind": "REVOKE_ROLE",
+          "command_ref": "revoke-a",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "a-manager",
+          "source_version": 1
+        },
+        {
+          "kind": "ROLLBACK_PREVIEW",
+          "command_ref": "rollback",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1
+        }
+      ],
+      "expected_permissions": [],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY",
+        "NO_EXECUTION_NO_RESURRECTION"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "ambiguous-active-compat-source-blocks-target-writer",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "grant-entry",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "b-entry",
+          "policy": "entry-v1"
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "AMBIGUOUS_COMPAT_SOURCE_BLOCKS_TARGET"
+      ],
+      "overrides": {
+        "compat": {
+          "ambiguous": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "permission": "client.club.calendar.write",
+            "classification": "AMBIGUOUS",
+            "active": true,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "delegation-cannot-grant-management-role",
+      "operations": [
+        {
+          "kind": "DELEGATE",
+          "command_ref": "delegate",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "issuer_id": "issuer-cm",
+          "recipient_id": "a-manager",
+          "issuer_version": 1,
+          "recipient_version": 1,
+          "permission": "client.staff.assign.club_manager",
+          "new_id": "d-new"
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "DELEGATION_AUTHORITY_DENIED"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "owner-assigns-club-manager-without-execution-config-grants",
+      "operations": [
+        {
+          "kind": "GRANT",
+          "command_ref": "owner-cm",
+          "invitation_id": 1001,
+          "actor": 1,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "new_id": "new-cm",
+          "policy": "cm-v1"
+        }
+      ],
+      "expected_permissions": [
+        "client.club.calendar.read",
+        "client.club.calendar.write",
+        "client.club.profile.read",
+        "client.club.profile.write",
+        "client.staff.assign.entry_manager",
+        "client.staff.assign.finance_manager",
+        "client.staff.assign.manager",
+        "client.staff.assign.promoter",
+        "client.staff.delegate.calendar",
+        "client.staff.delegate.profile",
+        "client.staff.disable.club",
+        "client.staff.revoke.lower",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {},
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "club-manager-full-disable-cannot-remove-opaque-sources",
+      "operations": [
+        {
+          "kind": "DISABLE",
+          "command_ref": "disable-opaque",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1
+        }
+      ],
+      "expected_permissions": [
+        "client.club.read",
+        "client.club.team.manage",
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "FULL_DISABLE_HIERARCHY_DENIED"
+      ],
+      "overrides": {
+        "compat": {
+          "read": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "permission": "client.club.read",
+            "classification": "KEEP_OPAQUE_COMPAT",
+            "active": true,
+            "epoch": 1
+          },
+          "team": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "permission": "client.club.team.manage",
+            "classification": "KEEP_OPAQUE_COMPAT",
+            "active": true,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "owner-full-disable-compatibility-only-subject",
+      "operations": [
+        {
+          "kind": "DISABLE",
+          "command_ref": "owner-disable-opaque",
+          "invitation_id": 1001,
+          "actor": 1,
+          "user": 7,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1
+        }
+      ],
+      "expected_permissions": [],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "assignments": {
+          "a-manager": {
+            "user": 7,
+            "client": 101,
+            "club": 1001,
+            "role": "FLOOR_MANAGER",
+            "policy": "floor-v1",
+            "policy_hash": "ab545b89678eda24c7d7bf2b1ecfec338d087dd7fc3a4144d243cff900e4ffbe",
+            "selector": {
+              "kind": "CLUB"
+            },
+            "status": "REVOKED",
+            "version": 2,
+            "epoch": 1
+          }
+        },
+        "compat": {
+          "read": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "permission": "client.club.read",
+            "classification": "KEEP_OPAQUE_COMPAT",
+            "active": true,
+            "epoch": 1
+          },
+          "profile": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "permission": "client.club.profile.write",
+            "classification": "KEEP_OPAQUE_COMPAT",
+            "active": true,
+            "epoch": 1
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7"
+      ],
+      "risks": []
+    },
+    {
+      "id": "issuer-revoke-fences-dependent-recipient",
+      "operations": [
+        {
+          "kind": "REVOKE_ROLE",
+          "command_ref": "issuer-revoke",
+          "invitation_id": 1001,
+          "actor": 1,
+          "user": 2,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "source_id": "issuer-cm",
+          "source_version": 1
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "delegations": {
+          "d-calendar": {
+            "client": 101,
+            "club": 1001,
+            "user": 7,
+            "issuer_id": "issuer-cm",
+            "recipient_id": "a-manager",
+            "permission": "client.club.calendar.write",
+            "policy_hash": "75dc85be7b1cf7327d291309a7fc4c3a80cea22a666db3911aeeb25638c64ce3",
+            "status": "ACTIVE",
+            "version": 1,
+            "epoch": 1,
+            "issuer_epoch": 1,
+            "expires_at": null
+          }
+        }
+      },
+      "observe": [
+        "101/1001/7",
+        "101/1001/2"
+      ],
+      "risks": []
+    },
+    {
+      "id": "initial-target-admission-creates-only-missing-membership",
+      "operations": [
+        {
+          "kind": "ADMIT",
+          "command_ref": "initial-admit",
+          "invitation_id": 1001,
+          "actor": 2,
+          "user": 11,
+          "client": 101,
+          "club": 1001,
+          "signed_identity": true,
+          "expected_epoch": 1,
+          "expected_version": 1,
+          "invitation_protocol": "TARGET_V1",
+          "invitation_epoch": 1,
+          "confirmed": true,
+          "claimed_user": 11,
+          "new_id": "initial-manager",
+          "policy": "floor-v1"
+        }
+      ],
+      "expected_permissions": [
+        "night.read",
+        "tables.read",
+        "tables.seat"
+      ],
+      "expected_outcomes": [
+        "COMMITTED_IN_MODEL_ONLY"
+      ],
+      "overrides": {
+        "fences": {
+          "101/1001/11": {
+            "active": false,
+            "epoch": 1,
+            "version": 1,
+            "mode": "TARGET"
+          }
+        }
+      },
+      "observe": [
+        "101/1001/11"
+      ],
+      "risks": []
+    }
+  ]
+}

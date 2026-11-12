@@ -1,0 +1,3694 @@
+{
+  "synthetic_only": true,
+  "source_revision": "5550b944990d8c1c93c0a5012d31db209f93ea6d",
+  "state": {
+    "now": 1000000,
+    "clients": {
+      "c1": {
+        "active": true,
+        "seq": 0
+      },
+      "c2": {
+        "active": true,
+        "seq": 0
+      }
+    },
+    "clubs": {
+      "A": "c1",
+      "B": "c1",
+      "C": "c1",
+      "D": "c1",
+      "E": "c1",
+      "Z": "c2"
+    },
+    "memberships": {
+      "c1/1": {
+        "active": true,
+        "version": 1,
+        "floor": 0
+      },
+      "c1/2": {
+        "active": true,
+        "version": 1,
+        "floor": 0
+      },
+      "c1/3": {
+        "active": true,
+        "version": 1,
+        "floor": 0
+      },
+      "c1/4": {
+        "active": true,
+        "version": 1,
+        "floor": 0
+      },
+      "c1/5": {
+        "active": true,
+        "version": 1,
+        "floor": 0
+      },
+      "c1/7": {
+        "active": true,
+        "version": 1,
+        "floor": 0
+      },
+      "c1/10": {
+        "active": true,
+        "version": 1,
+        "floor": 0
+      },
+      "c2/6": {
+        "active": true,
+        "version": 1,
+        "floor": 0
+      },
+      "c2/7": {
+        "active": true,
+        "version": 1,
+        "floor": 0
+      }
+    },
+    "admissions": {
+      "c1/A/2": {
+        "status": "ACTIVE",
+        "epoch": 1,
+        "version": 1,
+        "floor": 0,
+        "member_version": 1
+      },
+      "c1/A/3": {
+        "status": "ACTIVE",
+        "epoch": 1,
+        "version": 1,
+        "floor": 0,
+        "member_version": 1
+      },
+      "c1/B/4": {
+        "status": "ACTIVE",
+        "epoch": 1,
+        "version": 1,
+        "floor": 0,
+        "member_version": 1
+      },
+      "c1/C/10": {
+        "status": "ACTIVE",
+        "epoch": 1,
+        "version": 1,
+        "floor": 0,
+        "member_version": 1
+      },
+      "c2/Z/7": {
+        "status": "ACTIVE",
+        "epoch": 1,
+        "version": 1,
+        "floor": 0,
+        "member_version": 1
+      }
+    },
+    "sources": {
+      "nmA": {
+        "client": "c1",
+        "club": "A",
+        "user": 2,
+        "role": "NETWORK_MANAGER",
+        "policy": "NETWORK_MANAGER",
+        "policy_hash": "7ff93895ad20bc9d6b0411481106de232a745fd007438f1266645776f380350a",
+        "epoch": 1,
+        "version": 1,
+        "status": "ACTIVE"
+      },
+      "cmA": {
+        "client": "c1",
+        "club": "A",
+        "user": 3,
+        "role": "CLUB_MANAGER",
+        "policy": "CLUB_MANAGER",
+        "policy_hash": "75ac9a3510ff54737e88a9dac0d2edcae6a471b511af09665e6544039270a013",
+        "epoch": 1,
+        "version": 1,
+        "status": "ACTIVE"
+      },
+      "cmB": {
+        "client": "c1",
+        "club": "B",
+        "user": 4,
+        "role": "CLUB_MANAGER",
+        "policy": "CLUB_MANAGER",
+        "policy_hash": "75ac9a3510ff54737e88a9dac0d2edcae6a471b511af09665e6544039270a013",
+        "epoch": 1,
+        "version": 1,
+        "status": "ACTIVE"
+      },
+      "cmC": {
+        "client": "c1",
+        "club": "C",
+        "user": 10,
+        "role": "CLUB_MANAGER",
+        "policy": "CLUB_MANAGER",
+        "policy_hash": "75ac9a3510ff54737e88a9dac0d2edcae6a471b511af09665e6544039270a013",
+        "epoch": 1,
+        "version": 1,
+        "status": "ACTIVE"
+      },
+      "foreign7": {
+        "client": "c2",
+        "club": "Z",
+        "user": 7,
+        "role": "PROMOTER",
+        "policy": "PROMOTER",
+        "policy_hash": "80cae0a13f5ea2ad3380c408b64166b2f1a2cc9c6a20d046caa4af79c95d3720",
+        "epoch": 1,
+        "version": 1,
+        "status": "ACTIVE"
+      }
+    },
+    "delegations": {},
+    "owners": {
+      "c1/1": {
+        "id": "verified-c1-owner",
+        "verified": true,
+        "active": true,
+        "version": 1,
+        "clubs": [
+          "A",
+          "B",
+          "C",
+          "D",
+          "E"
+        ]
+      },
+      "c2/6": {
+        "id": "verified-c2-owner",
+        "verified": true,
+        "active": true,
+        "version": 1,
+        "clubs": [
+          "Z"
+        ]
+      }
+    },
+    "policies": {
+      "NETWORK_MANAGER": {
+        "role": "NETWORK_MANAGER",
+        "version": 1,
+        "permissions": [
+          "client.staff.assign.club_manager",
+          "client.staff.revoke.club_manager"
+        ],
+        "active": true,
+        "revision": 1
+      },
+      "CLUB_MANAGER": {
+        "role": "CLUB_MANAGER",
+        "version": 1,
+        "permissions": [
+          "client.club.calendar.read",
+          "client.club.calendar.write",
+          "client.staff.assign.entry_manager",
+          "client.staff.assign.finance_manager",
+          "client.staff.assign.manager",
+          "client.staff.assign.promoter",
+          "client.staff.delegate.calendar",
+          "client.staff.disable.club",
+          "client.staff.revoke.entry_manager",
+          "client.staff.revoke.finance_manager",
+          "client.staff.revoke.manager",
+          "client.staff.revoke.promoter"
+        ],
+        "active": true,
+        "revision": 1
+      },
+      "FLOOR_MANAGER": {
+        "role": "FLOOR_MANAGER",
+        "version": 1,
+        "permissions": [
+          "floor.tables.read",
+          "night.read"
+        ],
+        "active": true,
+        "revision": 1
+      },
+      "ENTRANCE_MANAGER": {
+        "role": "ENTRANCE_MANAGER",
+        "version": 1,
+        "permissions": [
+          "entrance.arrival.record",
+          "night.read"
+        ],
+        "active": true,
+        "revision": 1
+      },
+      "FINANCE_MANAGER": {
+        "role": "FINANCE_MANAGER",
+        "version": 1,
+        "permissions": [
+          "finance.report.read"
+        ],
+        "active": true,
+        "revision": 1
+      },
+      "PROMOTER": {
+        "role": "PROMOTER",
+        "version": 1,
+        "permissions": [
+          "booking.promoter.create",
+          "booking.promoter.own.read"
+        ],
+        "active": true,
+        "revision": 1
+      }
+    },
+    "invites": {},
+    "receipts": {},
+    "audits": [],
+    "revoked_permissions": {},
+    "frontier_known": true,
+    "protection_known": true,
+    "legacy_metadata": {
+      "5": [
+        "OWNER",
+        "GLOBAL_ADMIN"
+      ]
+    },
+    "audiences": {
+      "canonical": {
+        "active": true,
+        "version": 1,
+        "clients": {
+          "c1": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E"
+          ],
+          "c2": [
+            "Z"
+          ]
+        }
+      },
+      "brandA": {
+        "active": true,
+        "version": 1,
+        "clients": {
+          "c1": [
+            "A"
+          ]
+        }
+      },
+      "brandB": {
+        "active": true,
+        "version": 1,
+        "clients": {
+          "c1": [
+            "B"
+          ]
+        }
+      },
+      "foreign": {
+        "active": true,
+        "version": 1,
+        "clients": {
+          "c2": [
+            "Z"
+          ]
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "owner-appoints-club-manager",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 1,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "CLUB_MANAGER",
+          "policy": "CLUB_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 1,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "client.club.calendar.read",
+          "client.club.calendar.write",
+          "client.staff.assign.entry_manager",
+          "client.staff.assign.finance_manager",
+          "client.staff.assign.manager",
+          "client.staff.assign.promoter",
+          "client.staff.delegate.calendar",
+          "client.staff.disable.club",
+          "client.staff.revoke.entry_manager",
+          "client.staff.revoke.finance_manager",
+          "client.staff.revoke.manager",
+          "client.staff.revoke.promoter"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "owner-appoints-network-manager-exact-club",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 1,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "NETWORK_MANAGER",
+          "policy": "NETWORK_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 1,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7",
+        "c1/B/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "client.staff.assign.club_manager",
+          "client.staff.revoke.club_manager"
+        ],
+        "c1/B/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "network-manager-explicit-club",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 2,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "CLUB_MANAGER",
+          "policy": "CLUB_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 2,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "client.club.calendar.read",
+          "client.club.calendar.write",
+          "client.staff.assign.entry_manager",
+          "client.staff.assign.finance_manager",
+          "client.staff.assign.manager",
+          "client.staff.assign.promoter",
+          "client.staff.delegate.calendar",
+          "client.staff.disable.club",
+          "client.staff.revoke.entry_manager",
+          "client.staff.revoke.finance_manager",
+          "client.staff.revoke.manager",
+          "client.staff.revoke.promoter"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "network-manager-denied-neighbor-club",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 2,
+          "invite": "i1",
+          "client": "c1",
+          "club": "D",
+          "role": "CLUB_MANAGER",
+          "policy": "CLUB_MANAGER"
+        }
+      ],
+      "expected_outcomes": [
+        "ISSUER_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "club-manager-appoints-promoter",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "PROMOTER",
+          "policy": "PROMOTER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "booking.promoter.create",
+          "booking.promoter.own.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "promoter-three-of-five-no-client-inheritance",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-A",
+          "actor": 3,
+          "invite": "A",
+          "client": "c1",
+          "club": "A",
+          "role": "PROMOTER",
+          "policy": "PROMOTER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-A",
+          "actor": 7,
+          "invite": "A"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-A",
+          "actor": 3,
+          "invite": "A",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "issue",
+          "key": "issue-B",
+          "actor": 4,
+          "invite": "B",
+          "client": "c1",
+          "club": "B",
+          "role": "PROMOTER",
+          "policy": "PROMOTER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-B",
+          "actor": 7,
+          "invite": "B"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-B",
+          "actor": 4,
+          "invite": "B",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "issue",
+          "key": "issue-C",
+          "actor": 10,
+          "invite": "C",
+          "client": "c1",
+          "club": "C",
+          "role": "PROMOTER",
+          "policy": "PROMOTER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-C",
+          "actor": 7,
+          "invite": "C"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-C",
+          "actor": 10,
+          "invite": "C",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "issue",
+          "key": "issue-denied-D",
+          "actor": 7,
+          "invite": "denied-D",
+          "client": "c1",
+          "club": "D",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "ISSUER_DENIED"
+      ],
+      "observe": [
+        "c1/A/7",
+        "c1/B/7",
+        "c1/C/7",
+        "c1/D/7",
+        "c1/E/7",
+        "c2/Z/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "booking.promoter.create",
+          "booking.promoter.own.read"
+        ],
+        "c1/B/7": [
+          "booking.promoter.create",
+          "booking.promoter.own.read"
+        ],
+        "c1/C/7": [
+          "booking.promoter.create",
+          "booking.promoter.own.read"
+        ],
+        "c1/D/7": [],
+        "c1/E/7": [],
+        "c2/Z/7": [
+          "booking.promoter.create",
+          "booking.promoter.own.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "unconfirmed-recipient-has-no-target-permissions",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "wrong-account-needs-reissue",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 8,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "claim",
+          "key": "second-claim",
+          "actor": 7,
+          "invite": "i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "EXPLICIT_CONFIRMATION_REQUIRED",
+        "SECRET_CONSUMED_OR_INVALID"
+      ],
+      "observe": [
+        "c1/A/7",
+        "c1/A/8"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [],
+        "c1/A/8": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "stale-signed-initdata",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1",
+          "age": 300
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "IDENTITY_EXPIRED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "future-initdata",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1",
+          "age": -1
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "IDENTITY_EXPIRED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "wrong-recipient-bot-audience",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "recipient_connection": "brandA"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1",
+          "connection": "brandB"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "AUDIENCE_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "unknown-bot-audience",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "connection": "unknown"
+        }
+      ],
+      "expected_outcomes": [
+        "AUDIENCE_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "hmac-covers-signature",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1",
+          "signature_bad": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "IDENTITY_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "duplicate-signed-keys-rejected",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1",
+          "duplicate_keys": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "DUPLICATE_KEY"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "tampered-intent-envelope",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "envelope_bad": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "ENVELOPE_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "unclaimed-before-full-disable",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "issue",
+          "key": "issue-pending",
+          "actor": 3,
+          "invite": "pending",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "mode": "ADDITIONAL",
+          "target": 7
+        },
+        {
+          "op": "full_disable",
+          "client": "c1",
+          "club": "A",
+          "user": 7
+        },
+        {
+          "op": "claim",
+          "key": "claim-pending",
+          "actor": 7,
+          "invite": "pending"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "INVITATION_FENCED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "claimed-before-issuer-revoke",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "source_revoke",
+          "client": "c1",
+          "club": "A",
+          "user": 3,
+          "source": "cmA"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "ISSUER_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "same-key-claim-confirm-current-replay",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "REPLAY_CURRENT",
+        "COMMITTED",
+        "REPLAY_CURRENT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "distinct-key-reused-secret-denied",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "claim",
+          "key": "new-claim-key",
+          "actor": 7,
+          "invite": "i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "SECRET_CONSUMED_OR_INVALID"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "two-confirm-distinct-cas",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "expected_version": 2
+        },
+        {
+          "op": "confirm",
+          "key": "second-confirm",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "expected_version": 2
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "VERSION_CONFLICT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "confirm-first-full-disable",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "full_disable",
+          "client": "c1",
+          "club": "A",
+          "user": 7
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "full-disable-first-confirm",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "issue",
+          "key": "issue-pending",
+          "actor": 3,
+          "invite": "pending",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "mode": "ADDITIONAL",
+          "target": 7
+        },
+        {
+          "op": "claim",
+          "key": "claim-pending",
+          "actor": 7,
+          "invite": "pending"
+        },
+        {
+          "op": "full_disable",
+          "client": "c1",
+          "club": "A",
+          "user": 7
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-pending",
+          "actor": 3,
+          "invite": "pending",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "INVITATION_FENCED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "claim-first-invitation-revoke",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "cancel",
+          "key": "cancel-i1",
+          "actor": 3,
+          "invite": "i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "invitation-revoke-first-claim",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "cancel",
+          "key": "cancel-i1",
+          "actor": 3,
+          "invite": "i1"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "INVITATION_TERMINAL_OR_EXPIRED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "issue-first-issuer-revoke",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "source_revoke",
+          "client": "c1",
+          "club": "A",
+          "user": 3,
+          "source": "cmA"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "EVENT",
+        "ISSUER_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "issuer-revoke-first-issue",
+      "operations": [
+        {
+          "op": "source_revoke",
+          "client": "c1",
+          "club": "A",
+          "user": 3,
+          "source": "cmA"
+        },
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        }
+      ],
+      "expected_outcomes": [
+        "EVENT",
+        "ISSUER_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "confirm-first-platform-membership-revoke",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "platform_revoke",
+          "client": "c1",
+          "user": 7
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT"
+      ],
+      "observe": [
+        "c1/A/7",
+        "c2/Z/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [],
+        "c2/Z/7": [
+          "booking.promoter.create",
+          "booking.promoter.own.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "platform-membership-revoke-first-confirm",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "platform_revoke",
+          "client": "c1",
+          "user": 7
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "INVITATION_FENCED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "policy-retire-first-confirm",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "policy_retire",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "POLICY_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "confirm-first-policy-retire",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "policy_retire",
+          "policy": "FLOOR_MANAGER"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "new-policy-version-does-not-upgrade-pin",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "policy_v2",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "invitation-expires-during-lock-wait",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "tick",
+          "seconds": 604799
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "wait": 2
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "EVENT",
+        "COMMITTED",
+        "INVITATION_TERMINAL_OR_EXPIRED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "claim-attestation-expires",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "tick",
+          "seconds": 301
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "RECIPIENT_PROOF_EXPIRED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "same-account-refresh-is-not-rebinding",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "tick",
+          "seconds": 301
+        },
+        {
+          "op": "refresh",
+          "key": "refresh-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "explicit-readmission-new-source-old-tombstones",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "delegate",
+          "id": "calendar-old",
+          "issuer": "cmA",
+          "recipient": "target-i1"
+        },
+        {
+          "op": "full_disable",
+          "client": "c1",
+          "club": "A",
+          "user": 7
+        },
+        {
+          "op": "issue",
+          "key": "issue-readmit",
+          "actor": 3,
+          "invite": "readmit",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "mode": "READMIT",
+          "target": 7
+        },
+        {
+          "op": "claim",
+          "key": "claim-readmit",
+          "actor": 7,
+          "invite": "readmit"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-readmit",
+          "actor": 3,
+          "invite": "readmit",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "regrant_ack": [
+            "floor.tables.read",
+            "night.read"
+          ]
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "EVENT",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "readmission-requires-exact-regrant-ack",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "full_disable",
+          "client": "c1",
+          "club": "A",
+          "user": 7
+        },
+        {
+          "op": "issue",
+          "key": "issue-readmit",
+          "actor": 3,
+          "invite": "readmit",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "mode": "READMIT",
+          "target": 7
+        },
+        {
+          "op": "claim",
+          "key": "claim-readmit",
+          "actor": 7,
+          "invite": "readmit"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-readmit",
+          "actor": 3,
+          "invite": "readmit",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "COMMITTED",
+        "COMMITTED",
+        "REGRANT_ACK_REQUIRED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "membership-restore-is-not-staff-regrant",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "platform_revoke",
+          "client": "c1",
+          "user": 7
+        },
+        {
+          "op": "platform_restore",
+          "client": "c1",
+          "user": 7
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "EVENT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "unclaimed-other-club-without-admission-after-platform-restore",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 4,
+          "invite": "i1",
+          "client": "c1",
+          "club": "B",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "platform_revoke",
+          "client": "c1",
+          "user": 7
+        },
+        {
+          "op": "platform_restore",
+          "client": "c1",
+          "user": 7
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "EVENT",
+        "EVENT",
+        "INVITATION_FENCED"
+      ],
+      "observe": [
+        "c1/B/7",
+        "c2/Z/7"
+      ],
+      "expected_permissions": {
+        "c1/B/7": [],
+        "c2/Z/7": [
+          "booking.promoter.create",
+          "booking.promoter.own.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "old-receipt-after-new-epoch",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "full_disable",
+          "client": "c1",
+          "club": "A",
+          "user": 7
+        },
+        {
+          "op": "issue",
+          "key": "issue-readmit",
+          "actor": 3,
+          "invite": "readmit",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "mode": "READMIT",
+          "target": 7
+        },
+        {
+          "op": "claim",
+          "key": "claim-readmit",
+          "actor": 7,
+          "invite": "readmit"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-readmit",
+          "actor": 3,
+          "invite": "readmit",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "regrant_ack": [
+            "floor.tables.read",
+            "night.read"
+          ]
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "REPLAY_CURRENT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "additional-role-then-revoke-one-source",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "issue",
+          "key": "issue-entry",
+          "actor": 3,
+          "invite": "entry",
+          "client": "c1",
+          "club": "A",
+          "role": "ENTRANCE_MANAGER",
+          "policy": "ENTRANCE_MANAGER",
+          "mode": "ADDITIONAL",
+          "target": 7
+        },
+        {
+          "op": "claim",
+          "key": "claim-entry",
+          "actor": 7,
+          "invite": "entry"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-entry",
+          "actor": 3,
+          "invite": "entry",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "source_revoke",
+          "client": "c1",
+          "club": "A",
+          "user": 7,
+          "source": "target-i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "entrance.arrival.record",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "delegation-is-separate-from-role-invitation",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "delegate",
+          "id": "calendar",
+          "issuer": "cmA",
+          "recipient": "target-i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "client.club.calendar.read",
+          "client.club.calendar.write",
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "self-escalation-denied",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "target": 3
+        }
+      ],
+      "expected_outcomes": [
+        "PROTECTED_SUBJECT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "legacy-global-is-not-business-ownership",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 5,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "CLUB_MANAGER",
+          "policy": "CLUB_MANAGER"
+        }
+      ],
+      "expected_outcomes": [
+        "ISSUER_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "ownership-lost-before-confirm",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 1,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "CLUB_MANAGER",
+          "policy": "CLUB_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "revoke_owner",
+          "client": "c1",
+          "user": 1
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 1,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "ISSUER_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "inactive-membership-is-not-auto-restored",
+      "operations": [
+        {
+          "op": "platform_revoke",
+          "client": "c1",
+          "user": 7
+        },
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        }
+      ],
+      "expected_outcomes": [
+        "EVENT",
+        "COMMITTED",
+        "MEMBERSHIP_INACTIVE"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "cross-client-issuer-denied",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 2,
+          "invite": "i1",
+          "client": "c2",
+          "club": "Z",
+          "role": "CLUB_MANAGER",
+          "policy": "CLUB_MANAGER"
+        }
+      ],
+      "expected_outcomes": [
+        "ISSUER_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "terminal-source-id-reuse-denied",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "full_disable",
+          "client": "c1",
+          "club": "A",
+          "user": 7
+        },
+        {
+          "op": "issue",
+          "key": "issue-readmit",
+          "actor": 3,
+          "invite": "readmit",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "mode": "READMIT",
+          "target": 7,
+          "source": "target-i1"
+        },
+        {
+          "op": "claim",
+          "key": "claim-readmit",
+          "actor": 7,
+          "invite": "readmit"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-readmit",
+          "actor": 3,
+          "invite": "readmit",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "regrant_ack": [
+            "floor.tables.read",
+            "night.read"
+          ]
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "COMMITTED",
+        "COMMITTED",
+        "SOURCE_ID_TERMINAL"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "claimed-refresh-cannot-cross-revocation",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "issue",
+          "key": "issue-pending",
+          "actor": 3,
+          "invite": "pending",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "mode": "ADDITIONAL",
+          "target": 7
+        },
+        {
+          "op": "claim",
+          "key": "claim-pending",
+          "actor": 7,
+          "invite": "pending"
+        },
+        {
+          "op": "full_disable",
+          "client": "c1",
+          "club": "A",
+          "user": 7
+        },
+        {
+          "op": "refresh",
+          "key": "refresh-pending",
+          "actor": 7,
+          "invite": "pending"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "INVITATION_FENCED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "reissue-rotates-id-seq-and-secret",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "reissue",
+          "key": "issue-i2",
+          "actor": 3,
+          "invite": "i2",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "previous": "i1"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i2",
+          "actor": 7,
+          "invite": "i2",
+          "secret": "offline-only-invitation:i1"
+        },
+        {
+          "op": "claim",
+          "key": "claim-new-secret-i2",
+          "actor": 7,
+          "invite": "i2"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i2",
+          "actor": 3,
+          "invite": "i2",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "SECRET_CONSUMED_OR_INVALID",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "unknown-authoritative-frontier-denied",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "FRONTIER_UNKNOWN"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance.",
+      "initial_overrides": {
+        "frontier_known": false
+      }
+    },
+    {
+      "id": "unknown-protected-subject-denied",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "target": 7
+        }
+      ],
+      "expected_outcomes": [
+        "PROTECTION_UNKNOWN"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance.",
+      "initial_overrides": {
+        "protection_known": false
+      }
+    },
+    {
+      "id": "late-audit-failure-no-partial-issue",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "audit_failure": true
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "AUDIT_FAILURE_ROLLBACK",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "read-only-unknown-result-never-executes",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "resolve": true
+        }
+      ],
+      "expected_outcomes": [
+        "NOT_COMMITTED_AT_SNAPSHOT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "old-envelope-cannot-use-new-key",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "confirm",
+          "key": "new-key",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "challenge_replay": "confirm-i1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "INTENT_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "identity-expires-during-lock-wait",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1",
+          "age": 299,
+          "wait": 2
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "IDENTITY_EXPIRED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "command-challenge-expires-during-lock-wait",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1",
+          "wait": 121
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "CHALLENGE_EXPIRED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "body-userid-cannot-select-recipient",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1",
+          "body_user": 99
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7",
+        "c1/A/99"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ],
+        "c1/A/99": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "fresh-first-assignment-creates-missing-member-only-on-confirm",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 8,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 8,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/8"
+      ],
+      "expected_permissions": {
+        "c1/A/8": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "business-owner-cannot-be-staff-recipient",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 2,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "CLUB_MANAGER",
+          "policy": "CLUB_MANAGER",
+          "target": 1
+        }
+      ],
+      "expected_outcomes": [
+        "PROTECTED_SUBJECT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "platform-owner-cannot-be-staff-recipient",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "target": 99
+        }
+      ],
+      "expected_outcomes": [
+        "PROTECTED_SUBJECT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "business-owner-guest-are-not-staff-role-codes",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "GUEST",
+          "policy": "GUEST"
+        }
+      ],
+      "expected_outcomes": [
+        "ROLE_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "finance-exact-shift-no-neighbor-club",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FINANCE_MANAGER",
+          "policy": "FINANCE_MANAGER",
+          "selector": {
+            "kind": "SHIFT_SET",
+            "ids": [
+              10
+            ]
+          }
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7",
+        "c1/B/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "finance.report.read"
+        ],
+        "c1/B/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance.",
+      "resources": {
+        "c1/A/7": {
+          "shift": 10
+        },
+        "c1/B/7": {
+          "shift": 10
+        }
+      }
+    },
+    {
+      "id": "finance-denies-other-shift",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FINANCE_MANAGER",
+          "policy": "FINANCE_MANAGER",
+          "selector": {
+            "kind": "SHIFT_SET",
+            "ids": [
+              10
+            ]
+          }
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance.",
+      "resources": {
+        "c1/A/7": {
+          "shift": 11
+        }
+      }
+    },
+    {
+      "id": "finance-requires-explicit-selector",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FINANCE_MANAGER",
+          "policy": "FINANCE_MANAGER"
+        }
+      ],
+      "expected_outcomes": [
+        "SELECTOR_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "confirm-first-issuer-revoke-keeps-independent-role",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        },
+        {
+          "op": "source_revoke",
+          "client": "c1",
+          "club": "A",
+          "user": 3,
+          "source": "cmA"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "canonical-issuer-and-approved-branded-recipient",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "recipient_connection": "brandA"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": [
+          "floor.tables.read",
+          "night.read"
+        ]
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "branded-audience-revoked-after-claim",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER",
+          "recipient_connection": "brandA"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "audience_revoke",
+          "connection": "brandA"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "EVENT",
+        "AUDIENCE_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    },
+    {
+      "id": "confirm-cannot-switch-issuer-bot",
+      "operations": [
+        {
+          "op": "issue",
+          "key": "issue-i1",
+          "actor": 3,
+          "invite": "i1",
+          "client": "c1",
+          "club": "A",
+          "role": "FLOOR_MANAGER",
+          "policy": "FLOOR_MANAGER"
+        },
+        {
+          "op": "claim",
+          "key": "claim-i1",
+          "actor": 7,
+          "invite": "i1"
+        },
+        {
+          "op": "confirm",
+          "key": "confirm-i1",
+          "actor": 3,
+          "invite": "i1",
+          "claimant": 7,
+          "confirmed": true,
+          "comparison_ok": true,
+          "connection": "brandA"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "AUDIENCE_DENIED"
+      ],
+      "observe": [
+        "c1/A/7"
+      ],
+      "expected_permissions": {
+        "c1/A/7": []
+      },
+      "risk": "Fail closed; no automatic permission or scope inheritance."
+    }
+  ],
+  "source_sha256": {
+    "docs/product/ROLE_TARGET_IDENTITY_CONTRACT_PROPOSED.md": {
+      "algorithm": "SHA-256",
+      "digest": "a7253d0bb2aa9f194f017aeb565d1aad999a7ce9806ea684184713762f40e4e6"
+    },
+    "docs/product/ROLE_ASSIGNMENT_CONTRACT_PROPOSED.md": {
+      "algorithm": "SHA-256",
+      "digest": "f62c116e4855c9f307388aaa9c5ccfbc7db59739d5575429973e5ecd82b8d19c"
+    },
+    "docs/product/PRODUCT_SPEC.md": {
+      "algorithm": "SHA-256",
+      "digest": "706cc2b1af7bba84e2f6db1d33487e40ec4ec2d63ce1ce67d7b48ea367406968"
+    },
+    "docs/product/OPEN_DECISIONS.md": {
+      "algorithm": "SHA-256",
+      "digest": "e1c3bb72ea71d1a7523e4c2289d989b5e045337a70cccf37a1817d68424cc31c"
+    },
+    "docs/ops/owner-team-contract.md": {
+      "algorithm": "SHA-256",
+      "digest": "7d3ca0e366175bcc386fab08982a9e66fbf5c56e482f8c9200add35d97614857"
+    },
+    "docs/ops/owner-manager-contract.md": {
+      "algorithm": "SHA-256",
+      "digest": "b53d6f98016703f86bf1115c26e9c6cd6d3e9e3aac514831b5454eb45f1dfec5"
+    },
+    "core-security/src/main/kotlin/com/example/bot/security/auth/InitDataValidator.kt": {
+      "algorithm": "SHA-256",
+      "digest": "076cc924bcacec1b597977b6c0633da9c17ffae0cd6b59268e1712d6a76ae6f8"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/ClientContextAuth.kt": {
+      "algorithm": "SHA-256",
+      "digest": "cdb2b9e094697f4ba991a4ab356b7484888eabc29d17092cd8837f6f65dc6643"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentProviders.kt": {
+      "algorithm": "SHA-256",
+      "digest": "3d8a3d7251eb6c0868d49771f368fadbb6e473e4357a5e3e11b5ff23b8db9874"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentAuthority.kt": {
+      "algorithm": "SHA-256",
+      "digest": "eb0e0679992ab6d25017fba8934a3f56bd16544fc2186580124d7c81a2ca9d37"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentLifecycle.kt": {
+      "algorithm": "SHA-256",
+      "digest": "bb5d70383f9f28d7c309bbc1441f8d1861437c8739141f655c8a9e224beed11c"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/AssignmentAdmissionWriter.kt": {
+      "algorithm": "SHA-256",
+      "digest": "afc06371993262ad05f70f69ba72736c96300abbc4ae472fab1c5931a9053fe9"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/JdbcRoleAssignmentFoundation.kt": {
+      "algorithm": "SHA-256",
+      "digest": "d76a13afc68ba0b21ad32e38d8ff5619aba359e8c8db7a3b4e13dc944dedfeef"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/assignments/PlatformMembershipSourceInvalidator.kt": {
+      "algorithm": "SHA-256",
+      "digest": "9448af82a9b77e3b494922c4a5d44364a1e19a6b195a5bd24598973a26c1dbd9"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/StaffInvitationOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "430a45d4501fa95d152537adc76cbc97844a48c3bb6d369ec5193b45ac513154"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubStaffAccess.kt": {
+      "algorithm": "SHA-256",
+      "digest": "08a835a45d8332d98155742a89f3bd57eed5798c72439c81b7379643fac5a8d6"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubTeamOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "2fe6a0888302292bd1075d841f4c740c0054273fceb3d668d14ff5e0f195bf3f"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientAccessOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "6f20e67d8ba58e875af4f814bee4ac9aab1ce7f530a046d9ba89e3f7c328178e"
+    },
+    "core-data/src/main/resources/db/migration/h2/V077__client_role_assignment_foundation.sql": {
+      "algorithm": "SHA-256",
+      "digest": "84c4f610af6cd9dfc4d0e5db03be64c6fc9b7a6ab79592ab0b1437bd0215f1e2"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V077__client_role_assignment_foundation.sql": {
+      "algorithm": "SHA-256",
+      "digest": "84c4f610af6cd9dfc4d0e5db03be64c6fc9b7a6ab79592ab0b1437bd0215f1e2"
+    }
+  }
+}

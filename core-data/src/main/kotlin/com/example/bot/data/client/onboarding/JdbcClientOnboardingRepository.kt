@@ -3,7 +3,9 @@ package com.example.bot.data.client.onboarding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -124,10 +126,16 @@ class JdbcClientOnboardingRepository(
             if (!Regex("[A-Za-z0-9._:-]{8,128}").matches(idempotencyKey)) fail("validation_error")
             val requestHash = commandRequestHash(operation, resourceId, body)
             val keyHash = digest(idempotencyKey)
+            val mutationContext = currentCoroutineContext()
+            val memberMutation =
+                operation == OnboardingMutation.MEMBER_REVOKE || operation == OnboardingMutation.MEMBER_RESTORE
             var attempt = 0
             while (true) {
                 try {
-                    return@withContext transaction(readOnly = false) { sql ->
+                    return@withContext transaction(
+                        readOnly = false,
+                        beforeCommit = { if (memberMutation) mutationContext.ensureActive() },
+                    ) { sql ->
                         val ownerOperation = operation in OWNER_OPERATIONS
                         if (ownerOperation && configuredOwnerId?.takeIf { it > 0 } != actor.telegramUserId) {
                             fail("forbidden")
@@ -314,6 +322,7 @@ class JdbcClientOnboardingRepository(
 
     private fun <T> transaction(
         readOnly: Boolean,
+        beforeCommit: () -> Unit = {},
         block: (OnboardingSql) -> T,
     ): T =
         dataSource.connection.use { connection ->
@@ -323,6 +332,7 @@ class JdbcClientOnboardingRepository(
             connection.autoCommit = false
             try {
                 val result = block(OnboardingSql(connection))
+                beforeCommit()
                 connection.commit()
                 result
             } catch (cancelled: CancellationException) {

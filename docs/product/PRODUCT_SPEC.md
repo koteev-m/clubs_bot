@@ -51,8 +51,9 @@
 
 ## 4. Role/scope model и critical actions
 
-**AMEND, принято 2026-11-09:** актуальный target catalogue — девять ролей из
-[§29.17](#owner-manager-model). Строка `RBAC-001` ниже сохраняет исходный catalogue
+**AMEND, принято 2026-11-10:** актуальный target catalogue — восемь ролей из
+[§29.18](#business-role-model-20261110). Девять ролей [§29.17](#owner-manager-model)
+сохраняют историю решения 2026-11-09. Строка `RBAC-001` ниже сохраняет исходный catalogue
 как source traceability; прежние Host/зал/админ/DJ и сетевые административные
 названия не задают текущий основной набор ролей. Принятие новых названий и
 обязанностей не переименовывает технические packages или существующие assignments.
@@ -424,6 +425,7 @@ iBota не является способом обойти этот порядо�
 | DEC-003 | `ACCEPTED_DECISION` — pilot launch boundary | Первый usable release запускается для одного real pilot club, выбранного configuration/data без hardcode; multi-club data model, `clubId` и `CLUB/GLOBAL scope` сохраняются, а network analytics, полноценный multi-club onboarding и межклубный UX не входят в первый release | Pilot release; first slice | [DEC-003](OPEN_DECISIONS.md#dec-003--один-клуб-или-сеть-в-mvp) |
 | DEC-004 | `ACCEPTED_DECISION` — first-release role boundary | Первый release включает Гостя, Host/Менеджера входа, Менеджера клуба, Админа клуба и Owner; target distinction Менеджера зала сохраняется через mapping `DEC-005`; Promoter, Финансовый менеджер, DJ, Главный админ и Главный менеджер сети сохраняются в target model, но не входят в release; permission matrix этим решением не определяется | Pilot release; role slices | [DEC-004](OPEN_DECISIONS.md#dec-004--mvp-role-set) |
 | DEC-005 | `ACCEPTED_DECISION` — role/RBAC mapping | `GUEST`, `ENTRY_MANAGER`, объединённый для Менеджера зала/клуба `MANAGER`, `CLUB_ADMIN`, `OWNER`; первые три staff roles ограничены CLUB scope, `OWNER` сохраняет GLOBAL scope, а полномочия задаются role + scope + explicit permission; critical actions требуют confirmation/audit, existing `GLOBAL_ADMIN`/`HEAD_MANAGER`/`PROMOTER` не удаляются и не входят в новые first-release flows | Pilot release; RBAC foundation | [DEC-005](OPEN_DECISIONS.md#dec-005--различия-host-entrance-manager-floor-manager-club-manager-и-admin) |
+| DEC-006 | `ACCEPTED_DECISION` — уточнение scope 2026-11-10 | Одна роль Промоутер с явными назначениями и отдельным разрешением бронирования в конкретных клубах той же сети; свои брони и допустимые статусы. Ни membership, ни общий client, ни GLOBAL не дают остальные клубы, финансовую отчётность, вход или посадку | Promoter booking после canonical booking и permission contract; не runtime cutover | [DEC-006](OPEN_DECISIONS.md#dec-006--global-promoter-model) · [§29.18](#business-role-model-20261110) |
 | DEC-007 | `ACCEPTED_DECISION` — canonical guest navigation boundary | Future canonical guest home — новый minimal role-aware shell с target IA Клубы/Календарь/Схема или Столы/Мои брони/Пропуск/Мои ночи/Музыка/Вопросы; section активируется только после accepted dependencies, complete wiring, RBAC и staging smoke; first support slice остаётся private `/start → /ask`, не зависит от Mini App redesign и не активирует iBota; final labels зависят от `DEC-001`, cutover — от `DEC-017` | Guest shell after first slice; private support slice | [DEC-007](OPEN_DECISIONS.md#dec-007--canonical-guest-homenavigation) |
 | DEC-008 | `ACCEPTED_DECISION` — canonical operational nights | Вариант C для CAL-001–003. Правила согласуют одну операционную ночь на клубную дату с постоянным ID, IANA TZ и фактическими моментами открытия и закрытия. Клубная дата может предшествовать открытию, включая следующее 00:00. Безопасная отмена и допустимый перенос сохраняют ID и историю. Связанные обязательства требуют отдельной процедуры | Основа в кабинете клуба. Гостевой переход и сопоставление legacy записей отдельным этапом | [DEC-008](OPEN_DECISIONS.md#dec-008--canonical-operational-night-definition) |
 | DEC-017 | `ACCEPTED_DECISION` — Mini App implementation strategy | Новый role-aware shell становится canonical; current React можно переиспользовать выборочно только после проверки requirements/API/RBAC/packaging; static `/app` — temporary fallback, не target; итог — один `/app`, один build/package/serve pipeline и один source of assets; navigation после wiring/RBAC/tests/smoke, explicit cutover перед legacy removal; private support flow и bounded staff inbox не зависят от полного redesign | Canonical Mini App cutover; bounded support surface | [DEC-017](OPEN_DECISIONS.md#dec-017--retainreplace-current-mini-app-implementations) |
@@ -1174,6 +1176,10 @@ Managed Bots или модули за DEC-013/014/022/031. Implementation eviden
 <a id="owner-manager-model"></a>
 ### 29.17. Владение, подготовка клуба и календарь — принято 2026-11-09
 
+**Историческая граница:** catalogue и hierarchy этого решения заменены только в
+противоречащей части [уточнением 2026-11-10, §29.18](#business-role-model-20261110).
+Описанные existing packages, процесс подготовки и проверки не мигрируются этим текстом.
+
 **ACCEPTED_DECISION**, прямое решение владельца продукта в новой локальной задаче
 `CLB-owner-manager-ux`, base `16761e43887036688028358524847db1af0e5326`.
 Это датированное уточнение DEC-004/005/040/041 и ONB-003/008, RBAC-001/005/006,
@@ -1278,3 +1284,100 @@ HOLD и публичные ночи автоматически не создаю
 меняются. Existing calendar versions, conflict checks и protected-data guards
 сохраняются. Реальные Telegram WebView, deployment и миграция runtime остаются
 отдельной проверкой с отдельным разрешением.
+
+<a id="business-role-model-20261110"></a>
+### 29.18. Восемь ролей, делегирование и attribution — принято 2026-11-10
+
+**ACCEPTED_DECISION**, прямое уточнение владельца продукта в задаче
+`CLB-role-model-revision`, base `5550b944990d8c1c93c0a5012d31db209f93ea6d` после PR #567.
+Уточняет DEC-004/005/006/040/041, RBAC-001–006, NET-001–003, GL-006, TOPS-002,
+ANL-001–004 и CLNT-002/006/009 без новых decision/requirement IDs. Authority и
+оставшиеся вопросы — [decision addendum](OPEN_DECISIONS.md#role-model-20261110-decision).
+Source concept, 170 source rows и исторические решения сохраняются.
+
+#### Актуальный catalogue и рост пространства
+
+1. **Владелец бизнеса** — одна роль независимо от количества принадлежащих клубов.
+2. **Управляющий сети** — необязательная должность, только явно назначенные клубы.
+3. **Управляющий клуба** — конфигурация и управление конкретным разрешённым клубом.
+4. **Менеджер** — столы, брони, посадка и зал; отдельные делегированные настройки.
+5. **Менеджер входа** — QR, списки, поиск, отметки прихода и отказа.
+6. **Финансовый менеджер** — финансовые данные явно назначенного клуба/смены.
+7. **Промоутер** — собственные брони и разрешённые промоутерские действия.
+8. **Гость** — собственные действия в разрешённой клубной витрине.
+
+Владелец платформы — отдельная authority, не клиентская роль. Роли «Владелец сети»
+и «Владелец клуба» заменены одной ролью Владелец бизнеса; Host отдельно не возвращается.
+При одном клубе отдельный сетевой кабинет необязателен. Второй клуб развивает то же
+клиентское пространство в многоклубное без переноса данных, переименования владельца
+и автоматического изменения прав. Общий client не означает доступ ко всем клубам.
+DJ, бармен, официант и другие профессии в этом этапе — будущие карточки персонала/
+артистов и назначения на смены, не обязательные новые RBAC-роли. Музыкальные
+capabilities и исторические требования сохраняются; отдельный доступ к загрузке
+музыки остаётся будущим решением, DEC-014 не закрывается этим catalogue.
+
+#### Принятые обязанности и пределы делегирования
+
+| Роль | Принятый target | Не следует из этого решения |
+|---|---|---|
+| Владелец бизнеса | Показатели всех своих клубов, готовность, финансовые итоги после закрытия смен, посещения и результаты работы; назначение/отзыв управляющего сети и управляющих клубами | Platform/GLOBAL authority, автоматические денежные операции или emergency restore. Повседневная настройка залов/столов/ночей/финансовых шаблонов не является его основной работой |
+| Управляющий сети | Сопоставимые с владельцем инструменты просмотра/отчётности в явно назначенных клубах; назначение управляющих этих клубов | Назначение другого управляющего сети, ownership, platform authority и все клубы client |
+| Управляющий клуба | Полная ответственность за конфигурацию своего клуба: залы, столы, календарь, ночи, booking rules и разрешённые настройки; назначение менеджеров, менеджеров входа, финансовых менеджеров, промоутеров; поручение менеджеру настройки отдельных разделов | Другие клубы, автоматическая сетевая аналитика, чужие финансовые данные или неограниченная выдача permissions |
+| Менеджер | Столы/брони/посадка/зал; отдельно выданная настройка залов, ночей, профиля, booking rules | Ownership, staff management, финансовая смена или соседний клуб вследствие configuration delegation |
+| Менеджер входа | Входные действия в своём разрешённом контексте | Посадка, деньги и управление сотрудниками из названия роли; DEC-010/011/020/021 сохраняют собственные gates |
+| Финансовый менеджер | Финансовые данные явно назначенного клуба/смены по отдельным capabilities | Автоматическая сеть; close/correction/refund вне ещё не принятого operation contract DEC-012 |
+
+Это target hierarchy, а не разрешение вызвать прежний creator-only team endpoint
+от имени управляющего. Существующие owner-team/owner-manager contracts, packages,
+grants, tombstones и grant-writer semantics сохраняются до отдельной безопасной
+реализации. Фактические issuer/delegation/revoke протоколы и granular permission
+codes ещё требуют технического контракта. Аварийное восстановление управления
+нуждается в отдельном безопасном решении и не заменяется GLOBAL-доступом.
+
+#### Серверная финансовая изоляция
+
+Scope и capability проверяются независимо: назначение к клубу само по себе не
+даёт financial reports. Ограничение распространяется на отчёты, выручку, закрытые
+смены, депозиты, денежные операции, агрегаты, экспорты, analytics APIs и связанные
+private данные; одной скрытой вкладки или фильтра frontend недостаточно.
+
+Владелец бизнеса видит данные своих клубов, включая принятые закрытые финансовые
+итоги; управляющий сети — назначенные клубы. Управляющий клуба ограничен явно
+разрешёнными клубами, без автоматической network analytics. Менеджер получает
+только необходимую информацию своего явно назначенного клуба и только по отдельным
+permissions. Финансовый менеджер ограничен явно назначенным клубом/сменой.
+Ни один из этих scope не выдаёт конкретную финансовую capability автоматически.
+Бронирование промоутером не предоставляет финансовую отчётность клубов. Даже два
+клуба одного client не позволяют читать соседний клуб без его exact scope/capability.
+
+#### Промоутер: explicit same-network booking
+
+DEC-006 уточнён: промоутер может бронировать столы в клубах той же сети, только
+если явно назначен в конкретный клуб и имеет соответствующее разрешение. При пяти
+клубах сети и назначениях A/B/C доступны A/B/C, но не D/E. Это не GLOBAL и не
+все-клубы permission. Промоутер видит собственные брони и их допустимые статусы
+в назначенных клубах; чужие брони/списки, QR/check-in, seating, денежные операции,
+financial reports и staff management из права бронирования не следуют.
+
+Каждая бронь проверяет signed Telegram identity, active promoter assignment,
+current membership/authority, exact client/club, открытую canonical operational
+night, правила и доступность стола, HOLD invariants, явное критическое подтверждение,
+idempotency и audit. Accepted direction не доказывает совместимость старых promoter
+APIs, не открывает guest routes и не разрешает guest cutover.
+
+#### Источник брони и связь стола отдельно от финансового режима
+
+Система учитывает источник бронирования и связь стола: **от клуба** либо **от
+конкретного промоутера** — для корректной клубной/promoter статистики и GL-006.
+Эта attribution независима от финансового условия TOPS-002: депозит, по счёту,
+за счёт клуба и другие отдельно утверждённые варианты. «От промоутера» не означает
+«оплачено промоутером», «от клуба» не означает бесплатную посадку. Один enum для
+источника и финансового режима запрещён.
+
+Конкретные data fields/links к promoter assignment, picker подходящих назначений
+того же клуба, отображение менеджеру, correction authority/reason/audit/dedup и
+поведение при cancel/no-show/table move/revoke/history оформляются как
+[PROPOSED технический контракт](ROLE_WORKSPACES_PROPOSED.md#role-model-20261110).
+Детальные UI-правила исправления attribution, финансовые режимы и расчёт вознаграждения
+промоутера этим решением не приняты. DEC-012, DEC-010/011/020/021 и ограничения
+DEC-013/014/022/031 сохраняют не закрытые этим уточнением вопросы.

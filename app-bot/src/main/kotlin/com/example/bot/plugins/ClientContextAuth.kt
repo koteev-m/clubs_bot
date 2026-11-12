@@ -16,6 +16,8 @@ import io.ktor.server.request.queryString
 import io.ktor.server.routing.Route
 import io.ktor.util.AttributeKey
 import kotlinx.coroutines.CancellationException
+import java.time.Clock
+import java.time.Duration
 
 /** Server wiring only. The credential provider is deliberately opaque and never a principal field. */
 internal class TrustedBotConnection(
@@ -36,6 +38,17 @@ internal class TrustedBotConnection(
 
     fun verify(initData: String): TelegramUser? =
         InitDataValidator.validate(initData, checkedToken())?.takeIf { it.id > 0 }
+
+    /** Internal opt-in policy; the existing Mini App verify path retains its defaults. */
+    fun verifyWithPolicy(
+        initData: String,
+        clock: Clock,
+        maxAge: Duration,
+        maxFutureSkew: Duration,
+    ): TelegramUser? =
+        InitDataValidator
+            .validate(initData, checkedToken(), clock, maxAge, maxFutureSkew)
+            ?.takeIf { it.id > 0 }
 
     private fun checkedToken(): String =
         tokenProvider().also {

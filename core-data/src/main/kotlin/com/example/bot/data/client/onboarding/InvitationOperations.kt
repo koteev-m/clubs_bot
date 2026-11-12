@@ -163,6 +163,7 @@ internal class InvitationOperations(
             // An accepted invitation never silently restores a deactivated membership.
             fail("invalid_transition")
         }
+        session.requireLegacyClientAuthorityWrite(clientId, userId)
         sql.update("UPDATE clients SET is_active=TRUE,updated_at=? WHERE id=?", session.now, clientId)
         sql.update(
             "INSERT INTO client_memberships(client_id,user_id,is_active,created_at,updated_at) VALUES (?,?,TRUE,?,?)",
@@ -193,6 +194,7 @@ internal class InvitationOperations(
 
     private fun acceptRecipient(invitation: DbRow): MutationResult {
         val clientId = invitation.long("client_id")
+        session.requireLegacyClientAuthorityWrite(clientId, checkNotNull(session.userId))
         // Direct acceptance is exclusively for a newly issued empty cabinet, never an account transfer.
         if (session.client(clientId).active()) fail("invalid_transition")
         if (sql.row("SELECT client_id FROM client_memberships WHERE client_id=? LIMIT 1", clientId) != null ||

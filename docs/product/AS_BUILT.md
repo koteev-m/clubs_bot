@@ -1,5 +1,163 @@
 # AS_BUILT: repository snapshot
 
+## Control-head operator correction — local, unwired, 2026-11-12
+
+[Standalone P1 fix/evidence](../ops/role-target-db-control-head-foundation.md#role_target_control_operator_p1_fix--local-correction-2026-11-12)
+pins catalog-first transaction-local SQL resolution in lease/publisher independently
+of guarded maintenance. Metadata SELECT checks the persisted UUID; publisher checks
+exact RETURNING identity/fence and complete canonical poststate before commit.
+Original ordinary-role false lease and wrong-target UPDATE probes reproduce RED→GREEN.
+No migration, current authorization, runtime registration or TARGET activation changes.
+
+
+## DB maintenance control head — local, unwired, 2026-11-12
+
+[V079 implementation/evidence](../ops/role-target-db-control-head-foundation.md)
+adds empty control-head/publication-history storage, exact transaction-bound
+PostgreSQL SHARE lease (H2 exclusive parity), synthetic fence-first publisher and
+finite protected-bundle composition for existing inactive PLATFORM maintenance.
+The original signed verifier/actor/root/CAS/audit/receipt path is reused; the new
+receipt domain binds the admitted publication. Bare evidence writers refuse a
+controlled root. No current authorization, V077/V078, grants, active bot or staff
+state changes automatically. ENABLED is a metadata publication gate, not ACTIVE
+or user authority. Real config/intent/credential sources, multi-replica updater
+participation and runtime adoption remain blocked; default providers deny.
+
+## Production maintenance providers — design only, 2026-11-11
+
+[Lease/intent contract §10](ROLE_TARGET_TRUSTED_BINDING_CONTRACT_PROPOSED.md#production-lease-intent)
+is **PROPOSED**, not implemented: maintenance-purpose DB control head, explicit
+transaction-bound context port, finite trusted manifest and fence-first config
+publication. Separate-process disposable probes verify DB primitives plus unchanged
+V078 guards with a test model; they do not establish live provider/updater coverage.
+Production lease/intent/credential providers remain absent. Current authorization,
+NightConcierge connection, migrations and all activation boundaries are unchanged.
+
+## Commit-time TARGET maintenance — local, unwired, 2026-11-11
+
+[Adapter/evidence](../ops/role-target-commit-time-maintenance.md) connects the existing
+platform-only Disable/Revoke/selected-material retirement writer to fresh signed
+maintenance checks under a required shared authority/context lease and actor/root
+DB locks. Canonical snapshot/expected fence, audit, post-state and durable receipt
+share one transaction; retry reacquires/rechecks everything without refreshing pins.
+Read pins do not authorize writes. Production lease/intent providers are absent;
+no production DI/routes/jobs or credentials. Create/Replace/AttachReference/BRANDED,
+ACTIVE and TARGET issuance remain blocked. V077/V078 and old RBAC writers unchanged.
+
+
+## TARGET maintenance selector — local, unwired, 2026-11-11
+
+[Selector and evidence](../ops/role-target-maintenance-selector.md) compose strict
+TARGET maintenance authentication on the separate live platform channel with
+current server context, exact configured platform owner or independent business
+proof and two read-only V078 snapshots. A selected immutable metadata pin is not
+write authorization. Business/auth-context/server-intent providers have no runtime
+adapter and default deny; no ownership is inferred from creator/membership/roles.
+Read-only core-data type visibility is exported only for backend composition.
+V077/V078/writers, normal Mini App/platform-owner paths and DI/routes are unchanged;
+ACTIVE, credentials, TARGET grants/invitations and mutation integration stay off.
+
+## Durable TARGET binding source — local, unwired, 2026-11-11
+
+[Read-only source/evidence](../ops/role-target-durable-binding-source.md) reads one
+coherent qualified V078 root/incarnation/credential/mapping snapshot from exact
+server pins. Inactive/revoked metadata never grants TARGET identity/audience or
+permissions. Aggregate root version/generation and exact mapping high-water are
+checked; PostgreSQL operators use a transaction-local pg_catalog-first path.
+No schema/writer/legacy auth changes or production selector/resolver/DI/route/job.
+ACTIVE remains SQL/service-denied; future mutations need locked revalidation.
+
+## TARGET binding P1/P2 correction — local, 2026-11-11
+
+[Focused fix/evidence](../ops/role-target-binding-p1-p2-fix.md) corrects unpublished
+V078 schema masking and unfenced child mutations. PostgreSQL functions use the
+trusted Flyway schema/pg_catalog, explicit pg_temp-last configuration and invoker
+security. H2/PG child guards lock exact roots NOWAIT and advance storage revisions
+atomically; service input CAS and final receipt pins are preserved. Composite
+commands may advance multiple revisions. Prior foundation evidence is historical
+for these two properties. No production authorization/provider/route activation.
+
+## Inactive TARGET binding foundation — local, 2026-11-11
+
+[V078 and implementation evidence](../ops/role-target-binding-foundation.md) add
+empty root/incarnation/reference/material/receipt/scope tables plus a durable
+per-client mapping high-water mark. Metadata-only triggers cover client predicate
+changes, exact mapping DML and FK club-delete cascades; client-ID reuse preserves
+the fence. Previous migration bytes, grants and runtime authorization are unchanged.
+Internal platform lifecycle supports PENDING/DISABLED/terminal REVOKED, monotonic
+CAS/version/generation, independent maintenance evidence, actor/root locks,
+transactional audit/current-only receipts and credential-reference retirement.
+H2 trigger quoting follows JDBC identifier case; row-label normalization stays
+inside the new binding package, leaving the old OnboardingSql unchanged.
+ACTIVE is deliberately blocked in SQL and operations. No actual bot/credential
+is adopted, no resolver or production evidence provider exists, no DI/route/job
+calls it. NightConcierge/current Mini App/platform-owner flow is unchanged;
+TARGET identity/audience readers and V077 remain unwired. This is a local inactive
+foundation, not deployed RBAC or a usable branded-bot registry. Privileged schema
+bypass/restore, actual credential invalidation, proof v2 and future activation
+need separately reviewed adapters/contracts.
+
+## Canonical TARGET audience — local, unwired, 2026-11-11
+
+[Read-only provider and evidence](../ops/role-target-canonical-audience-provider.md)
+combine an explicitly pinned/current canonical server binding with one-statement
+`clients`/`client_clubs`/`clubs` snapshots. Active/unarchived client, exact finite
+mapping set and lifecycle version are checked. Private clubs remain eligible
+resources; no membership/grants are inferred. Current binding defaults deny, with
+exact connection-object and revision checks. No persisted bot registry is claimed.
+The existing verifier compares immutable canonical snapshots across its reads;
+this is not a transaction fence, durable mapping epoch or user authority.
+No production DI/route, grant writer, migration or TARGET activation was added.
+
+## TARGET identity verifier — local, unwired, 2026-11-11
+
+Bounded unpublished follow-up on `5550b944990d8c1c93c0a5012d31db209f93ea6d`.
+[Internal read-only verifier](../../app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetIdentityVerifier.kt)
+reuses existing Telegram HMAC with strict TARGET parsing, 0≤age<300с/zero future
+skew and explicit finite server audience snapshots. It returns only typed identity
+metadata. Default audience provider denies; no real registry/DI/route or RBAC reader
+is connected. Legacy Mini App24h/future/duplicate semantics are unchanged.
+[Evidence/remaining boundaries](../ops/role-target-identity-verifier.md).
+Invitation issue/claim/confirm, nonce/proof v2, business ownership and TARGET
+admissions are not implemented by this follow-up. V077/platform adapter preserved.
+
+
+## Role assignment foundation — local, inactive, 2026-11-10
+
+Bounded unpublished candidate on `5550b944990d8c1c93c0a5012d31db209f93ea6d`.
+The owner accepted the five architecture directions in the
+[assignment contract §0](ROLE_ASSIGNMENT_CONTRACT_PROPOSED.md#0-локальная-реализация-и-граница-активации)
+for local implementation only. This is repository/test evidence, not deployed RBAC.
+
+[V077](../../core-data/src/main/resources/db/migration/postgresql/V077__client_role_assignment_foundation.sql)
+and its H2 counterpart add three empty tables: scoped role sources, limited
+delegations and admission fences. No old migration or actual grant is changed.
+[JdbcRoleAssignmentFoundation](../../core-data/src/main/kotlin/com/example/bot/data/client/assignments/JdbcRoleAssignmentFoundation.kt)
+provides isolated issue/revoke/delegate/disable/readmit operations and evaluates
+virtual provenance under active membership/version, exact scope, epoch, pinned
+registered policy, dependency and expiry checks. Actor/client locks serialize
+writers; CAS, transactional audit/receipts and current-state replay are persisted.
+Providers default deny. There is no DI/route/evaluator wiring to existing authorization.
+
+[LegacyClientAuthorityWrites](../../core-data/src/main/kotlin/com/example/bot/data/client/onboarding/LegacyClientAuthorityWrites.kt)
+fences incompatible old writers before mutation for new controlled/mixed subjects;
+empty additive tables preserve old behavior. Mapped legacy promoter writes acquire
+the same client lock. A local [source-aware platform adapter](../ops/role-platform-revoke-adapter.md)
+now terminates role/delegation authority and disables subject admissions before
+legacy cleanup in the existing platform membership transaction. Restore never
+revives sources/epochs and rejects flat club-grant restoration in controlled scopes.
+No-state legacy behavior and existing explicit restore protections are retained.
+Per-tuple cutover and real staff materialization remain unauthorized.
+Internal full disable rejects active opaque legacy authority instead of partially
+disabling it. Existing grants/readers, invitations and operational routes remain
+their earlier contracts. No actual user was migrated.
+
+Disposable H2/PostgreSQL tests and bounded security review are recorded in
+[foundation evidence](../ops/role-assignment-foundation.md), including exact checks
+and remaining verification limits. No production policy catalog, ownership or
+TARGET-invitation adapter, compatibility import, mounted API/UI or real activation
+is claimed. The following older snapshot sections retain their historical scope.
+
 ## Bounded local refresh: owner club setup
 
 The unpublished candidate over `aeb80259f7208deee78c38dd5e68ebd899c2aa96`

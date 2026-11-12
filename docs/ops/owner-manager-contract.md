@@ -1,5 +1,12 @@
 # Управление клубом и делегирование подготовки
 
+> Датированное уточнение 2026-11-10: девятиролевой catalogue ниже сохраняет историю
+> решения 2026-11-09. Текущий target — восемь ролей с единым Владельцем бизнеса по
+> [PRODUCT_SPEC §29.18](../product/PRODUCT_SPEC.md#business-role-model-20261110).
+> Creator-only preparation/team API и full CLUB_ADMIN configuration package
+> остаются existing wiring; новые бизнес-полномочия не получают эти grants
+> автоматически. Delegation раздела не ownership, staff или financial authority.
+
 Статус: **ACCEPTED_DECISION**, прямое решение владельца продукта 2026-11-09.
 Новая локальная задача `CLB-owner-manager-ux`, repository `koteev-m/clubs_bot`,
 base `16761e43887036688028358524847db1af0e5326` (merged PR #566).

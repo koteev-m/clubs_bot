@@ -405,7 +405,6 @@ internal open class NightLockPostgresFixture protected constructor() : PostgresI
     fun prepareNight() =
         runBlocking {
             observer.connection.use { control ->
-                control.exec("TRUNCATE TABLE clients, users RESTART IDENTITY CASCADE")
                 control.exec("INSERT INTO users(id,telegram_user_id) VALUES (1,101),(2,102)")
                 control.exec("INSERT INTO clients(id,display_name,is_active) VALUES (1,'Test client',TRUE)")
                 control.exec("INSERT INTO clubs(id,name,timezone,is_active) VALUES (1,'Test club','UTC',FALSE)")

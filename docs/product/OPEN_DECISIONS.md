@@ -55,6 +55,10 @@
 
 ## `DEC-004` — MVP role set
 
+**Текущее уточнение 2026-11-10:** основной catalogue содержит восемь ролей с одним
+Владельцем бизнеса. [Прямо принятое решение](#role-model-20261110-decision)
+заменяет противоречащие названия/обязанности ниже; прежние даты и acceptance сохраняются.
+
 **AMEND 2026-11-09, принято владельцем:** прежний целевой набор ниже сохраняется
 как история. Актуальные девять ролей, обязанности и границы безопасного перехода
 заданы в [датированном уточнении](#owner-manager-model-decision) и
@@ -87,6 +91,10 @@
 - **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-005` — различия Host, entrance manager, floor manager, club manager и admin
+
+**Текущее уточнение 2026-11-10:** [восемь ролей и delegated configuration](#role-model-20261110-decision)
+задают target hierarchy. Технический mapping ниже — исторический; роли и grants
+не переименовываются, а issuer/grant-writer переход требует отдельного контракта.
 
 **AMEND 2026-11-09, принято владельцем:** целевые обязанности разделены между
 Менеджером (включая столы), Менеджером входа и Управляющим клуба; отдельного Host
@@ -130,6 +138,15 @@
 
 ## `DEC-006` — GLOBAL promoter model
 
+**ACCEPTED_DECISION, уточнение 2026-11-10:** одна роль Промоутер, явные назначения
+в конкретные клубы той же сети и отдельное разрешение бронирования. Промоутер видит
+свои брони/допустимые статусы назначенных клубов. Ни общий client, ни название роли
+не открывают остальные клубы, чужие брони/списки, вход, посадку, staff или финансы.
+[Полный принятый boundary и оставшиеся вопросы](#role-model-20261110-decision).
+Это принятое scope-направление, не выбор production permission codes, cross-club
+analytics/quotas или готовая миграция. Следующие options/recommendation сохраняют
+историческое состояние до принятия.
+
 - **Context:** source прямо называет промоутера глобальным.
 - **Source tension:** глобальный promoter может работать с несколькими клубами.
 - **Code tension:** global roles — Owner/Global Admin/Head Manager; promoter access обычно club assignment.
@@ -138,7 +155,8 @@
 - **Consequences:** A расширяет доступ слишком широко; C увеличивает role catalogue; B требует определить cross-club analytics/quotas.
 - **Depends on:** `DEC-003`, `DEC-004`.
 - **Blocks:** `DEC-024`.
-- **Status:** `DECISION_REQUIRED`.
+- **Historical status before 2026-11-10:** `DECISION_REQUIRED`.
+- **Status:** `ACCEPTED_DECISION`; принято владельцем 2026-11-10 в указанной границе.
 
 ## `DEC-007` — canonical guest home/navigation
 
@@ -1099,6 +1117,10 @@ authority. Прямое принятие нового пустого client cabi
 <a id="owner-manager-model-decision"></a>
 ## Уточнение DEC-004/005/040/041: управление клубом — 2026-11-09
 
+**Историческая граница:** девять target ролей и creator-only hierarchy здесь
+читаются с [принятым AMEND от 2026-11-10](#role-model-20261110-decision).
+Existing preparation/packages и результаты прошлого этапа этим не мигрируются.
+
 - **Status:** `ACCEPTED_DECISION`; direct owner instruction 2026-11-09, новая
   локальная задача `CLB-owner-manager-ux`, base `16761e43887036688028358524847db1af0e5326`.
   Новый номер решения/карточки не создаётся.
@@ -1140,3 +1162,85 @@ authority. Прямое принятие нового пустого client cabi
   [принятый контракт](../ops/owner-manager-contract.md),
   [roadmap](PRODUCT_ROADMAP.md#owner-manager-sequence).
   Принятие не равно local PASS, публикации, deployed revision или runtime readiness.
+
+<a id="role-model-20261110-decision"></a>
+## Уточнение DEC-004/005/006/040/041: восемь ролей — 2026-11-10
+
+- **Status:** `ACCEPTED_DECISION`; direct owner instruction в задаче
+  `CLB-role-model-revision`, base `5550b944990d8c1c93c0a5012d31db209f93ea6d` после PR #567.
+  Нового DEC ID нет; DEC-006 переведён из pending в accepted только в указанном scope.
+- **AMEND catalogue:** Владелец бизнеса, Управляющий сети, Управляющий клуба,
+  Менеджер, Менеджер входа, Финансовый менеджер, Промоутер, Гость. Один Владелец
+  бизнеса заменяет владельцев сети/клуба независимо от числа клубов. Platform owner
+  остаётся отдельной authority. Host отдельно не возвращается.
+- **Рост/профессии:** при одном клубе сетевой кабинет необязателен; второй клуб
+  развивает существующее client space без переноса данных/автоматического изменения
+  прав. Управляющий сети необязателен. DJ/бармен/официант и другие профессии этого
+  этапа — будущие personnel/artist cards и назначения на смены, не обязательные
+  RBAC-роли. Music/history сохраняются; upload access — будущее решение.
+- **Владелец бизнеса:** показатели всех своих клубов, готовность, посещения,
+  результаты и финансовые итоги закрытых смен; назначение/отзыв network/club managers.
+  Повседневная конфигурация не его основная работа. Emergency management recovery
+  требует отдельного безопасного контракта, а не GLOBAL bypass.
+- **Управляющий сети:** просмотр/отчётность и контроль явно назначенных клубов;
+  может назначить их club managers, но не другого network manager. Ownership и
+  platform authority не передаются.
+- **Управляющий клуба:** полная ответственность за конфигурацию конкретного клуба,
+  разрешённые настройки, залы/столы/календарь/ночи/booking rules; назначение manager,
+  entry manager, financial manager и promoter; поручение отдельных разделов менеджеру.
+- **Менеджер:** столы/брони/посадка/зал; отдельные разрешения на настройку залов,
+  ночей, профиля и booking rules. Delegation не передаёт ownership, staff management,
+  financial shift authority или другие клубы.
+- **Финансовая изоляция:** scope и capability независимы, server-enforced во всех
+  reports/revenue/closed shifts/deposits/operations/aggregates/exports/analytics APIs
+  и связанных private данных. Owner — свои клубы; network manager — назначенные;
+  club manager — явно разрешённые, без automatic network analytics; manager —
+  минимум необходимого своего назначенного клуба по отдельным permissions; finance
+  manager — свой явно назначенный club/shift. Membership/assignment/common client
+  сами по себе не дают financial reports; promoter booking не даёт finance access.
+- **DEC-006 scope принят:** promoter booking в любом клубе той же сети только с
+  explicit active club assignment и соответствующим permission. A/B/C из пяти
+  клубов не включает D/E. Свои bookings/допустимые statuses доступны; чужие
+  bookings/lists, check-in, seating, деньги/финансы и staff этим не разрешены.
+  Каждая бронь требует signed identity, current membership/authority, exact client/
+  club, active promoter assignment, открытой canonical night, rules/availability/
+  HOLD invariants, confirmation, idempotency и audit. Это target, не guest cutover.
+- **Attribution принято:** источник booking/связь стола — от клуба либо конкретного
+  промоутера; отдельно financial mode. «От промоутера» не означает его оплату,
+  «от клуба» не означает бесплатно. Один enum для source и monetary mode запрещён.
+  GL-006 и TOPS-002 сохраняются с этим разделением.
+- **Остаётся PROPOSED:** exact permission registry/scope mapping, issuer/delegation/
+  revoke/grant-writer contract и migration; attribution fields/assignment link,
+  same-club picker/manager view, correction authority/reason/audit/dedup и handling
+  cancel/no-show/table move/revoke/history; детальные correction UI, финансовые
+  режимы и promoter rewards. Network emergency recovery и music upload не приняты.
+  DEC-012, DEC-010/011/020/021 и ограничения DEC-013/014/022/031 не закрываются
+  сверх явно указанного здесь scope; DEC-006 не принимает analytics/quotas/rewards.
+- **Compatibility:** legacy roles/GLOBAL semantics, existing client packages,
+  assignments, grants/tombstones, two-step invitation и current writer сохраняются.
+  Creator-only team API не становится делегированным через новое название роли.
+  В этой задаче production code/grants/schema/routes/real data не меняются.
+- **Traceability:** [PRODUCT_SPEC §29.18](PRODUCT_SPEC.md#business-role-model-20261110),
+  [roadmap](PRODUCT_ROADMAP.md#role-model-20261110-sequence),
+  [gap delta](CONCEPT_CODE_GAP.md#role-model-20261110-gap),
+  [PROPOSED техническая модель](ROLE_WORKSPACES_PROPOSED.md#role-model-20261110).
+  Принятие направления не означает implementation, runtime readiness или новую выдачу.
+
+<a id="role-assignment-foundation-20261110"></a>
+## Техническое разрешение: CLB-role-assignment-foundation — 2026-11-10
+
+- **Status:** `ACCEPTED_DECISION`, прямое решение владельца в этой задаче;
+  отдельный новый DEC ID не вводится, предыдущие records сохраняются.
+- Приняты пять направлений [assignment contract §0](ROLE_ASSIGNMENT_CONTRACT_PROPOSED.md):
+  независимые assignments/delegations/admission и virtual sources; exact scopes
+  и independent lifecycle writers; terminal tombstones/epochs/explicit regrant;
+  compatibility classification/staged cutover; client lock/CAS/durable current-state
+  replay/transactional audit/stale-response fencing.
+- Разрешён только local additive persistence/evaluator/internal operations/guards
+  и disposable tests. Это **не** принятие всех permission codes/пакетов матрицы,
+  не production role activation и не разрешение перенести старых сотрудников.
+- [Фактическая inactive foundation](AS_BUILT.md#role-assignment-foundation--local-inactive-2026-11-10)
+  не устанавливает production policy/ownership/TARGET-invitation providers и не
+  меняет существующий authorization reader. Platform authority отдельно.
+- Следующая граница: source-aware platform adapter и all-writer/reader/seed gates
+  до любого reviewed cutover. No grants/backfill, stage/prod, publication/deploy.

@@ -1,5 +1,516 @@
 # Project status checkpoint
 
+## ROLE_TARGET_CONTROL_OPERATOR_P1_FIX — local, 2026-11-12
+
+- [Focused P1 correction/evidence](role-target-db-control-head-foundation.md#role_target_control_operator_p1_fix--local-correction-2026-11-12):
+  standalone lease/publisher now pin transaction-local catalog-first operator
+  resolution; canonical read/UPDATE RETURNING IDs and complete poststate are checked.
+  Original non-superuser false-lease and wrong-target attacks reproduced RED before
+  editing and GREEN after correction; permanent regressions added.
+- PROJECT_IDENTITY_OK; all201 baseline hashes matched, registered detached worktree;
+  HEAD/base/merge-base/fresh main `5550b944990d8c1c93c0a5012d31db209f93ea6d`.
+  Backups/final logs/input hashes/full manifest: `/private/tmp/clb-control-operator-p1-kc1gzqfw/`.
+- **READY_FOR_FOCUSED_REVIEW**: Kotlin/H2/PG218 unique cases pass, original2 probes
+  pass on final production bytes, both permanent attack cases prove RED→GREEN.
+  Compile/Detekt/ktlint, Flyway and reference140 pass; final secret/diff/preservation
+  evidence is tied to the delivered bytes. No wide all-module JVM/IT rerun.
+- No migration or authorization/route/DI changes; V077/V078/V079 and unrelated
+  candidate bytes preserved. ACTIVE/TARGET and production providers remain off.
+- Next: independent focused review; no publication or next functional stage.
+
+
+## ROLE_TARGET_DB_CONTROL_HEAD_FOUNDATION — local, 2026-11-12
+
+- [Implementation/23-group participation/evidence](role-target-db-control-head-foundation.md):
+  owner-approved §10 implemented locally with additive V079, same-Connection native
+  transaction-fenced head lease, synthetic publisher/finite trusted intent and
+  publication-bound receipt domain. Bare evidence mutations reject adopted roots.
+- PROJECT_IDENTITY_OK; registered detached worktree; HEAD/base/merge-base/fresh main
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`; all179 baseline hashes matched.
+  Backups/check logs/full+delta manifests: `/private/tmp/clb-db-control-head-pfnzjejy/`.
+- **READY_FOR_REVIEW**: full JVM1,739 (one unchanged GuestFlowStart skip), PG348
+  unique cases, reference140, compile/Detekt/affected ktlint and Flyway checks pass.
+  Final sequential XML/input/secret/scope/link/diff evidence accompanies manifests.
+  V077/V078 and existing product permissions unchanged;
+  no real config/token/bot/user adoption, publication or stage/prod access.
+- Production blocked: real protected config/publisher/intent provider, complete
+  external updater/replica/failover participation and recovery gates remain absent.
+  ACTIVE, BRANDED maintenance, credentials, TARGET and runtime DI/routes/jobs remain off.
+- Next: independent focused review of transaction lifetime, V079 schema/guard and
+  receipt-domain/adoption/concurrency evidence; no further activation.
+
+## ROLE_TARGET_PRODUCTION_LEASE_INTENT_CONTRACT — PROPOSED, 2026-11-11
+
+- [Single contract §10](../product/ROLE_TARGET_TRUSTED_BINDING_CONTRACT_PROPOSED.md#production-lease-intent):
+  **READY_FOR_APPROVAL**; minimum DB maintenance control head, transaction-held
+  SHARE/UPDATE fence, same-Connection lease port, protected finite server intent,
+  fence-first publisher and explicit all-writer/replica gate. No provider implemented.
+- PROJECT_IDENTITY_OK; registered detached worktree; HEAD/base/merge-base/fresh main
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`; all175 baseline hashes matched.
+  Evidence/backups/full+delta manifests: `/private/tmp/clb-lease-intent-contract-o47mab22/`.
+- New scope: documentation + synthetic reference/disposable probes only. Inventory23
+  groups/88 source pins; reference9 tests/24 literal cases; PostgreSQL18 separate-process
+  probes (real V078, synthetic control/command model). Combined reference140 tests.
+  Final outcomes/source preservation/link/scope/diff checks accompany manifests.
+  No broad JVM/IT rerun: all production Kotlin/SQL/legacy tests byte-preserved.
+- Blockers: current app lease port lacks Connection binding; no production control
+  head/publisher/finite intent provider or cross-replica operational participation
+  proof. W13/W17–W19 cannot be declared production-safe. BRANDED, ACTIVE, real
+  credentials, TARGET, routes/DI/jobs and publication remain prohibited.
+- Next: owner approval of five technical choices, then one default-deny local
+  control-head/provider slice with synthetic publisher and separate-process tests.
+
+## ROLE_TARGET_COMMIT_TIME_MAINTENANCE — local, 2026-11-11
+
+- [Adapter/evidence](role-target-commit-time-maintenance.md): same writer transaction,
+  signed identity/current exact authority/context under shared lease, actor/root CAS,
+  same-connection canonical checks, audit/receipt, bounded retry and stale replay.
+- PROJECT_IDENTITY_OK; registered detached worktree, HEAD/merge-base/fresh main
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`; all162 baseline hashes matched.
+  Evidence/backups/manifests: `/private/tmp/clb-commit-maintenance-mo27st3r/`.
+- **READY_FOR_REVIEW**: final adapter44/44, affected281/281, full JVM1,716
+  (one unchanged GuestFlowStart skip), reference131 PASS. Compile/Detekt/ktlint/
+  H2/PG Flyway PASS. Actor-mapping and absent-schema/TEMP receipt self-review
+  corrections have RED→GREEN evidence and final rechecks. Candidate175/delta20;
+  prior155/162 byte-identical; final source/secret/scope hashes accompany manifests.
+  Only platform Disable/Revoke/selected material retirement;
+  missing production shared-lease/intent provider denies. Create/Replace/AttachReference,
+  all BRANDED/ACTIVE/token/TARGET operations remain blocked. No SQL migration,
+  legacy grant/writer, real data, route/DI/job or publication changes.
+- Next: independent focused review of lease/transaction/replay/retry boundary;
+  keep production activation and further functional slices disabled.
+
+
+## ROLE_TARGET_MAINTENANCE_SELECTOR — local, 2026-11-11
+
+- [Implementation/evidence](role-target-maintenance-selector.md): strict signed
+  maintenance identity, current channel/context/authority and exact durable pin.
+  Metadata selection only; no write proof, credential resolver or TARGET authority.
+- PROJECT_IDENTITY_OK; registered detached worktree, HEAD/merge-base/fresh main
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`; all152 baseline hashes matched.
+  Evidence/backups/manifests: `/private/tmp/clb-role-maintenance-selector-bq549iqa/`.
+- **READY_FOR_REVIEW**: maintenance32/32, affected237/237, full JVM1,696
+  (one old GuestFlowStart skip), reference131 PASS. Compile/Detekt/ktlint/Flyway
+  PASS; final secret/scope/source-input evidence accompanies candidate162/delta20
+  manifests. Previous142/152 paths unchanged. Business runtime is fail-closed: verified ownership
+  provider absent. Trusted current auth/server-intent lifecycle providers also
+  have no production wiring. V077/V078/writers/legacy auth unchanged; no ACTIVE,
+  real data/connections, routes/jobs/DI or publication.
+- Next slice: separately approved commit-time maintenance authorization adapter
+  for the existing inactive lifecycle, keeping activation/issuance forbidden.
+
+## ROLE_TARGET_DURABLE_BINDING_SOURCE — local, 2026-11-11
+
+- [Internal read-only adapter/evidence](role-target-durable-binding-source.md): exact
+  root/incarnation aggregate and credential/mapping pins; coherent one-statement
+  snapshot; inactive/revoked metadata never authorizes TARGET. No selector/resolver.
+- PROJECT_IDENTITY_OK, registered detached worktree, HEAD/merge-base/fresh main
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`; all143 reviewed hashes matched.
+  Baseline/backups/tests/manifests: `/private/tmp/clb-role-durable-binding-6wi27xy_/`.
+- **READY_FOR_REVIEW**: new reader24/24 (H2=11, PG=13), unchanged regressions109,
+  app compatibility52 and offline reference131 PASS; compile/Detekt/ktlint/Flyway
+  PASS. Candidate152/delta15; previous137/143 unchanged. Final secret/scope/input
+  evidence accompanies full/delta manifests. V077/V078/P1/P2 guards, legacy writers, NightConcierge
+  and current authorization remain unchanged; no ACTIVE/DI/routes/jobs/real data.
+- Next: separately approved signed read-only maintenance selector; keep activation
+  and TARGET permission issuance disabled.
+
+## ROLE_TARGET_BINDING_P1_P2_FIX — local correction, 2026-11-11
+
+- [Focused correction/report](role-target-binding-p1-p2-fix.md): only independent
+  P1 schema/search_path masking and P2 child aggregate-fence bypass. New functions
+  remain invoker; no added SQL privilege. Root NOWAIT closes reversed child wait;
+  guarded child revisions invalidate earlier receipts; service uses final CAS pins.
+- PROJECT_IDENTITY_OK, registered detached worktree
+  `/private/tmp/clubs-role-workspaces-proposed-20261109`; HEAD/fresh remote main
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`. All previous138 hashes matched;
+  no unrelated changes/ref update. Evidence/backups/full+delta manifests:
+  `/private/tmp/clb-binding-p1-p2-iopfhqmp/`.
+- Three independent failing cases RED→GREEN; expanded H2/PG73 PASS, including
+  ordinary invoker, hostile schemas, raw child/service races, rollback and actual
+  SERIALIZABLE40001 retry. **READY_FOR_FOCUSED_REVIEW**: full JVM/static1,661 /
+  one old skip; final targeted104/104 and reference131/131 PASS. Source/history
+  secret/scope/preservation/link evidence in the report; candidate143/delta16,
+  prior127/138 byte-identical; V077/historical migrations untouched.
+- V077/historical migrations, legacy permissions/routes/Mini App, real data and
+  runtime activation untouched. No publication; no next functional stage.
+- Next: independent focused P1/P2 review of this exact final candidate.
+
+## ROLE_TARGET_INACTIVE_BINDING_FOUNDATION — local, 2026-11-11
+
+- [Implementation and writer/test evidence](role-target-binding-foundation.md).
+  Architecture accepted only for inactive local work; activation/issuance remain prohibited.
+- PROJECT_IDENTITY_OK; registered detached worktree
+  `/private/tmp/clubs-role-workspaces-proposed-20261109`, HEAD/fresh remote main
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`; local main ref preserved. All 101
+  baseline hashes matched; baseline/copies/logs/full+delta manifests:
+  `/private/tmp/clb-role-inactive-binding-pcz8b7vo/`.
+- Additive V078; platform-only inactive lifecycle, terminal incarnations/material
+  retirement, CAS/generation/shared root locks/audit/receipts; evidence defaults deny.
+  Durable mapping high-water survives client/mapping ABA and covers transactional
+  DML/cascades without changing existing writer code or product permissions.
+- **ROLE_TARGET_BINDING_FOUNDATION: READY_FOR_REVIEW.** Closing JVM/static1,656
+  cases / one old skip; full IT2,211 / eleven old skips, zero failures. The final
+  isolated H2 identifier-mode correction has 57 H2/PG repository rechecks plus
+  the closing full JVM/static gate; migrations and PostgreSQL behavior unchanged.
+  Total new H2/PG/Ktor cases61, no skips. Source/history secret gate, links/scope,
+  exact preservation and full/delta manifests accompany the report (candidate138,
+  delta47; prior91/101 unchanged, all31 prior production/schema paths unchanged).
+  No production DI/routes, real connections/tokens/staff, server changes or publication.
+- Next: independent review of inactive lifecycle and mapping coverage before the
+  read-only durable binding-source adapter; TARGET remains disabled.
+
+## ROLE_TARGET_TRUSTED_BINDING_CONTRACT — PROPOSED, 2026-11-11
+
+- [Один технический контракт](../product/ROLE_TARGET_TRUSTED_BINDING_CONTRACT_PROPOSED.md),
+  **ROLE_TARGET_BINDING_CONTRACT: PROPOSED / READY_FOR_APPROVAL**; только design +
+  synthetic checks. Не registry implementation, выборы требуют отдельного approval.
+- PROJECT_IDENTITY_OK; active Clubs Bot instructions, foreign=0. Registered detached
+  worktree `/private/tmp/clubs-role-workspaces-proposed-20261109`, HEAD/fresh remote
+  main `5550b944990d8c1c93c0a5012d31db209f93ea6d`; local main ref сохранён отстающим.
+  Оба review inventories совпали: 97 paths, manifest
+  `0147d4ae562d0382aa439a85df89345008d294340e58dc10468626aebf90cf3f`.
+  Baseline/logs/results/full+delta manifests: `/private/tmp/clb-role-target-binding-contract-4ea9qftp/`.
+- Proposal: stable connection root + terminal binding UUID; PLATFORM multi-client
+  through exact authorized intents, BRANDED immutable one-client finite clubs;
+  generation/CAS, immutable secret revision and disable-first rotation. Coarse
+  client mapping epoch + complete writer/cascade guard prevent created_at ABA.
+- Future actor→client→connection/child locking, root-only global lifecycle,
+  commit-time issuer/recipient/policy/fence checks and current-only receipt replay.
+  No production Kotlin/schema/secret/registry/API/DI, real data or publication changes.
+- Checks PASS: reference131 (previous116 + new15), 60 literal synthetic scenarios;
+  rotation/material alias deny, terminal IDs, mapping ABA, both ordered conflicts,
+  current-only replay и rollback. Full candidate101 / delta8; previous93/97
+  byte-identical, четыре явных docs/source-pin updates, весь production Kotlin/V077
+  и прежние helpers/tests сохранены. SQL locks/secret backend/runtime этим не доказаны.
+- После отдельного approval следующий slice: локальная inactive platform-only
+  binding lifecycle + mapping-epoch foundation с disposable H2/PG locks/CAS/ABA
+  tests и synthetic credential references; без реальных tokens/invitations/activation.
+
+## ROLE_TARGET_CANONICAL_AUDIENCE_PROVIDER — local read-only, 2026-11-11
+
+- **ROLE_TARGET_AUDIENCE_PROVIDER: READY_FOR_REVIEW.**
+  [Implementation/evidence](role-target-canonical-audience-provider.md). Local only;
+  no production binding/provider registration or staff authority.
+- PROJECT_IDENTITY_OK; active Clubs Bot instructions, foreign=0. Registered detached
+  worktree `/private/tmp/clubs-role-workspaces-proposed-20261109`, HEAD/fresh remote
+  main `5550b944990d8c1c93c0a5012d31db209f93ea6d`; HEAD/origin merge-base agrees.
+  Local main is stale and was preserved. Both reviewed inventories matched 84 paths;
+  manifest `c13a4d5cf1bf2e5e12ca2b137903c75babd308e00a3d0fdc6d5ec57def156eb7`.
+  Baseline/logs/XML/full+delta manifests: `/private/tmp/clb-role-target-audience-provider-191yjiqh/`.
+- Canonical DB snapshot checks active/unarchived clients and all explicitly allowed
+  club mappings, preserving private club preparation. Exact canonical connection,
+  current finite server pin/version/status required; unknown/default binding denies.
+  Canonical snapshot metadata participates in the verifier's fresh-read comparisons.
+- No actual finite config source or branded registry; no membership/ownership proof,
+  invitation/proof v2/admission, runtime activation, real data or publication.
+- Checks PASS: full JVM/static1,628 cases/0 failures/1 old skip; new H2+provider26,
+  real PG11 plus legacy PG16; reference23. Full candidate97 / this slice18;
+  prior79/84 byte-identical, five explicit updates. Evidence/limits in the report.
+- One next implementation slice after lifecycle/persistence approval: read-only
+  canonical current-binding source adapter with identity/version/revoke evidence,
+  keeping invitations/DI disabled and explicit mutation-transaction revalidation.
+
+## ROLE_TARGET_IDENTITY_VERIFIER — local read-only, 2026-11-11
+
+- **ROLE_TARGET_IDENTITY_VERIFIER: READY_FOR_REVIEW.**
+  [Implementation/evidence](role-target-identity-verifier.md),
+  [bounded AS_BUILT](../product/AS_BUILT.md#target-identity-verifier--local-unwired-2026-11-11).
+  New verifier is not production staff RBAC or an invitation/admission implementation.
+- PROJECT_IDENTITY_OK; active Clubs Bot instructions, foreign=0. Fresh main/HEAD
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`, registered detached worktree
+  `/private/tmp/clubs-role-workspaces-proposed-20261109`. Previous74 hashes matched
+  manifest `1163091b494f3a17d92e0d161b2f1780857c98d3a7ca02d7b8ed17d1f4440549`.
+  Baseline/logs/XML/full+delta manifests: `/private/tmp/clb-role-target-identity-verifier-u3rl7ryx/`.
+- Implemented isolated strict credential parser + existing HMAC reuse through an
+  opt-in trusted connection method, age<300с/zero future skew, stable finite client/
+  club audience and typed identity without Principal/permissions. Default provider
+  denies. Reuse of signed initData is authentication, not one-time intent consent.
+- Security review hardened duplicate/escaped JSON keys and malformed UTF-8, current
+  audience/version/connection checks, credential rotation during validation, final
+  freshness/clock checks, cancellation and sanitized failure paths. Ktor probes
+  reject legacy identity fallback and leak no raw credential/provider exception.
+- Full JVM/static gate PASS: 1,602 cases, zero failures/errors, one old disabled case;
+  all 27 new tests pass, including three Ktor probes. Reference 23 and secret scan PASS.
+  Full candidate 84 paths / this slice 15; previous 69/74 byte-identical, five explicit
+  docs/evidence-pin updates. No DB/transaction/schema
+  changes, so no PostgreSQL/IT rerun. Legacy auth and previous V077/platform adapter
+  code retain their behavior; original RBAC implementation files are preserved.
+- No real bindings/invitations/assignments/grants, real users, stage/prod or publishing.
+  Unverified/unwired: actual canonical/branded metadata provider, membership/ownership,
+  invitation nonce/proof v2, TARGET cutoffs/compound issuance, UI and runtime rollout.
+- One next slice: read-only canonical audience metadata provider with reviewed
+  server client/club mapping and version/status semantics; no role grants or activation.
+
+
+## CLB-role-target-identity-contract — PROPOSED, 2026-11-11
+
+- **ROLE_TARGET_IDENTITY_CONTRACT: READY_FOR_APPROVAL.**
+  [Один TARGET contract](../product/ROLE_TARGET_IDENTITY_CONTRACT_PROPOSED.md),
+  [synthetic CURRENT/TARGET/DIFFERENCE/RISK](role-target-identity-shadow-report.md).
+  Восемь product roles/обязанности ACCEPTED; новые identity/invitation choices,
+  exact policies/persistence/compound writer остаются PROPOSED.
+- PROJECT_IDENTITY_OK; active Clubs Bot instructions, foreign=0. Fresh main/HEAD
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`, тот же registered detached worktree
+  `/private/tmp/clubs-role-workspaces-proposed-20261109`. Перед правками все69 hashes
+  review manifest `9b783569ed141f793fd3e3aeb7aa64db833a6008fdee857c43735785337db4ed`
+  совпали; дополнительных/missing paths нет. Baseline/logs/final manifest:
+  `/private/tmp/clb-role-target-identity-contract-9bt8yx3q/`.
+- Proposal: exact issuer matrix и ownership attestation default-deny; strict bot-token
+  HMAC identity 300с/0future, two trusted audience pins; Issue→Claim→separate issuer
+  Confirm→atomic admission+source. Hash-only one-use secret; nonce-bound intent,
+  current-only replay, READMIT новым ID/epoch/ack, без grants array replacement.
+- Critical proposed fence: per-client TARGET issuance seq и отдельные client/member
+  и club/user cutoffs, охватывающие unclaimed и клубы без admission при platform
+  revoke. Legacy MAX(id) не этот ledger. NULL/unknown frontier запрещает выдачу;
+  restore не сбрасывает marker. Source revoke сохраняет независимые live права.
+- Implementation blockers явны: ownership/audience providers отсутствуют, текущие
+  V077/adapter не содержат TARGET markers, SHADOW-only writer/proof не compound
+  Confirm; policy/compatibility/reader gates ещё закрыты. Это не blocker полноты
+  проекта контракта и не разрешение обойти их через legacy OWNER/GLOBAL.
+- Verification PASS: **116/116** Python reference tests (прежние93 + новые23),
+  **68** literal synthetic scenarios; independent OpenSSL HMAC golden vector,
+  stale/duplicate/wrong-audience deny, all ordered conflict outcomes, exact rollback,
+  claim-refresh CAS, unknown/NULL frontier, source-scoped revoke и explicit regrant.
+  Links/decision statuses/source pins/diff/scope и preservation evidence — там же.
+  JVM/IT не запускались: production Kotlin, V077 и прежние fixtures/helpers неизменны;
+  будущие TARGET SQL locks/Telegram runtime этими тестами не доказываются.
+- Только новые docs/reference fixture/tests плюс ссылки README/checkpoint.
+  Реальных TARGET invitations/assignments, DB/network apply, stage/prod и публикации нет.
+  Непроверено: реальный Telegram/Kotlin provider, ownership onboarding, SQL/PG locks,
+  compound writer, branded runtime и UI merger. Reference interleavings не SQL proof.
+- Один следующий slice после approval: локальный read-only strict signed TARGET
+  identity/audience verifier для explicit canonical binding; ownership/admission deny,
+  без invitations/issuance/routes, migrations или реальных сотрудников.
+
+
+## CLB-role-platform-revoke-adapter — local, inactive RBAC, 2026-11-10
+
+- Local source-aware adapter and [evidence/limits](role-platform-revoke-adapter.md);
+  [technical contract §0.1](../product/ROLE_ASSIGNMENT_CONTRACT_PROPOSED.md#01-platform-membership-revokerestore-adapter--implemented-locally).
+  **ROLE_PLATFORM_REVOKE_ADAPTER: READY_FOR_REVIEW**; no release approval.
+- PROJECT_IDENTITY_OK; Clubs Bot instructions, foreign=0. Fresh main/HEAD
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`, registered detached worktree
+  `/private/tmp/clubs-role-workspaces-proposed-20261109`. Reviewed57-path manifest
+  SHA-256 `0350dbfeae719b55073b8947b3614a393887b32a058a8e26694e4380aff610e1`
+  matched exactly before edits. Baseline/logs/final full+delta manifest:
+  `/private/tmp/clb-role-platform-revoke-adapter-drylmbog/`.
+- Existing platform operation now atomically terminates this client's subject
+  roles, incoming/outgoing delegations, fences/epochs and legacy scopes, member
+  CAS, audit and receipt. Other clients/independent recipient roles survive.
+  Membership restore never revives staff IDs/epochs; controlled flat club restore
+  fails closed. No-state legacy behavior and whitelist/staff protections retained.
+- Shared actor/client serialization, sorted child locks, CAS/current-state replay,
+  SQL retry and cancellation rollback; no new API, migration or evaluator wiring.
+  V077, immutable concept, previous materials and other-checkout edits preserved.
+- Checks PASS: full JVM1,575/0 failures (1 old skip); full IT2,088/0 failures
+  (11 old skips); new adapter H211 + PG11 + concurrency8 + Ktor4, no new skips.
+  Detekt/ktlint, shadow93, secret gate, links/statuses/scope and diff checks PASS.
+  Final totals/commands/manifests are in the linked report. No actual user or
+  database, real SHADOW materialization, stage/prod or publication was touched.
+- Inactive foundation/default-deny providers remain. Identity/ownership/TARGET
+  admission/compatibility/assignment cutover are not authorized by this adapter.
+- One next step: review the bounded signed TARGET admission/identity adapter
+  contract and fresh-invitation/epoch/regrant gates before real staff materialization.
+
+## CLB-role-assignment-foundation — local, inactive, 2026-11-10
+
+Historical checkpoint before the adapter follow-up above; its pending-platform
+notes describe that earlier stage and do not override the current adapter report.
+
+- **ROLE_ASSIGNMENT_FOUNDATION: READY_FOR_REVIEW.** [Implementation/evidence](role-assignment-foundation.md),
+  [accepted technical directions/current limits](../product/ROLE_ASSIGNMENT_CONTRACT_PROPOSED.md#0-локальная-реализация-и-граница-активации),
+  [bounded AS_BUILT](../product/AS_BUILT.md#role-assignment-foundation--local-inactive-2026-11-10).
+- Remote main rechecked unchanged `5550b944990d8c1c93c0a5012d31db209f93ea6d`;
+  registered detached worktree `/private/tmp/clubs-role-workspaces-proposed-20261109`.
+  PROJECT_IDENTITY_OK; Clubs Bot active instructions, foreign=0. Existing19-path
+  baseline saved in `/private/tmp/clb-role-assignment-foundation-59kjscy6/before/`;
+  all prior paths/history, immutable concept and other-checkout edits preserved.
+- ACCEPTED local architecture: additive V077 H2/PG with3 empty entities; independent
+  role/delegation sources, admission/member versions and epochs, immutable policies,
+  virtual effective contributions, source-scoped terminal revoke/regrant, read-only
+  resolve, actor/subject response fences, client serialization/CAS/durable audit.
+  No production policy/provider/route/DI or evaluator authorization wiring.
+- Old staff/invitation/client/platform/promoter writers reject new controlled/mixed
+  tuples before effects. Empty tables preserve accepted old behavior and bootstrap.
+  Source-aware platform revoke/restore/compatibility import/cutover are pending.
+  **No real staff materialization, even SHADOW**, until those gates exist; current
+  guards could otherwise close their old revocation path. No actual rows created.
+- Checks: focused H2 **48/48**, real PG16.14 **59/59**, no foundation skips;
+  full `core-data:test -PrunIT=true` final **746 cases /0 failures /0 errors /10
+  unrelated native-support opt-in skips**. Broad JVM **1,557 /0 failures** with1
+  pre-existing disabled test; other-module IT suites PASS. Initial IT discovery
+  errors in2 new test fixtures corrected; failed scope fully rechecked.
+- Full fresh ktlint **54 tasks PASS**, Detekt gate PASS, final changed-module
+  Detekt/ktlint PASS; no baselines/rules/gates weakened. Earlier foreign-worktree
+  cached lint output superseded with forced current-byte checks, not declared backlog.
+  Shadow **93 tests**, 46+38 scenario IDs/oracles preserved; source pins26+31.
+  Task-added links/statuses/scope PASS; one unchanged historical CLB83 temp-report
+  reference is unavailable and retained as an evidence limit, not repaired by guess.
+  Explicit public checksum metadata keeps strict SHA-256/source-drift validation.
+- Security/concurrency review fixed registry completeness, separate owner delegation
+  revoke authority, JDBC cancellation rollback and mutable queued intents. Actual PG
+  barriers verify issuer/CAS/revoke/disable/read/expiry/replay/cancellation/legacy
+  interference; late audit failure rolls back source+fence+audit+receipt.
+- Evidence/logs/XML/final manifest: `/private/tmp/clb-role-assignment-foundation-59kjscy6/`.
+  No actual grants, user migration, stage/prod, commit/push/PR/merge/deploy.
+  Unverified: real identity/ownership/TARGET-invitation adapters, privileged manual
+  SQL fencing, operational endpoints and UI response merger, actual rollout/rollback.
+- One next step: isolated source-aware platform revoke/restore adapter and its
+  dependency-tail tests, while real staff writes and authorization activation stay off.
+
+## Role assignment contract — PROPOSED, 2026-11-10
+
+- **ROLE_ASSIGNMENT_CONTRACT: READY_FOR_APPROVAL.** Один
+  [технический контракт](../product/ROLE_ASSIGNMENT_CONTRACT_PROPOSED.md) с
+  all-writer inventory, persistence/API shape, source semantics, migration gates
+  и пятью конкретными техническими choices. Продуктовые восемь ролей не меняются.
+- Fresh read-only remote main: `5550b944990d8c1c93c0a5012d31db209f93ea6d`;
+  тот же registered detached worktree `/private/tmp/clubs-role-workspaces-proposed-20261109`.
+  PROJECT_IDENTITY_OK; active Clubs Bot instructions, foreign=0. Primary checkout
+  и его чужие edits сохранены; Goal/ветка/публикация не создавались.
+- PROPOSED: три additive entities (assignment, delegation, subject admission fence),
+  virtual source contributions/pinned policy, separate ownership/SELF/platform,
+  exact-club scopes, source revoke vs full disable, terminal tombstones/new-ID ack,
+  current-state idempotent replay и all-writer TARGET gates.
+- Inventory включает package/staff/invitation writers, оба club-create bootstraps,
+  platform revoke/restore, preparation indirect admission, lifecycle, legacy promoter
+  writer, owner grant migrations, seed scripts, migration entrypoints и FK effects.
+  Existing writers, schema и permissions не менялись; old replace непригоден для
+  независимых contributions. Membership restore не target staff admission.
+- [Новый CURRENT/TARGET/DIFFERENCE/RISK report](role-assignment-shadow-report.md):
+  38 synthetic scenarios, 32/32 focused tests PASS. Источники одного permission
+  сохраняются независимо; два interleavings/CAS, regrant/admission, platform restore,
+  audit/receipt rollback, finance scope, promoter3/5 и legacy-writer deny покрыты.
+  Это offline value model, не PostgreSQL lock/SQL migration/runtime proof.
+- Независимый product/code review завершён, findings исправлены: separate Guest/
+  owner providers; compatibility-only/opaque full disable; dependency recipient
+  revisions; pending fence FK users+mapping после signed claim; inactive membership
+  и старые/unclaimed invitation watermarks. Current fingerprint set 17 sources.
+- Прежние 60/60 test / 46-scenario evidence переиспользуются после byte/source-pin
+  проверки без повторного прогона: старый helper/fixture/tests/report не менялись.
+  Новый AST/compile/CLI/deterministic report, docs links/whitespace/scope/history
+  проверены в финальном handoff. Source concept/decision statuses неизменны.
+- Baseline 16 файлов: `/private/tmp/clb-role-assignment-contract-cxica0qf/`.
+  Только новый contract/reference helper/fixture/tests/report и ссылки/checkpoint.
+  Реальные assignments, H2/Postgres schema/transactions, runtime/crypto/UI и
+  stage/prod не проверялись. JVM/ktlint/Detekt/IT не запускались: JVM/DB/API-код
+  неизменен. Commit/push/PR/merge/deploy/real grants/invitations отсутствуют.
+- Один следующий шаг: утвердить пять PROPOSED choices контракта для отдельного
+  минимального local этапа с disposable H2/PostgreSQL и Ktor verification gates.
+
+## Role model revision — accepted eight-role product overlay, 2026-11-10
+
+- **ROLE_MODEL_REVISION: READY_FOR_REVIEW.** [Текущая модель/матрица](../product/ROLE_WORKSPACES_PROPOSED.md#role-model-20261110),
+  [accepted spec](../product/PRODUCT_SPEC.md#business-role-model-20261110),
+  [обновлённый inventory](role-shadow-inventory.md),
+  [generated report](role-shadow-synthetic-report.md).
+- Remote main подтверждён свежим read-only snapshot на прежнем
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`; тот же registered detached worktree
+  `/private/tmp/clubs-role-workspaces-proposed-20261109`. PROJECT_IDENTITY_OK,
+  active Clubs Bot instructions, foreign=0. Primary checkout/его чужие changes
+  сохранены. Goal/ветка/публикация не создавались.
+- Direct ACCEPTED: единый Владелец бизнеса; необязательный УС; один client от
+  одного клуба к нескольким без переноса/automatic grants; scoped hierarchy
+  appointments/config delegation; финансовые scope AND capability; promoter
+  booking в явно назначенных клубах; attribution source отдельно от money.
+  Platform owner вне клиентских ролей. Exact codes/storage/writers/correction
+  UI/financial modes/rewards/emergency recovery остаются PROPOSED.
+- DEC-006 accepted по explicit assigned scope, прежняя pending-история сохранена.
+  Decision register 42: 26 accepted / 16 pending, включая ранее принятые
+  DEC-008/009/018. Concept и все прежние source requirement rows неизменны.
+- Shadow: 46 сценариев (24 исходных IDs сохранены +22 новых), 8 report-only roles,
+  26 source fingerprints; product_status отдельно от technical PROPOSED.
+  No actual authority change, zero grants/API calls/corrections. Synthetic
+  future probes не являются production authorization evidence.
+- 60 focused tests PASS: прежние 38 invariants уточнены под новую модель,
+  +22 проверки scopes/финансовых deny/typed delegation/booking/attribution.
+  Independent product/code review findings исправлены: attribution view=P,
+  finite shift [] deny, issuer supporting read, full ledger vs manager minimum.
+  Static compile/AST, source pins, generated report, links/status/diff/scope
+  проверены финальным handoff; SQL/JVM/runtime checks не заявляются.
+- До правок сохранены 15 файлов и baseline manifest:
+  `/private/tmp/clb-role-model-revision-6cj22ljc/`. Предыдущие 9-role design и
+  24-case handoff сохранены как HISTORICAL, исходный report — в before/.
+  Непроверено: реальные grants/ownership, PostgreSQL concurrency/transactions,
+  guest/promoter cutover, production endpoints, stage/prod. Старый writer не менялся;
+  прежние grants/tombstones/memberships/invitations/platform authority сохраняются.
+- Только разрешённые docs/helper/fixtures/tests. Production RBAC/API/routes/schema
+  и real data не менялись; commit/push/PR/merge/deploy отсутствуют.
+- Один следующий шаг: согласовать узкий технический assignment/delegation/
+  revoke/full-disable и grant-writer coexistence contract перед local RBAC этапом.
+
+## CLB-role-shadow-inventory — synthetic read-only proof, 2026-11-10
+
+- **ROLE_SHADOW_INVENTORY: PASS. RBAC_MIGRATION_READINESS: BLOCKED.**
+  [Inventory, результаты, матрица и пять decision groups](role-shadow-inventory.md);
+  [воспроизводимый отчёт 24 сценариев](role-shadow-synthetic-report.md).
+- Fresh read-only remote main остаётся `5550b944990d8c1c93c0a5012d31db209f93ea6d`
+  после PR #567. Тот же registered detached worktree
+  `/private/tmp/clubs-role-workspaces-proposed-20261109`; PROJECT_IDENTITY_OK с
+  exact HEAD. Основной checkout `e83f806…` и его чужие edits сохранены;
+  active Clubs Bot instructions, foreign=0. Goal/новая ветка не создавались.
+- Локальный helper читает только bundled synthetic fixture и 20 source fingerprints,
+  выводит CURRENT/PROPOSED/DIFFERENCE/RISK в stdout; DB/network/apply/output-path
+  интерфейсов нет. 172 projection rows; все девять target roles — только report
+  labels, не production roles. Proposed matrix не принята и не менялась.
+- Exact tuple comparisons показывают configuration loss, новые token intents,
+  tombstone restoration attempts и opaque legacy scope candidates. GLOBAL/CLIENT
+  не принимаются в client authority. Два independent clients, несколько assignments,
+  inactive states и старые invitations сохранены; role names не выполняют migration.
+- Writer preview отдельно показывает disable, 8 создаваемых grants при upgrade
+  ENTRY_MANAGER→CLUB_ADMIN, 2 tombstone reactivations в другом примере и future
+  operational capability loss. Production replace/confirm/change/disable не менялись.
+  Coexistence блокируется до отдельного origin/assignment-aware writer contract.
+- 38/38 focused unittest PASS, включая static AST/compile/import surface и
+  disposable CLI; source fingerprints и deterministic report PASS. Independent
+  code/semantic review findings исправлены и узко перепроверены: unique invitation
+  PK, create delta старого writer, SELF diff/risk. Документальные links/whitespace,
+  generated report match и scope preservation проверены финальным handoff.
+- Snapshot before=after `4aab1ecf31b03046ed9739ea4f8ac00f8229026c36e76b382676675aa5d76445`;
+  applied additions/removals ∅/∅; writes=0. Cancel/rollback только считают отчёт,
+  не выполняют реальный rollback. Commands/audit — safe projections, без replay.
+- Непроверено: реальные assignments, полный legacy endpoint allow/deny, production
+  writer execution, PostgreSQL locks/migration/transaction и runtime. JVM/static/IT
+  не запускались: изменён только offline Python helper/test/docs, production sources
+  и migration files неизменны. Stage/prod/real DB/commit/push/PR/merge/deploy нет.
+- Один следующий шаг: принять матрицу и максимум пять product decision groups
+  из отчёта; не принятые пункты остаются deny. Никакая реальная выдача не разрешена.
+
+## Nine-role workspaces — PROPOSED design, 2026-11-09
+
+- **PROPOSED_DESIGN_READY_FOR_PRODUCT_REVIEW.** Новая задача анализа без номера
+  карточки/Goal. [Единый проект](../product/ROLE_WORKSPACES_PROPOSED.md): девять
+  scopes, точная предлагаемая permission matrix, code/API/frontend evidence,
+  безопасный переход, кабинеты, dependency gates и проверяемая последовательность.
+- Base/remote main подтверждён read-only GitHub snapshot и fetch:
+  `5550b944990d8c1c93c0a5012d31db209f93ea6d`, merged PR #567.
+  Detached worktree `/private/tmp/clubs-role-workspaces-proposed-20261109`;
+  основной checkout `e83f806…` и его pre-existing edits сохранены.
+  PROJECT_IDENTITY_OK в обоих фактических cwd; active Clubs Bot instructions,
+  active foreign instructions=0. Guard label `CLB-role-workspaces-proposed` —
+  описательная метка, не новый номер карточки.
+- Каталог и обязанности приняты прежним решением; новая матрица целиком PROPOSED.
+  ENTRY_MANAGER/MANAGER/CLUB_ADMIN остаются configuration packages. Legacy APIs
+  mounted, но mapped client clubs защищены containment; role rename не даёт
+  QR/посадку/деньги. Client revoke не отзывает независимые legacy assignments.
+- Полный новый ночной staff cabinet пока имеет product/permission blockers.
+  Preparation уже реализован PR #567; первый предлагаемый новый cabinet — вход
+  только после DEC-010/011/020/021 и exact authority contract. Finance/network/
+  promoter scope и остальные спорные права не считаются принятыми.
+- Проверки: exact identity PASS; независимые bounded product/RBAC/frontend reads
+  и focused review завершены; findings по labels двух authority systems,
+  grant-writer coexistence, upstream list-authoring scope и ledger wording
+  исправлены. Локальные ссылки/anchors (45) и diff whitespace PASS; только три
+  документа в delta. Общего docs validator для этих файлов не найдено.
+  Gradle/ktlint/Detekt/IT не нужны для docs-only delta; stage/prod,
+  актуальные реальные assignments и migration не проверялись.
+- Разрешены и выполнены только анализ/документация и отдельный локальный checkout.
+  Production code, grants, БД и routes не менялись; commit/push/PR/deploy/workflow/
+  runtime действий нет. Никакого нового admission или operational grant.
+- Один следующий шаг: отдельно разрешить local read-only inventory + shadow
+  migration report на synthetic fixtures, с no-write/no-expansion DoD проекта.
+
 
 ## OWNER_MANAGER_UX — unknown recovery P2 fix, 2026-11-09
 

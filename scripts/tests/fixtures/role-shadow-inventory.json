@@ -1,0 +1,4403 @@
+{
+  "schema": "CLB-role-shadow-fixture-v1",
+  "synthetic_only": true,
+  "source_revision": "5550b944990d8c1c93c0a5012d31db209f93ea6d",
+  "model_revision": "2026-11-10-eight-roles",
+  "historical_24_scenario_ids": [
+    "network-owner-finite-clubs-creator-only-one",
+    "club-owner-creator",
+    "club-manager-preparation-package",
+    "floor-manager-name-is-not-package-mapping",
+    "entrance-manager-read-is-not-checkin",
+    "finance-manager-template-is-not-money",
+    "promoter-two-clubs-no-global",
+    "two-independent-clients",
+    "multiple-assignments-exact-tuple-only",
+    "revoked-grants-old-writer-resurrection",
+    "inactive-membership-active-stored-grants",
+    "client-only-revoke-legacy-access-remains",
+    "duplicate-legacy-global-owner-no-network-adoption",
+    "negative-input-legacy-client-scope-invalid",
+    "old-staff-invitation-no-target-assignment",
+    "inactive-staff-active-grants-contradiction",
+    "active-write-with-inactive-read",
+    "same-technical-role-no-explicit-target",
+    "guest-personal-data-only",
+    "network-manager-finite-assigned-set",
+    "cross-client-and-global-target-rejected",
+    "inactive-and-archived-client",
+    "bigint-identity-not-rounded",
+    "accepted-invitation-expiry-does-not-revoke"
+  ],
+  "source_sha256": {
+    "docs/product/ROLE_WORKSPACES_PROPOSED.md": {
+      "algorithm": "SHA-256",
+      "digest": "4a89dff37d1a6e14d6ce450b53a36e3ebdc631ec7106bbeec3556e5c937141fe"
+    },
+    "docs/product/PRODUCT_SPEC.md": {
+      "algorithm": "SHA-256",
+      "digest": "706cc2b1af7bba84e2f6db1d33487e40ec4ec2d63ce1ce67d7b48ea367406968"
+    },
+    "docs/product/OPEN_DECISIONS.md": {
+      "algorithm": "SHA-256",
+      "digest": "e1c3bb72ea71d1a7523e4c2289d989b5e045337a70cccf37a1817d68424cc31c"
+    },
+    "docs/product/PRODUCT_ROADMAP.md": {
+      "algorithm": "SHA-256",
+      "digest": "d6907fea9fa9dba38de552dbdf1d243f18289c18dfdceb74dd8464b106bf5845"
+    },
+    "docs/ops/owner-team-contract.md": {
+      "algorithm": "SHA-256",
+      "digest": "7d3ca0e366175bcc386fab08982a9e66fbf5c56e482f8c9200add35d97614857"
+    },
+    "docs/ops/owner-manager-contract.md": {
+      "algorithm": "SHA-256",
+      "digest": "b53d6f98016703f86bf1115c26e9c6cd6d3e9e3aac514831b5454eb45f1dfec5"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/security/Role.kt": {
+      "algorithm": "SHA-256",
+      "digest": "10062352680edfef34b837970c70d2af789fa89db4f185759a0f50edd98682a7"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V1__init.sql": {
+      "algorithm": "SHA-256",
+      "digest": "f775db40f489ff9bd234658bb210631801e3a3ba52514b143a4e12cd59d6ecf5"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V058__user_role_permissions.sql": {
+      "algorithm": "SHA-256",
+      "digest": "0c86c17cf29c77093fa385c3729f02b5161a682d3df9fd6936a500d3381577f3"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V061__client_context.sql": {
+      "algorithm": "SHA-256",
+      "digest": "2b56b810d74509cbbb528368aa89a9605a97c46089a05c89806d696bc8dc14c6"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V062__client_onboarding_a.sql": {
+      "algorithm": "SHA-256",
+      "digest": "af0bccb59f676e17c15ac9a76b2d6a8f94015a42b0f54f265f2b1f69e53f2ee0"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V075__client_club_staff.sql": {
+      "algorithm": "SHA-256",
+      "digest": "ed059f2cfa38fb1ff52171188928f893c37a590a85907672ca1f0f82ae19b632"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubStaffAccess.kt": {
+      "algorithm": "SHA-256",
+      "digest": "08a835a45d8332d98155742a89f3bd57eed5798c72439c81b7379643fac5a8d6"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubTeamOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "2fe6a0888302292bd1075d841f4c740c0054273fceb3d668d14ff5e0f195bf3f"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/StaffInvitationOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "430a45d4501fa95d152537adc76cbc97844a48c3bb6d369ec5193b45ac513154"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClientAccessOperations.kt": {
+      "algorithm": "SHA-256",
+      "digest": "6f20e67d8ba58e875af4f814bee4ac9aab1ce7f530a046d9ba89e3f7c328178e"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/OnboardingSql.kt": {
+      "algorithm": "SHA-256",
+      "digest": "fd187de019fea8d41370baaf80535e5100112eee5c6b69046c9e7c6dd05057a6"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/onboarding/JdbcClientOnboardingRepository.kt": {
+      "algorithm": "SHA-256",
+      "digest": "ef49a908a4d7aa5abdaaf1ebfd0f95ee5ec1bb893c814ffaed5ade6b8b208ecf"
+    },
+    "core-security/src/main/kotlin/com/example/bot/security/rbac/RbacHelpers.kt": {
+      "algorithm": "SHA-256",
+      "digest": "38326c7d936ff71889c447e2cd99df3445bde8620fd28764b45102bbafa11fe1"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/PrivateClubContainment.kt": {
+      "algorithm": "SHA-256",
+      "digest": "a41b2973f4f09b49333d48e2d8e78406a6e476133d8316fbd04ccdca356f1157"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/booking/BookingTables.kt": {
+      "algorithm": "SHA-256",
+      "digest": "d06bdaba0bbc9c1eb215b09d9b38992a39d1167e92db24837e03ff4a4a8485a5"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/booking/core/BookingCoreModels.kt": {
+      "algorithm": "SHA-256",
+      "digest": "58a088ede33fdeabb802c24f2b11e6056339f416d86799bca6aad6e119ae74f0"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/booking/core/CanonicalBookingTransaction.kt": {
+      "algorithm": "SHA-256",
+      "digest": "ecb942a374c2dfb1a5df22f6142c05c6f35da4f58355613c575c616f968c1340"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/booking/core/BookingRepository.kt": {
+      "algorithm": "SHA-256",
+      "digest": "46a63020fb79b3511ef502127a52edd99d0e40805e2fede4cd2f72cccbaa0976"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/promo/PromoRepositories.kt": {
+      "algorithm": "SHA-256",
+      "digest": "603c91a5ccd325ae5beda155dcb59d0caecf189b3760ff761891e06e6bbe334d"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/promoter/PromoterAdminRepositoryImpl.kt": {
+      "algorithm": "SHA-256",
+      "digest": "6a8ea747b0af38f714104d5e1e6793307be981336fb7f86a86e45d1a785f92b0"
+    }
+  },
+  "snapshot": {
+    "clients": [
+      {
+        "archived_at": null,
+        "id": 101,
+        "is_active": true
+      },
+      {
+        "archived_at": null,
+        "id": 102,
+        "is_active": true
+      },
+      {
+        "archived_at": null,
+        "id": 103,
+        "is_active": false
+      },
+      {
+        "archived_at": "2026-01-01T00:00:00Z",
+        "id": 104,
+        "is_active": true
+      }
+    ],
+    "client_clubs": [
+      {
+        "client_id": 101,
+        "club_id": 1001
+      },
+      {
+        "client_id": 101,
+        "club_id": 1002
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001
+      },
+      {
+        "client_id": 103,
+        "club_id": 3003
+      },
+      {
+        "client_id": 104,
+        "club_id": 4001
+      },
+      {
+        "client_id": 101,
+        "club_id": 1003
+      },
+      {
+        "client_id": 101,
+        "club_id": 1004
+      },
+      {
+        "client_id": 101,
+        "club_id": 1005
+      }
+    ],
+    "creators_projection": [
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "owner_user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1002,
+        "owner_user_id": 99
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "owner_user_id": 2
+      }
+    ],
+    "client_memberships": [
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 1,
+        "version": 3
+      },
+      {
+        "client_id": 102,
+        "is_active": true,
+        "user_id": 2,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 3,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 4,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 5,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 6,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 7,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 8,
+        "version": 3
+      },
+      {
+        "client_id": 102,
+        "is_active": true,
+        "user_id": 8,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 9,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 10,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": false,
+        "user_id": 11,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 12,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 14,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 15,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 16,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 17,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 18,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 20,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 21,
+        "version": 3
+      },
+      {
+        "client_id": 103,
+        "is_active": true,
+        "user_id": 22,
+        "version": 3
+      },
+      {
+        "client_id": 104,
+        "is_active": true,
+        "user_id": 22,
+        "version": 3
+      },
+      {
+        "client_id": 102,
+        "is_active": true,
+        "user_id": 9007199254740993,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 24,
+        "version": 3
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 51,
+        "version": 1
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 52,
+        "version": 1
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 53,
+        "version": 1
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 54,
+        "version": 1
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 55,
+        "version": 1
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 56,
+        "version": 1
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 57,
+        "version": 1
+      },
+      {
+        "client_id": 101,
+        "is_active": true,
+        "user_id": 58,
+        "version": 1
+      },
+      {
+        "client_id": 102,
+        "is_active": true,
+        "user_id": 57,
+        "version": 1
+      }
+    ],
+    "client_membership_grants": [
+      {
+        "client_id": 101,
+        "is_active": true,
+        "permission_code": "client.application.manage",
+        "user_id": 1,
+        "version": 2
+      }
+    ],
+    "client_club_grants": [
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.finance.read",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.finance.write",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.modules.read",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.modules.write",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.team.manage",
+        "user_id": 1
+      },
+      {
+        "client_id": 101,
+        "club_id": 1002,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 1
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.finance.read",
+        "user_id": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.finance.write",
+        "user_id": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.modules.read",
+        "user_id": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.modules.write",
+        "user_id": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.team.manage",
+        "user_id": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 3
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 3
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 3
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 3
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 3
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.finance.read",
+        "user_id": 3
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.finance.write",
+        "user_id": 3
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.modules.read",
+        "user_id": 3
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.modules.write",
+        "user_id": 3
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 4
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 4
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 4
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 4
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 4
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 5
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 6
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 6
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 6
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 6
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 6
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.finance.read",
+        "user_id": 6
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.finance.write",
+        "user_id": 6
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.modules.read",
+        "user_id": 6
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.modules.write",
+        "user_id": 6
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 7
+      },
+      {
+        "client_id": 101,
+        "club_id": 1002,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 7
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 8
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 8
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 8
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 8
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 8
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 8
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 9
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 9
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 9
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 9
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 9
+      },
+      {
+        "client_id": 101,
+        "club_id": 1002,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 9
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 10
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": false,
+        "permission_code": "client.club.profile.write",
+        "user_id": 10
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 10
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": false,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 10
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 10
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 11
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 11
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 11
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 11
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 11
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.finance.read",
+        "user_id": 11
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.finance.write",
+        "user_id": 11
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.modules.read",
+        "user_id": 11
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.modules.write",
+        "user_id": 11
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": false,
+        "permission_code": "client.club.read",
+        "user_id": 12
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 16
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 16
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 16
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 16
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 16
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": false,
+        "permission_code": "client.club.read",
+        "user_id": 17
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.profile.write",
+        "user_id": 17
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.layout.write",
+        "user_id": 17
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.calendar.write",
+        "user_id": 17
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.booking_rules.write",
+        "user_id": 17
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 18
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 20
+      },
+      {
+        "client_id": 101,
+        "club_id": 1002,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 20
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 21
+      },
+      {
+        "client_id": 103,
+        "club_id": 3003,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 22
+      },
+      {
+        "client_id": 104,
+        "club_id": 4001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 22
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 9007199254740993
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 24
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "is_active": true,
+        "permission_code": "client.club.read",
+        "user_id": 51
+      }
+    ],
+    "client_club_staff": [
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 301,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "CLUB_ADMIN",
+        "user_id": 3,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 401,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "MANAGER",
+        "user_id": 4,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 501,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "ENTRY_MANAGER",
+        "user_id": 5,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 601,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "CLUB_ADMIN",
+        "user_id": 6,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 801,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "MANAGER",
+        "user_id": 8,
+        "version": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "invitation_id": 802,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "ENTRY_MANAGER",
+        "user_id": 8,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 901,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "MANAGER",
+        "user_id": 9,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 1001,
+        "is_active": true,
+        "revoked_through_invitation_id": 1000,
+        "role_code": "MANAGER",
+        "user_id": 10,
+        "version": 5
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 1101,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "CLUB_ADMIN",
+        "user_id": 11,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 1201,
+        "is_active": false,
+        "revoked_through_invitation_id": 1205,
+        "role_code": "ENTRY_MANAGER",
+        "user_id": 12,
+        "version": 4
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 1601,
+        "is_active": false,
+        "revoked_through_invitation_id": 1605,
+        "role_code": "MANAGER",
+        "user_id": 16,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 1701,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "MANAGER",
+        "user_id": 17,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 1801,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "ENTRY_MANAGER",
+        "user_id": 18,
+        "version": 2
+      },
+      {
+        "client_id": 102,
+        "club_id": 2001,
+        "invitation_id": 900719925474099301,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "ENTRY_MANAGER",
+        "user_id": 9007199254740993,
+        "version": 2
+      },
+      {
+        "client_id": 101,
+        "club_id": 1001,
+        "invitation_id": 2401,
+        "is_active": true,
+        "revoked_through_invitation_id": 0,
+        "role_code": "ENTRY_MANAGER",
+        "user_id": 24,
+        "version": 2
+      }
+    ],
+    "user_roles": [
+      {
+        "id": 701,
+        "role_code": "PROMOTER",
+        "scope_club_id": 3001,
+        "scope_type": "CLUB",
+        "user_id": 7
+      },
+      {
+        "id": 702,
+        "role_code": "PROMOTER",
+        "scope_club_id": 3002,
+        "scope_type": "CLUB",
+        "user_id": 7
+      },
+      {
+        "id": 901,
+        "role_code": "ENTRY_MANAGER",
+        "scope_club_id": 3001,
+        "scope_type": "CLUB",
+        "user_id": 9
+      },
+      {
+        "id": 902,
+        "role_code": "MANAGER",
+        "scope_club_id": 3002,
+        "scope_type": "CLUB",
+        "user_id": 9
+      },
+      {
+        "id": 1201,
+        "role_code": "ENTRY_MANAGER",
+        "scope_club_id": 3001,
+        "scope_type": "CLUB",
+        "user_id": 12
+      },
+      {
+        "id": 1301,
+        "role_code": "OWNER",
+        "scope_club_id": null,
+        "scope_type": "GLOBAL",
+        "user_id": 13
+      },
+      {
+        "id": 1302,
+        "role_code": "OWNER",
+        "scope_club_id": null,
+        "scope_type": "GLOBAL",
+        "user_id": 13
+      },
+      {
+        "id": 1401,
+        "role_code": "MANAGER",
+        "scope_club_id": null,
+        "scope_type": "CLIENT",
+        "user_id": 14
+      }
+    ],
+    "user_role_permissions": [
+      {
+        "permission_code": "support.view",
+        "user_role_id": 902
+      },
+      {
+        "permission_code": "support.reply",
+        "user_role_id": 902
+      }
+    ],
+    "invitations_projection": [
+      {
+        "claimant_user_id": 3,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 301,
+        "purpose": "staff",
+        "staff_role": "CLUB_ADMIN",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 4,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 401,
+        "purpose": "staff",
+        "staff_role": "MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 5,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 501,
+        "purpose": "staff",
+        "staff_role": "ENTRY_MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 6,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 601,
+        "purpose": "staff",
+        "staff_role": "CLUB_ADMIN",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 8,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 801,
+        "purpose": "staff",
+        "staff_role": "MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 8,
+        "client_id": 102,
+        "club_id": 2001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 802,
+        "purpose": "staff",
+        "staff_role": "ENTRY_MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 9,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 901,
+        "purpose": "staff",
+        "staff_role": "MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 10,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 1001,
+        "purpose": "staff",
+        "staff_role": "MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 11,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 1101,
+        "purpose": "staff",
+        "staff_role": "CLUB_ADMIN",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 12,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 1201,
+        "purpose": "staff",
+        "staff_role": "ENTRY_MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 15,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 1501,
+        "purpose": "staff",
+        "staff_role": "ENTRY_MANAGER",
+        "status": "claimed",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 16,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 1601,
+        "purpose": "staff",
+        "staff_role": "MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 17,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 1701,
+        "purpose": "staff",
+        "staff_role": "MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 18,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 1801,
+        "purpose": "staff",
+        "staff_role": "ENTRY_MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 9007199254740993,
+        "client_id": 102,
+        "club_id": 2001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 900719925474099301,
+        "purpose": "staff",
+        "staff_role": "ENTRY_MANAGER",
+        "status": "accepted",
+        "version": 2
+      },
+      {
+        "claimant_user_id": 24,
+        "client_id": 101,
+        "club_id": 1001,
+        "expires_at": "2026-01-01T00:00:00Z",
+        "id": 2401,
+        "purpose": "staff",
+        "staff_role": "ENTRY_MANAGER",
+        "status": "accepted",
+        "version": 2
+      }
+    ],
+    "commands_projection": [
+      {
+        "actor_user_id": 10,
+        "client_id": 101,
+        "result_id": 1001,
+        "result_type": "club_team"
+      }
+    ],
+    "audit_projection": [
+      {
+        "action": "client.staff.role.change",
+        "actor_user_id": 1,
+        "club_id": 1001,
+        "id": 10001
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "network-owner-finite-clubs-creator-only-one",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001,
+            1002
+          ],
+          "historical_target_role": "NETWORK_OWNER",
+          "role": "BUSINESS_OWNER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 1,
+      "writer_probes": []
+    },
+    {
+      "id": "club-owner-creator",
+      "targets": [
+        {
+          "client_id": 102,
+          "club_ids": [
+            2001
+          ],
+          "historical_target_role": "CLUB_OWNER",
+          "role": "BUSINESS_OWNER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 2,
+      "writer_probes": []
+    },
+    {
+      "id": "club-manager-preparation-package",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "CLUB_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 3,
+      "writer_probes": []
+    },
+    {
+      "id": "floor-manager-name-is-not-package-mapping",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 4,
+      "writer_probes": [
+        {
+          "client_id": 101,
+          "club_id": 1001,
+          "future_actions": [
+            "table.seat.booked",
+            "table.release",
+            "table.deposit.record"
+          ],
+          "package": "MANAGER"
+        }
+      ]
+    },
+    {
+      "id": "entrance-manager-read-is-not-checkin",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "ENTRANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 5,
+      "writer_probes": [
+        {
+          "client_id": 101,
+          "club_id": 1001,
+          "future_actions": [
+            "entrance.arrival.record",
+            "night_pass.validate"
+          ],
+          "package": "ENTRY_MANAGER"
+        },
+        {
+          "client_id": 101,
+          "club_id": 1001,
+          "future_actions": [],
+          "package": "CLUB_ADMIN"
+        }
+      ]
+    },
+    {
+      "id": "finance-manager-template-is-not-money",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "FINANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 6,
+      "writer_probes": [
+        {
+          "client_id": 101,
+          "club_id": 1001,
+          "future_actions": [
+            "shift.close",
+            "shift.revenue.write"
+          ],
+          "package": "CLUB_ADMIN"
+        }
+      ]
+    },
+    {
+      "id": "promoter-two-clubs-no-global",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001,
+            1002
+          ],
+          "role": "PROMOTER",
+          "scope": "CLUBS",
+          "source_legacy_ids": [
+            701,
+            702
+          ]
+        }
+      ],
+      "user_id": 7,
+      "writer_probes": []
+    },
+    {
+      "id": "two-independent-clients",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        },
+        {
+          "client_id": 102,
+          "club_ids": [
+            2001
+          ],
+          "role": "ENTRANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 8,
+      "writer_probes": []
+    },
+    {
+      "id": "multiple-assignments-exact-tuple-only",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        },
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "ENTRANCE_MANAGER",
+          "scope": "CLUBS"
+        },
+        {
+          "client_id": 101,
+          "club_ids": [
+            1002
+          ],
+          "role": "CLUB_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 9,
+      "writer_probes": []
+    },
+    {
+      "id": "revoked-grants-old-writer-resurrection",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "CLUB_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 10,
+      "writer_probes": [
+        {
+          "client_id": 101,
+          "club_id": 1001,
+          "future_actions": [
+            "entrance.arrival.record"
+          ],
+          "package": "MANAGER"
+        }
+      ]
+    },
+    {
+      "id": "inactive-membership-active-stored-grants",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "CLUB_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 11,
+      "writer_probes": []
+    },
+    {
+      "id": "client-only-revoke-legacy-access-remains",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "ENTRANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 12,
+      "writer_probes": []
+    },
+    {
+      "id": "duplicate-legacy-global-owner-no-network-adoption",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001,
+            1002
+          ],
+          "historical_target_role": "NETWORK_OWNER",
+          "role": "BUSINESS_OWNER",
+          "scope": "CLUBS",
+          "source_legacy_ids": [
+            1301,
+            1302
+          ]
+        }
+      ],
+      "user_id": 13,
+      "writer_probes": []
+    },
+    {
+      "id": "negative-input-legacy-client-scope-invalid",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "CLUB_MANAGER",
+          "scope": "CLUBS",
+          "source_legacy_ids": [
+            1401
+          ]
+        }
+      ],
+      "user_id": 14,
+      "writer_probes": []
+    },
+    {
+      "id": "old-staff-invitation-no-target-assignment",
+      "targets": [],
+      "user_id": 15,
+      "writer_probes": []
+    },
+    {
+      "id": "inactive-staff-active-grants-contradiction",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 16,
+      "writer_probes": []
+    },
+    {
+      "id": "active-write-with-inactive-read",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "CLUB_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 17,
+      "writer_probes": []
+    },
+    {
+      "id": "same-technical-role-no-explicit-target",
+      "targets": [],
+      "user_id": 18,
+      "writer_probes": []
+    },
+    {
+      "id": "guest-personal-data-only",
+      "targets": [
+        {
+          "role": "GUEST",
+          "scope": "SELF"
+        }
+      ],
+      "user_id": 19,
+      "writer_probes": []
+    },
+    {
+      "id": "network-manager-finite-assigned-set",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001,
+            1002
+          ],
+          "role": "NETWORK_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 20,
+      "writer_probes": []
+    },
+    {
+      "id": "cross-client-and-global-target-rejected",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            2001
+          ],
+          "role": "CLUB_MANAGER",
+          "scope": "CLUBS"
+        },
+        {
+          "historical_target_role": "NETWORK_OWNER",
+          "role": "BUSINESS_OWNER",
+          "scope": "GLOBAL"
+        }
+      ],
+      "user_id": 21,
+      "writer_probes": []
+    },
+    {
+      "id": "inactive-and-archived-client",
+      "targets": [
+        {
+          "client_id": 103,
+          "club_ids": [
+            3003
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        },
+        {
+          "client_id": 104,
+          "club_ids": [
+            4001
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 22,
+      "writer_probes": []
+    },
+    {
+      "id": "bigint-identity-not-rounded",
+      "targets": [
+        {
+          "client_id": 102,
+          "club_ids": [
+            2001
+          ],
+          "role": "ENTRANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 9007199254740993,
+      "writer_probes": []
+    },
+    {
+      "id": "accepted-invitation-expiry-does-not-revoke",
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "role": "ENTRANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 24,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "finance.closed_totals.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "final_only": true,
+          "kind": "finance",
+          "shift_closed": true,
+          "signed_identity": true
+        }
+      ],
+      "id": "business-owner-single-club",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002
+            ],
+            "id": "owner-51",
+            "is_active": true,
+            "permissions": [
+              "finance.closed_totals.read"
+            ],
+            "role": "BUSINESS_OWNER",
+            "user_id": 51
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "BUSINESS_OWNER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 51,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "finance.closed_totals.read",
+          "client_id": 101,
+          "club_id": 1002,
+          "final_only": true,
+          "kind": "finance",
+          "shift_closed": true,
+          "signed_identity": true
+        }
+      ],
+      "id": "same-business-owner-second-club-no-grant-inheritance",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002
+            ],
+            "id": "owner-51",
+            "is_active": true,
+            "permissions": [
+              "finance.closed_totals.read"
+            ],
+            "role": "BUSINESS_OWNER",
+            "user_id": 51
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001,
+            1002
+          ],
+          "delegated_permissions": [],
+          "role": "BUSINESS_OWNER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 51,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "finance.closed_totals.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "final_only": true,
+          "kind": "finance",
+          "shift_closed": true,
+          "signed_identity": true
+        },
+        {
+          "capability": "finance.closed_totals.read",
+          "client_id": 101,
+          "club_id": 1002,
+          "final_only": true,
+          "kind": "finance",
+          "shift_closed": true,
+          "signed_identity": true
+        }
+      ],
+      "id": "optional-network-manager-finite-subset",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "nw-20",
+            "is_active": true,
+            "permissions": [
+              "finance.closed_totals.read"
+            ],
+            "role": "NETWORK_MANAGER",
+            "user_id": 20
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "NETWORK_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 20,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "finance.report.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "finance",
+          "signed_identity": true
+        },
+        {
+          "capability": "finance.report.read",
+          "client_id": 101,
+          "club_id": 1002,
+          "kind": "finance",
+          "signed_identity": true
+        },
+        {
+          "capability": "finance.report.read",
+          "client_id": 102,
+          "club_id": 2001,
+          "kind": "finance",
+          "signed_identity": true
+        }
+      ],
+      "id": "club-manager-finance-same-club-only",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "cm-52",
+            "is_active": true,
+            "permissions": [
+              "finance.report.read"
+            ],
+            "role": "CLUB_MANAGER",
+            "user_id": 52
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "CLUB_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 52,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "finance.report.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "finance",
+          "signed_identity": true
+        }
+      ],
+      "id": "club-assignment-without-finance-capability",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "cm-53",
+            "is_active": true,
+            "permissions": [],
+            "role": "CLUB_MANAGER",
+            "user_id": 53
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "CLUB_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 53,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "client.club.profile.write",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "configuration",
+          "signed_identity": true
+        },
+        {
+          "capability": "client.club.profile.write",
+          "client_id": 101,
+          "club_id": 1002,
+          "kind": "configuration",
+          "signed_identity": true
+        },
+        {
+          "capability": "finance.report.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "finance",
+          "signed_identity": true
+        }
+      ],
+      "id": "manager-granular-configuration-delegation",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "cm-3",
+            "is_active": true,
+            "permissions": [
+              "configuration.delegate",
+              "client.club.read",
+              "client.club.profile.write",
+              "client.club.layout.write",
+              "client.club.calendar.write",
+              "client.club.booking_rules.write"
+            ],
+            "role": "CLUB_MANAGER",
+            "user_id": 3
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": [
+          {
+            "client_id": 101,
+            "club_id": 1001,
+            "id": "delegation-profile-54",
+            "is_active": true,
+            "issuer_assignment_id": "cm-3",
+            "permissions": [
+              "client.club.read",
+              "client.club.profile.write"
+            ],
+            "recipient_assignment_id": "floor-54"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [
+            "client.club.read",
+            "client.club.profile.write"
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "audit_ready": true,
+          "capability": "booking.promoter.create",
+          "client_id": 101,
+          "club_id": 1001,
+          "confirmed": true,
+          "hold_invariants": true,
+          "idempotency_ready": true,
+          "kind": "booking.create",
+          "night_available": true,
+          "rules_valid": true,
+          "signed_identity": true,
+          "table_available": true
+        },
+        {
+          "audit_ready": true,
+          "capability": "booking.promoter.create",
+          "client_id": 101,
+          "club_id": 1002,
+          "confirmed": true,
+          "hold_invariants": true,
+          "idempotency_ready": true,
+          "kind": "booking.create",
+          "night_available": true,
+          "rules_valid": true,
+          "signed_identity": true,
+          "table_available": true
+        },
+        {
+          "audit_ready": true,
+          "capability": "booking.promoter.create",
+          "client_id": 101,
+          "club_id": 1003,
+          "confirmed": true,
+          "hold_invariants": true,
+          "idempotency_ready": true,
+          "kind": "booking.create",
+          "night_available": true,
+          "rules_valid": true,
+          "signed_identity": true,
+          "table_available": true
+        },
+        {
+          "booking_actor_user_id": 55,
+          "capability": "booking.promoter.own.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "booking.own.read",
+          "signed_identity": true
+        },
+        {
+          "booking_actor_user_id": 56,
+          "capability": "booking.promoter.own.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "booking.own.read",
+          "signed_identity": true
+        },
+        {
+          "capability": "finance.report.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "finance",
+          "signed_identity": true
+        }
+      ],
+      "id": "promoter-assigned-three-of-five",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 102,
+            "club_ids": [
+              2001
+            ],
+            "id": "foreign-promoter-57",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 57
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001,
+            1002,
+            1003
+          ],
+          "delegated_permissions": [],
+          "role": "PROMOTER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 55,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "audit_ready": true,
+          "capability": "booking.promoter.create",
+          "client_id": 101,
+          "club_id": 1004,
+          "confirmed": true,
+          "hold_invariants": true,
+          "idempotency_ready": true,
+          "kind": "booking.create",
+          "night_available": true,
+          "rules_valid": true,
+          "signed_identity": true,
+          "table_available": true
+        },
+        {
+          "audit_ready": true,
+          "capability": "booking.promoter.create",
+          "client_id": 101,
+          "club_id": 1005,
+          "confirmed": true,
+          "hold_invariants": true,
+          "idempotency_ready": true,
+          "kind": "booking.create",
+          "night_available": true,
+          "rules_valid": true,
+          "signed_identity": true,
+          "table_available": true
+        },
+        {
+          "audit_ready": true,
+          "capability": "booking.promoter.create",
+          "client_id": 102,
+          "club_id": 2001,
+          "confirmed": true,
+          "hold_invariants": true,
+          "idempotency_ready": true,
+          "kind": "booking.create",
+          "night_available": true,
+          "rules_valid": true,
+          "signed_identity": true,
+          "table_available": true
+        }
+      ],
+      "id": "promoter-fourth-and-fifth-club-denied",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001,
+            1002,
+            1003
+          ],
+          "delegated_permissions": [],
+          "role": "PROMOTER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 55,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "audit_ready": true,
+          "capability": "booking.promoter.create",
+          "client_id": 101,
+          "club_id": 1001,
+          "confirmed": true,
+          "hold_invariants": true,
+          "idempotency_ready": true,
+          "kind": "booking.create",
+          "night_available": true,
+          "rules_valid": true,
+          "signed_identity": true,
+          "table_available": true
+        },
+        {
+          "booking_actor_user_id": 55,
+          "capability": "booking.promoter.own.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "booking.own.read",
+          "signed_identity": true
+        }
+      ],
+      "id": "promoter-assignment-revoked",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": false,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 102,
+            "club_ids": [
+              2001
+            ],
+            "id": "foreign-promoter-57",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 57
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001,
+            1002,
+            1003
+          ],
+          "delegated_permissions": [],
+          "role": "PROMOTER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 55,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [],
+      "attribution_fixture": {
+        "candidate": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 3,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": null,
+          "source_kind": "CLUB",
+          "version": 1
+        },
+        "current": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 3,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": null,
+          "source_kind": "CLUB",
+          "version": 1
+        },
+        "events": [
+          {
+            "command_ref": "synthetic-0",
+            "kind": "BOOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-1",
+            "kind": "SEATED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          }
+        ]
+      },
+      "id": "attribution-club-source-is-not-free",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 102,
+            "club_ids": [
+              2001
+            ],
+            "id": "foreign-promoter-57",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 57
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [],
+      "attribution_fixture": {
+        "candidate": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "DEPOSIT",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "current": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "DEPOSIT",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "events": [
+          {
+            "command_ref": "synthetic-0",
+            "kind": "BOOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-1",
+            "kind": "ARRIVED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-2",
+            "kind": "SEATED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          }
+        ]
+      },
+      "id": "attribution-promoter-is-not-payer",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 102,
+            "club_ids": [
+              2001
+            ],
+            "id": "foreign-promoter-57",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 57
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [],
+      "attribution_fixture": {
+        "candidate": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "CLUB_FUNDED",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "current": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "CLUB_FUNDED",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "events": [
+          {
+            "command_ref": "synthetic-0",
+            "kind": "BOOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          }
+        ]
+      },
+      "id": "same-promoter-source-different-financial-mode",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [],
+      "attribution_fixture": {
+        "candidate": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 3,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "foreign-promoter-57",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "current": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 3,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": null,
+          "source_kind": "CLUB",
+          "version": 1
+        },
+        "events": [
+          {
+            "command_ref": "synthetic-0",
+            "kind": "BOOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          }
+        ]
+      },
+      "id": "attribution-foreign-promoter-body-denied",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 102,
+            "club_ids": [
+              2001
+            ],
+            "id": "foreign-promoter-57",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 57
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [],
+      "attribution_fixture": {
+        "candidate": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 3,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "current": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 3,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": null,
+          "source_kind": "CLUB",
+          "version": 1
+        },
+        "events": [
+          {
+            "command_ref": "synthetic-0",
+            "kind": "BOOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          }
+        ]
+      },
+      "id": "attribution-revoked-promoter-new-selection-denied",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": false,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 102,
+            "club_ids": [
+              2001
+            ],
+            "id": "foreign-promoter-57",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 57
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [],
+      "attribution_fixture": {
+        "candidate": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "current": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "events": [
+          {
+            "command_ref": "synthetic-0",
+            "kind": "BOOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-1",
+            "kind": "CANCELLED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          }
+        ]
+      },
+      "id": "attribution-cancelled-history-preserved",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [],
+      "attribution_fixture": {
+        "candidate": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "current": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "events": [
+          {
+            "command_ref": "synthetic-0",
+            "kind": "BOOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-1",
+            "kind": "NO_SHOW",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          }
+        ]
+      },
+      "id": "attribution-no_show-history-preserved",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [],
+      "attribution_fixture": {
+        "candidate": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "current": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "events": [
+          {
+            "command_ref": "synthetic-0",
+            "kind": "BOOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-1",
+            "kind": "REVOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          }
+        ]
+      },
+      "id": "attribution-promoter-revoke-keeps-history",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": false,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [],
+      "attribution_fixture": {
+        "candidate": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "current": {
+          "booking_id": "00000000-0000-4000-8000-000000000055",
+          "client_id": 101,
+          "club_id": 1001,
+          "financial_mode": "BILL",
+          "origin": {
+            "actor_user_id": 55,
+            "channel": "SYNTHETIC",
+            "recorded_at": "2026-11-10T12:00:00Z"
+          },
+          "promoter_assignment_id": "promoter-55",
+          "source_kind": "PROMOTER",
+          "version": 1
+        },
+        "events": [
+          {
+            "command_ref": "synthetic-0",
+            "kind": "BOOKED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-1",
+            "kind": "ARRIVED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-2",
+            "kind": "SEATED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-3",
+            "kind": "TABLE_MOVED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          },
+          {
+            "command_ref": "synthetic-2",
+            "kind": "SEATED",
+            "subject_id": "00000000-0000-4000-8000-000000000055"
+          }
+        ]
+      },
+      "id": "attribution-table-move-and-command-retry-no-double-count",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-54",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 54
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003
+            ],
+            "id": "promoter-55",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create",
+              "booking.promoter.own.read"
+            ],
+            "role": "PROMOTER",
+            "user_id": 55
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "promoter-56",
+            "is_active": true,
+            "permissions": [
+              "booking.promoter.create"
+            ],
+            "role": "PROMOTER",
+            "user_id": 56
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": []
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 54,
+      "writer_probes": []
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "client.club.profile.write",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "configuration",
+          "signed_identity": true
+        },
+        {
+          "capability": "finance.report.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "finance",
+          "signed_identity": true
+        }
+      ],
+      "id": "combined-staff-assignments-before-revoke",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "cm-3",
+            "is_active": true,
+            "permissions": [
+              "configuration.delegate",
+              "client.club.read",
+              "client.club.profile.write",
+              "client.club.layout.write",
+              "client.club.calendar.write",
+              "client.club.booking_rules.write"
+            ],
+            "role": "CLUB_MANAGER",
+            "user_id": 3
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-58",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 58
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "fin-58",
+            "is_active": true,
+            "permissions": [
+              "finance.report.read"
+            ],
+            "role": "FINANCE_MANAGER",
+            "user_id": 58
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": [
+          {
+            "client_id": 101,
+            "club_id": 1001,
+            "id": "delegation-profile-58",
+            "is_active": true,
+            "issuer_assignment_id": "cm-3",
+            "permissions": [
+              "client.club.read",
+              "client.club.profile.write"
+            ],
+            "recipient_assignment_id": "floor-58"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [
+            "client.club.read",
+            "client.club.profile.write"
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        },
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FINANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 58,
+      "writer_probes": [
+        {
+          "client_id": 101,
+          "club_id": 1001,
+          "future_actions": [
+            "finance.report.read",
+            "table.seat.booked"
+          ],
+          "package": "MANAGER"
+        }
+      ]
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "client.club.profile.write",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "configuration",
+          "signed_identity": true
+        },
+        {
+          "capability": "finance.report.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "finance",
+          "signed_identity": true
+        }
+      ],
+      "id": "revoke-one-role-preserves-independent-finance",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "cm-3",
+            "is_active": true,
+            "permissions": [
+              "configuration.delegate",
+              "client.club.read",
+              "client.club.profile.write",
+              "client.club.layout.write",
+              "client.club.calendar.write",
+              "client.club.booking_rules.write"
+            ],
+            "role": "CLUB_MANAGER",
+            "user_id": 3
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-58",
+            "is_active": false,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 58
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "fin-58",
+            "is_active": true,
+            "permissions": [
+              "finance.report.read"
+            ],
+            "role": "FINANCE_MANAGER",
+            "user_id": 58
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": [
+          {
+            "client_id": 101,
+            "club_id": 1001,
+            "id": "delegation-profile-58",
+            "is_active": true,
+            "issuer_assignment_id": "cm-3",
+            "permissions": [
+              "client.club.read",
+              "client.club.profile.write"
+            ],
+            "recipient_assignment_id": "floor-58"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [
+            "client.club.read",
+            "client.club.profile.write"
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        },
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FINANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 58,
+      "writer_probes": [
+        {
+          "client_id": 101,
+          "club_id": 1001,
+          "future_actions": [
+            "finance.report.read",
+            "table.seat.booked"
+          ],
+          "package": "MANAGER"
+        }
+      ]
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "client.club.profile.write",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "configuration",
+          "signed_identity": true
+        },
+        {
+          "capability": "finance.report.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "finance",
+          "signed_identity": true
+        }
+      ],
+      "id": "revoke-one-delegation-preserves-other-role",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "cm-3",
+            "is_active": true,
+            "permissions": [
+              "configuration.delegate",
+              "client.club.read",
+              "client.club.profile.write",
+              "client.club.layout.write",
+              "client.club.calendar.write",
+              "client.club.booking_rules.write"
+            ],
+            "role": "CLUB_MANAGER",
+            "user_id": 3
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-58",
+            "is_active": true,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 58
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "fin-58",
+            "is_active": true,
+            "permissions": [
+              "finance.report.read"
+            ],
+            "role": "FINANCE_MANAGER",
+            "user_id": 58
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": [
+          {
+            "client_id": 101,
+            "club_id": 1001,
+            "id": "delegation-profile-58",
+            "is_active": false,
+            "issuer_assignment_id": "cm-3",
+            "permissions": [
+              "client.club.read",
+              "client.club.profile.write"
+            ],
+            "recipient_assignment_id": "floor-58"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [
+            "client.club.read",
+            "client.club.profile.write"
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        },
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FINANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 58,
+      "writer_probes": [
+        {
+          "client_id": 101,
+          "club_id": 1001,
+          "future_actions": [
+            "finance.report.read",
+            "table.seat.booked"
+          ],
+          "package": "MANAGER"
+        }
+      ]
+    },
+    {
+      "access_probes": [
+        {
+          "capability": "client.club.profile.write",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "configuration",
+          "signed_identity": true
+        },
+        {
+          "capability": "finance.report.read",
+          "client_id": 101,
+          "club_id": 1001,
+          "kind": "finance",
+          "signed_identity": true
+        }
+      ],
+      "id": "full-club-disable-distinct-from-one-revoke",
+      "policy_fixture": {
+        "assignments": [
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "cm-3",
+            "is_active": true,
+            "permissions": [
+              "configuration.delegate",
+              "client.club.read",
+              "client.club.profile.write",
+              "client.club.layout.write",
+              "client.club.calendar.write",
+              "client.club.booking_rules.write"
+            ],
+            "role": "CLUB_MANAGER",
+            "user_id": 3
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "floor-58",
+            "is_active": false,
+            "permissions": [
+              "table.seat.booked"
+            ],
+            "role": "FLOOR_MANAGER",
+            "user_id": 58
+          },
+          {
+            "business_id": "biz-A",
+            "client_id": 101,
+            "club_ids": [
+              1001
+            ],
+            "id": "fin-58",
+            "is_active": false,
+            "permissions": [
+              "finance.report.read"
+            ],
+            "role": "FINANCE_MANAGER",
+            "user_id": 58
+          }
+        ],
+        "businesses": [
+          {
+            "client_id": 101,
+            "club_ids": [
+              1001,
+              1002,
+              1003,
+              1004,
+              1005
+            ],
+            "id": "biz-A",
+            "owner_user_id": 51
+          }
+        ],
+        "delegations": [
+          {
+            "client_id": 101,
+            "club_id": 1001,
+            "id": "delegation-profile-58",
+            "is_active": false,
+            "issuer_assignment_id": "cm-3",
+            "permissions": [
+              "client.club.read",
+              "client.club.profile.write"
+            ],
+            "recipient_assignment_id": "floor-58"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [
+            "client.club.read",
+            "client.club.profile.write"
+          ],
+          "role": "FLOOR_MANAGER",
+          "scope": "CLUBS"
+        },
+        {
+          "client_id": 101,
+          "club_ids": [
+            1001
+          ],
+          "delegated_permissions": [],
+          "role": "FINANCE_MANAGER",
+          "scope": "CLUBS"
+        }
+      ],
+      "user_id": 58,
+      "writer_probes": [
+        {
+          "client_id": 101,
+          "club_id": 1001,
+          "future_actions": [
+            "finance.report.read",
+            "table.seat.booked"
+          ],
+          "package": "MANAGER"
+        }
+      ]
+    }
+  ]
+}

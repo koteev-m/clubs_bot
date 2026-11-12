@@ -12,7 +12,6 @@ import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.params.ParameterizedTest
@@ -24,11 +23,6 @@ import java.sql.SQLException
 @Timeout(30)
 internal class CanonicalBookingCheckinPostgresIT : PostgresIntegrationTest() {
     private val observer by lazy { source("observer") }
-
-    @BeforeEach
-    fun clearClientActors() {
-        observer.write("TRUNCATE TABLE clients, users RESTART IDENTITY CASCADE")
-    }
 
     @Test
     fun `checkin and its visit block the calendar until the whole admission commits`() =

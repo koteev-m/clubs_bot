@@ -2,6 +2,7 @@ package com.example.bot.data.club
 
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
+import com.example.bot.data.testing.freshPostgresSchema
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.Table
@@ -50,25 +51,7 @@ abstract class PostgresClubIntegrationTest {
 
     @BeforeEach
     fun cleanDatabase() {
-        transaction(database) {
-            exec(
-                """
-                TRUNCATE TABLE
-                    checkins,
-                    guest_list_entries,
-                    invitations,
-                    guest_lists,
-                    bookings,
-                    booking_holds,
-                    events,
-                    tables,
-                    zones,
-                    clubs,
-                    users
-                RESTART IDENTITY CASCADE
-                """.trimIndent(),
-            )
-        }
+        freshPostgresSchema(postgres)
     }
 
     protected fun insertClub(

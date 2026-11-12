@@ -441,6 +441,10 @@ Managed Bots и disputed modules не становятся выполненны�
 <a id="owner-manager-sequence"></a>
 ## Уточнение последовательности: управление и подготовка, 2026-11-09
 
+**Историческая последовательность:** nine-role catalogue и hierarchy ниже
+заменены в противоречащей части [уточнением 2026-11-10](#role-model-20261110-sequence).
+Существующие implementation/release результаты и незатронутые gates сохраняются.
+
 Основание — [принятое уточнение](OPEN_DECISIONS.md#owner-manager-model-decision)
 и [PRODUCT_SPEC §29.17](PRODUCT_SPEC.md#owner-manager-model), без нового DEC/CLB номера.
 Новый основной target catalogue содержит ровно девять ролей: Владелец сети,
@@ -479,3 +483,58 @@ concept и другие проекты сохраняются; guest cutover, д
 рабочие кабинеты, Managed Bots и disputed modules не включаются. DEC-006/012/014
 и DEC-013/022/031 не закрыты новым catalogue. Acceptance решения, локальный
 implementation evidence и runtime release checkpoints учитываются раздельно.
+
+<a id="role-model-20261110-sequence"></a>
+## Восемь ролей: направление и следующие gates, 2026-11-10
+
+Основание — [прямо принятое уточнение](OPEN_DECISIONS.md#role-model-20261110-decision)
+и [PRODUCT_SPEC §29.18](PRODUCT_SPEC.md#business-role-model-20261110). Владелец бизнеса
+един для одного/нескольких клубов; network manager необязателен. Состав — восемь
+клиентских ролей, platform authority отдельно. Это AMEND role model, а не новая
+миграция или разрешение открыть текущие legacy APIs. DEC-006 теперь accepted для
+explicit same-network club assignments/booking; прежние pending формулировки выше
+сохраняют состояние на свои даты. Остальные unresolved contracts не принимаются.
+
+1. **Зафиксировать accepted target отдельно от PROPOSED реализации.** В одном
+   [проекте контракта](ROLE_WORKSPACES_PROPOSED.md#role-model-20261110) разделить
+   owner/network/club delegation, granular manager configuration, strict financial
+   scope/capability, promoter booking и attribution. Определить trustworthy own-club/
+   network membership без legacy OWNER/GLOBAL или client-membership fallback.
+2. **Пересчитать offline shadow на synthetic данных.** Восемь role labels и отдельная
+   platform identity; exact assignments/старые packages/tombstones не меняются.
+   Показать no-expansion/no-restore, single→multi-club без автоматических прав,
+   новый issuer hierarchy против current creator-only API, обе authority systems,
+   grant-writer coexistence и независимо financial scope/capability. PASS отчёта не
+   равен readiness DB migration или runtime.
+3. **До новой выдачи принять exact permission/delegation/writer contract.** Target
+   owner appoint/revoke network/club managers; network manager назначает club managers
+   своего scope, но не network manager; club manager назначает lower staff и отдельно
+   делегирует manager configuration. Конкретные allowlists, issuer limits, confirmation,
+   revoke scopes, audit/idempotency/version, expiry и concurrency должны быть проверены
+   прежде, чем новый путь получит authority. Existing packages/invitations не backfill.
+4. **Перед кабинетами обеспечить read/data boundary.** Owner видит свои клубы и
+   закрытые финансовые итоги; network — assigned clubs; club/manager/finance — свои
+   exact scopes с отдельными capabilities. Проверить соседние клубы одного client,
+   private descendants/exports/analytics и UI stale responses. Финансовый read не
+   создаёт shift; configuration delegation не выдаёт staff/finance authority.
+5. **Canonical booking и promoter attribution — отдельные завершённые outcomes.**
+   Сохраняются DEC-008/009/018, V070/V072 links, empty V073 TEST_ONLY activation и
+   quiescence conflicting writers перед разрешённым cutover. Promoter assigned A/B/C
+   бронирует только A/B/C с current exact permission и видит own statuses. Attribution
+   CLUB/конкретный promoter отдельно от monetary mode, без двойного назначения
+   источника через body ID. Data/history/correction UI/rewards — только по отдельно
+   принятому техническому/продуктовому контракту, не побочный эффект booking.
+6. **Затем самостоятельные operational cabinets по своим gates.** Entrance зависит
+   от DEC-010/011/020/021, canonical list/pass/outcome и принятой authoring authority;
+   floor — от seating/stop-sales/ledger/entrance-first contract; finance — DEC-012 и
+   отдельные денежные capabilities/freeze. Promoter booking не разрешает эти действия.
+   Рекомендация конкретного первого кабинета остаётся в PROPOSED-проекте, а не
+   объявляется принятым implementation priority этим catalogue.
+
+DoD каждого implementation outcome: meaningful production wiring, exact allow/deny
+и client/club isolation, current authorization после revoke/replay, atomic audit,
+необходимые Ktor/Postgres checks и packaged/mobile journeys по affected scope.
+В этом этапе меняются docs/offline synthetic helper/test, не production RBAC,
+grants/schema/routes. Publication, live migration, guest cutover, staging smoke и
+deploy требуют отдельной authority. Emergency management recovery, music upload,
+attribution correction UI и promoter rewards остаются будущими решениями.

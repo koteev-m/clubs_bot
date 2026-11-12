@@ -545,6 +545,10 @@ DEC-013/014/022 и initial allocation catalogue/configuration boundary DEC-031
 <a id="owner-manager-gap"></a>
 ## Управление клубом: target/source/implementation delta, 2026-11-09
 
+**Исторический delta:** девять target ролей и creator-only hierarchy здесь
+сохраняют принятие 2026-11-09; противоречащая часть заменена
+[уточнением восьми ролей 2026-11-10](#role-model-20261110-gap).
+
 Прямое решение владельца — [PRODUCT_SPEC §29.17](PRODUCT_SPEC.md#owner-manager-model)
 и [decision addendum](OPEN_DECISIONS.md#owner-manager-model-decision). Это новая
 локальная задача `CLB-owner-manager-ux`, base `16761e43887036688028358524847db1af0e5326`
@@ -574,3 +578,38 @@ compatibility и audit/rollback verification. DEC-006 promoter scope, DEC-012
 финансы, DEC-014 музыка и ограничения DEC-013/022/031 не закрыты новым catalogue.
 Новые кабинеты остальных ролей, network authority, guest booking cutover и денежные
 операции остаются вне этого локального scope.
+
+<a id="role-model-20261110-gap"></a>
+## Восемь ролей: принятый target и implementation gaps, 2026-11-10
+
+Authority: [PRODUCT_SPEC §29.18](PRODUCT_SPEC.md#business-role-model-20261110) и
+[прямой decision addendum](OPEN_DECISIONS.md#role-model-20261110-decision), задача
+`CLB-role-model-revision`, exact main `5550b944990d8c1c93c0a5012d31db209f93ea6d`
+после PR #567. Только следующие item-level изменения target приняты; 170 source
+rows, immutable concept и прежние датированные evidence не переписываются.
+
+| Concept / прежняя граница | Принятая классификация | Current evidence / оставшийся gap |
+|---|---|---|
+| RBAC-001 и девять ролей 2026-11-09 | **AMEND** | Восемь ролей; один Владелец бизнеса вместо network/club owners, platform owner отдельно. Existing role enums/packages не реализуют новый catalogue автоматически |
+| Один клуб → сеть | **AMEND** | То же client space без переноса данных/automatic rights; network manager и сетевой кабинет при одном клубе необязательны. Own-club/network authority не выводится из membership или GLOBAL |
+| Creator-only team authority и настройка владельцем в текущем slice | **AMEND target**, **KEEP current evidence** | Owner appoint/revoke network/club managers; network manager назначает club manager своего scope; club manager — lower staff и delegated manager configuration. Current creator-only ClubTeamOperations/ClubStaffAccess не имеют безопасного нового issuer hierarchy; их вызов от имени новой роли не разрешён |
+| MANAGER configuration package | **AMEND target**, **KEEP existing grants** | Менеджер может получить отдельные hall/night/profile/booking-rule permissions; delegation не даёт staff/ownership/shift/other-club rights. Existing five-token package не превращается автоматически в granular delegation |
+| NET/ANL/FIN scope | **AMEND** | Scope и capability отдельно на сервере для reports/revenue/closed shifts/deposits/money/aggregates/exports/analytics/private data; owner own clubs/closed totals, network assigned clubs, club/manager/finance exact scopes. Existing finance-template grants не означают financial operations/reports |
+| DEC-006 GLOBAL promoter tension | **AMEND**, scope **ACCEPTED_DECISION** | Explicit active assignments+permission в клубах той же сети, own booking statuses. Existing legacy promoter APIs и GLOBAL semantics не являются новой client authority; нет accepted analytics/quotas/rewards или runtime cutover |
+| GL-006 attribution и TOPS-002 financial mode | **AMEND** | Source CLUB/конкретный promoter отдельно от monetary mode; «от клуба» не бесплатно, «от promoter» не его оплата. Concrete assignment links, manager view, same-club picker, cancel/no-show/table move/revoke/history и correcting commands требуют PROPOSED technical contract; один enum не допускается |
+| DJ/другие профессии в role catalogue | **AMEND** | Будущие personnel/artist cards/shift assignments, не обязательные новые RBAC-роли этого этапа. Music capabilities/history **KEEP**; upload access и DEC-014 остаются открыты |
+| Legacy/GLOBAL, assignments/tombstones, current grant writer | **KEEP** | Никакого автоматического rename/adoption/backfill/restore; new target grants не выдаются. Existing replace выключает exact-tuple grants, поэтому coexistence и origin/assignment boundaries требуют отдельного writer contract |
+
+Current evidence: [ClubStaffAccess](../../core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubStaffAccess.kt),
+[ClubTeamOperations](../../core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubTeamOperations.kt),
+[OnboardingSql](../../core-data/src/main/kotlin/com/example/bot/data/client/onboarding/OnboardingSql.kt),
+[PrivateClubContainment](../../app-bot/src/main/kotlin/com/example/bot/plugins/PrivateClubContainment.kt).
+Более подробные source locators, role-to-code crosswalk и новый
+[PROPOSED technical contract](ROLE_WORKSPACES_PROPOSED.md#role-model-20261110)
+отделяют принятый product target от implementation proposals.
+
+Gap closure этой задачи — согласованность документации и offline synthetic shadow,
+не новая permission registry или выполненная миграция. DEC-012 и pass/list/outcome
+DEC-010/011/020/021, emergency recovery, correction UI, финансовые режимы и rewards
+не разрешаются этим delta. Stage/prod, real assignments/DB, grants/routes и runtime
+не проверяются; accepted target не объявляется AS_BUILT.
