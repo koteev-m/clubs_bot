@@ -1,5 +1,53 @@
 # Project status checkpoint
 
+## CLB_STAGE_SNAPSHOT_FINAL_FIX — local, 2026-11-13
+
+- PARTIAL_BLOCKED: [final two-finding correction](stage-protected-readonly-snapshot.md#final-two-finding-correction--2026-11-13).
+  Namespace-mutating role contexts now refuse before COPY; relation and namespace
+  OIDs are rechecked under the existing transaction lock. Interrupted cleanup
+  retains failure state and can finish boundedly without signalling after reap.
+- PROJECT_IDENTITY_OK; active foreign instructions=0; registered detached worktree
+  `/private/tmp/clb-stage-readonly-snapshot-20261112`, HEAD/base
+  `aed1e5831ca807f1c8ab2d58dbc952efc899207b`; initial 11 paths exactly matched manifest
+  `2df107d3b5a91c8a7604c4baefcf2878d1421ee11c9440b6808e5954483f08c9`.
+- Snapshot host 43 PASS/5 Linux-only SKIP; pin 8 PASS/5 SKIP; inventory 13 PASS/3 SKIP;
+  workflow YAML/capabilities (33 workflows), Python compile, shell syntax, links
+  and diff checks pass. Two new cleanup cases reproduced RED on the input helper.
+  Six new PG cases bring the disposable suite to 23; four new process cases bring
+  snapshot tests to 48. Evidence: `/private/tmp/clb-snapshot-final-fix-vltrti7_/`.
+- Docker socket access denied: PG setup ran 0 cases, Linux container did not start,
+  secret scan blocked at preflight. PG16.11/16.14, Linux cross-thread cancellation
+  and final-source/history secret scan remain UNVERIFIED. Trusted administrative
+  schema/role/grant changes during reads are outside the supported DB contract.
+- Only local source/tests/docs modified. No commit/push/PR/merge, dispatch, live
+  SSH/DB, deploy/migration, Environment/secrets or authorization changes. Existing
+  deploy, RBAC, Mini App, SSH protections and five other candidate files preserved.
+  STAGE_RELEASE_ADMISSION remains BLOCKED; live/runtime gates remain UNKNOWN.
+- Next: run blocked PG16.11/16.14, Linux and pinned secret-scan gates on this exact
+  manifest in an authorized Docker environment; no publication or runtime action.
+
+## CLB_STAGE_READONLY_SNAPSHOT_P1_P2_FIX — local, 2026-11-13
+
+- [Six corrected review findings](stage-protected-readonly-snapshot.md): catalog/
+  locked exact-OID heap Flyway read; no SSH identity-file/certificate fallback;
+  owned group TERM/KILL before leader reap; disjoint snapshot Actions group;
+  canonical NOT_FOUND vs UNKNOWN; complete strict schema with fixed UNKNOWN gates.
+- PROJECT_IDENTITY_OK, foreign instructions=0; registered detached worktree
+  `/private/tmp/clb-stage-readonly-snapshot-20261112`, HEAD/base/merge-base/fresh main
+  `aed1e5831ca807f1c8ab2d58dbc952efc899207b`. Initial nine-path hashes exactly
+  matched review baseline `c42c57ea3a30ebf445a21f96c1a744b9b13a1d487abf873a3740dc108ba420e6`.
+- READY_FOR_FOCUSED_REVIEW. Snapshot44 unique cases, 17 disposable PostgreSQL cases on
+  PG16.11/16.14, affected pin/inventory and static/security gates are retained
+  with final input hashes in `/private/tmp/clb-snapshot-p1-p2-fix-w348ht5h/`.
+  Original review RED evidence remains unchanged. No full JVM/IT or live run.
+- STAGE_RELEASE_ADMISSION remains BLOCKED; backup/recovery, FSM/ledger integrity,
+  Hookah identity/isolation and future migration/release gates remain UNKNOWN.
+  No dispatch, SSH/server access, stage/prod/Hookah DB mutation, deploy/migration/
+  backup/restore, trust/Environment/credential change, Git staging/publication
+  or RBAC worktree change. Existing deploy concurrency and migrations preserved.
+- Next: independent focused review; no Draft PR preparation or operational continuation.
+
+
 ## ROLE_TARGET_CONTROL_OPERATOR_P1_FIX — local, 2026-11-12
 
 - [Focused P1 correction/evidence](role-target-db-control-head-foundation.md#role_target_control_operator_p1_fix--local-correction-2026-11-12):

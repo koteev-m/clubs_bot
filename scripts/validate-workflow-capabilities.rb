@@ -10,6 +10,7 @@ require_relative "validate-stage-compose-mode-workflow"
 require_relative "validate-stage-compose-diagnostic-workflow"
 require_relative "validate-stage-compose-env-semantic-workflow"
 require_relative "validate-stage-runtime-inventory-workflow"
+require_relative "validate-stage-readonly-snapshot-workflow"
 require_relative "validate-stage-package-plan-workflow"
 require_relative "validate-stage-apt-metadata-refresh-workflow"
 require_relative "validate-stage-runtime-feasibility-workflow"
@@ -1294,6 +1295,7 @@ module WorkflowCapabilityPolicy
     key = [path, job_name]
     return DEPLOY_SECRETS if DEPLOY_JOBS.key?(key)
     return RELEASE_STATUS_SECRETS if key == [RELEASE_STATUS_WORKFLOW, "status"]
+    return RELEASE_STATUS_SECRETS if key == [StageReadonlySnapshotWorkflow::PATH, "snapshot"]
     return RELEASE_STATUS_SECRETS if key == [StageComposeModeWorkflow::PATH, "repair"]
     return RELEASE_STATUS_SECRETS if key == [StageComposeDiagnosticWorkflow::PATH, "diagnose"]
     return RELEASE_STATUS_SECRETS if key == [StageComposeEnvSemanticWorkflow::PATH, "diagnose"]
@@ -1353,6 +1355,7 @@ module WorkflowCapabilityPolicy
     expected = "stage" if key == [StageComposeDiagnosticWorkflow::PATH, "diagnose"]
     expected = "stage" if key == [StageComposeEnvSemanticWorkflow::PATH, "diagnose"]
     expected = "stage" if key == [StageRuntimeInventoryWorkflow::PATH, "inventory"]
+    expected = "stage" if key == [StageReadonlySnapshotWorkflow::PATH, "snapshot"]
     expected = "stage" if key == [StagePackagePlanWorkflow::PATH, "collect"]
     expected = "stage" if key == [StageAptMetadataRefreshWorkflow::PATH, "refresh"]
     expected = "stage" if key == [StageRuntimeFeasibilityWorkflow::PATH, "feasibility"]
@@ -2333,6 +2336,7 @@ module WorkflowCapabilityPolicy
       StageComposeDiagnosticWorkflow.validate(self, workflow) if path == StageComposeDiagnosticWorkflow::PATH
       StageComposeEnvSemanticWorkflow.validate(self, workflow) if path == StageComposeEnvSemanticWorkflow::PATH
       StageRuntimeInventoryWorkflow.validate(self, workflow) if path == StageRuntimeInventoryWorkflow::PATH
+      StageReadonlySnapshotWorkflow.validate(self, workflow) if path == StageReadonlySnapshotWorkflow::PATH
       StagePackagePlanWorkflow.validate(self, workflow) if path == StagePackagePlanWorkflow::PATH
       StageAptMetadataRefreshWorkflow.validate(self, workflow) if path == StageAptMetadataRefreshWorkflow::PATH
       StageRuntimeFeasibilityWorkflow.validate(self, workflow) if path == StageRuntimeFeasibilityWorkflow::PATH

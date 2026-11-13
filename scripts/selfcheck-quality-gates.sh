@@ -11824,6 +11824,10 @@ echo "[selfcheck] private semantic request/source/protocol regressions (offline 
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_env_semantic.py" RuntimeProfileTest ProtocolTest SourceTest
 echo "[selfcheck] fixed non-secret runtime inventory regressions"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_inventory.py"
+echo "[selfcheck] protected stage read-only snapshot boundaries"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_readonly_snapshot.py"
+echo "[selfcheck] snapshot canonical Flyway disposable PostgreSQL safety"
+CLB_SNAPSHOT_DISPOSABLE_PG=1 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_snapshot_postgres.py"
 echo "[selfcheck] fixed read-only package-plan channel and frozen collector"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_expat_rebaseline.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_package_plan_collector.py"
