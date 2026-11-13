@@ -14,7 +14,7 @@ OLD = 'dc588b651fe13675774614f8e6a936a468676387'
 WORKFLOWS = ('db-migrate', 'deploy-ssh', 'release-status', 'corrected-stage-release',
              'stage-compose-diagnostic', 'stage-runtime-inventory', 'stage-runtime-feasibility', 'stage-principal-uid',
              'stage-compose-mode-repair', 'stage-compose-env-semantic',
-             'stage-package-plan', 'stage-apt-metadata-refresh')
+             'stage-package-plan', 'stage-apt-metadata-refresh', 'stage-readonly-snapshot')
 FIXTURE = ROOT / 'scripts/tests/fixtures/ssh-agent-v0.10.0.json'
 
 # Exact upstream source and extracted dist module bodies are evaluated in a VM.
