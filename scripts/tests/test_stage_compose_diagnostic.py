@@ -1393,7 +1393,7 @@ StageComposeDiagnosticWorkflow.validate(WorkflowCapabilityPolicy,w)
             self.assertIn(name, selfcheck)
         ruby = '''require "validate-workflow-yaml"; require "validate-workflow-capabilities";
 root=Pathname.new(ARGV[0]); paths=WorkflowYamlSafety.visible_workflows(root);
-raise "inventory: expected 32, actual #{paths.length}" unless paths.length == 32;
+raise "inventory: expected 33, actual #{paths.length}" unless paths.length == 33;
 raise "yaml" unless WorkflowYamlSafety.run(root) == 0;
 WorkflowCapabilityPolicy.run(root);
 '''
@@ -1418,14 +1418,14 @@ WorkflowCapabilityPolicy.run(root);
             with self.subTest(inventory='missing-one'):
                 child = validate(fixture)
                 self.assertNotEqual(child.returncode, 0)
-                self.assertIn('inventory: expected 32, actual 31', child.stderr)
+                self.assertIn('inventory: expected 33, actual 32', child.stderr)
             removed.write_bytes(retained)
             extra = fixture / '.github/workflows/clb91-unexpected-inventory.yml'
             self.assertFalse(extra.exists()); extra.write_bytes(retained)
             with self.subTest(inventory='extra-one'):
                 child = validate(fixture)
                 self.assertNotEqual(child.returncode, 0)
-                self.assertIn('inventory: expected 32, actual 33', child.stderr)
+                self.assertIn('inventory: expected 33, actual 34', child.stderr)
 
 
 class EndToEndTest(unittest.TestCase):

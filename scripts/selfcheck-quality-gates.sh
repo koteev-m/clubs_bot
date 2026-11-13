@@ -1515,6 +1515,11 @@ validate_tests_workflow_contract() {
   local postgres_wait_run
   local repository_guard_run
 
+  if ! ruby -I "$ROOT_DIR/scripts" -r validate-workflow-capabilities -r yaml -e \
+    'TestsWorkflow.validate(WorkflowCapabilityPolicy, YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true))' "$file"; then
+    fail "Tests workflow mandatory logs-policy/aggregate contract changed: $file"
+  fi
+
   assert_exact_line "$file" "name: Tests"
 
   if ! trigger_contract="$(normalize_top_level_trigger_contract "$file")"; then
@@ -1547,11 +1552,11 @@ validate_tests_workflow_contract() {
   ' "$file")"; then
     fail "Tests workflow jobs block is missing or ambiguous: $file"
   fi
-  if [ "$jobs_contract" != $'unit-tests\nintegration-tests\namd64-runtime-prototype' ]; then
-    fail "Tests workflow must contain exactly unit-tests, integration-tests and amd64-runtime-prototype: $file"
+  if [ "$jobs_contract" != $'unit-tests\nintegration-tests\nlogs-policy\ntests-required\namd64-runtime-prototype' ]; then
+    fail "Tests workflow must contain exactly unit-tests, integration-tests, logs-policy, tests-required and amd64-runtime-prototype: $file"
   fi
 
-  for job_name in unit-tests integration-tests; do
+  for job_name in unit-tests integration-tests logs-policy; do
     assert_job_line "$file" "$job_name" "    runs-on: ubuntu-latest"
     assert_job_has_no_direct_key "$file" "$job_name" "if"
     assert_job_has_no_direct_key "$file" "$job_name" "continue-on-error"
@@ -1587,6 +1592,7 @@ validate_tests_workflow_contract() {
     $'./gradlew help \\\n--dependency-verification=strict \\\n--no-configuration-cache \\\n--no-build-cache \\\n--console=plain'
   assert_job_line "$file" "unit-tests" "      - &guard-no-project-repositories"
   assert_job_line "$file" "integration-tests" "      - *guard-no-project-repositories"
+  assert_job_line "$file" "logs-policy" "      - *guard-no-project-repositories"
 
   if ! awk '
     $0 == "  unit-tests:" {
@@ -1670,17 +1676,17 @@ validate_tests_workflow_contract() {
     'if ./gradlew test -PrunIT=true --no-configuration-cache $extra --console=plain --stacktrace; then'
   assert_contains "$integration_run" "exit 1"
 
-  if ! logs_policy_run="$(normalize_step_run_contract "$file" "integration-tests" "Logs policy scan (SEC-02) (retry x2)")"; then
-    fail "integration logs-policy command is missing or ambiguous in $file"
+  if ! logs_policy_run="$(normalize_step_run_contract "$file" "logs-policy" "Logs policy scan (SEC-02) (retry x2)")"; then
+    fail "standalone logs-policy command is missing or ambiguous in $file"
   fi
   assert_step_has_no_direct_key \
     "$file" \
-    "integration-tests" \
+    "logs-policy" \
     "Logs policy scan (SEC-02) (retry x2)" \
     "if"
   assert_step_has_no_direct_key \
     "$file" \
-    "integration-tests" \
+    "logs-policy" \
     "Logs policy scan (SEC-02) (retry x2)" \
     "continue-on-error"
   assert_contains \
@@ -3678,7 +3684,7 @@ anchor_indexes = [
 alias_indexes = [
     index for index, line in enumerate(lines) if line.rstrip("\r\n") == alias
 ]
-if len(anchor_indexes) != 1 or len(alias_indexes) != 1:
+if len(anchor_indexes) != 1 or len(alias_indexes) != 2:
     raise SystemExit("remove_tests_repository_guard: guard anchor/alias is ambiguous")
 
 anchor_start = anchor_indexes[0]
@@ -3693,48 +3699,41 @@ removed = lines[anchor_start:anchor_end]
 if not any("Guard: no project-level repositories" in line for line in removed):
     raise SystemExit("remove_tests_repository_guard: target step name not found")
 
-alias_index = alias_indexes[0]
 kept = [
     line
     for index, line in enumerate(lines)
-    if not (anchor_start <= index < anchor_end) and index != alias_index
+    if not (anchor_start <= index < anchor_end) and index not in alias_indexes
 ]
 target.write_text("".join(kept), encoding="utf-8")
 PY
 }
 
-move_exact_line_before() {
-  local source_file="$1"
-  local target_file="$2"
-  local moving_line="$3"
-  local before_line="$4"
-  python3 - "$source_file" "$target_file" "$moving_line" "$before_line" <<'PY'
+# Aliases now occur in both integration-tests and logs-policy. Mutate only the
+# intended integration prerequisite, retaining strict rejection of ambiguity.
+mutate_tests_integration_guard() {
+  python3 - "$1" "$2" "$3" <<'PYTHON'
 from pathlib import Path
+import re
 import sys
 
-source = Path(sys.argv[1])
-target = Path(sys.argv[2])
-moving_line = sys.argv[3]
-before_line = sys.argv[4]
-lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
-
-moving = [
-    index for index, line in enumerate(lines) if line.rstrip("\r\n") == moving_line
-]
-before = [
-    index for index, line in enumerate(lines) if line.rstrip("\r\n") == before_line
-]
-if len(moving) != 1 or len(before) != 1:
-    raise SystemExit("move_exact_line_before: moving/target line is ambiguous")
-
-line = lines.pop(moving[0])
-before_index = next(
-    index for index, candidate in enumerate(lines)
-    if candidate.rstrip("\r\n") == before_line
-)
-lines.insert(before_index, line)
-target.write_text("".join(lines), encoding="utf-8")
-PY
+source, target, mutation = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+text = source.read_text()
+jobs = list(re.finditer(r"(?ms)^  integration-tests:\n.*?(?=^  [a-zA-Z0-9_-]+:|\Z)", text))
+if len(jobs) != 1:
+    raise SystemExit("integration guard fixture: ambiguous job")
+job = jobs[0]
+body = job[0]
+guard = "      - *guard-no-project-repositories\n"
+wrapper = "      - *validate-wrapper\n"
+if body.count(guard) != 1 or body.count(wrapper) != 1:
+    raise SystemExit("integration guard fixture: ambiguous step")
+body = body.replace(guard, "", 1)
+if mutation == "before-setup":
+    body = body.replace(wrapper, guard + wrapper, 1)
+elif mutation != "removed":
+    raise SystemExit("integration guard fixture: unknown mutation")
+target.write_text(text[:job.start()] + body + text[job.end():])
+PYTHON
 }
 
 move_build_labels_outside_with() {
@@ -4468,11 +4467,10 @@ assert_tests_workflow_contract_rejected \
   "$tests_guard_removed_fixture"
 
 tests_guard_before_setup_fixture="$TMP_DIR/tests-guard-before-setup.yml"
-move_exact_line_before \
+mutate_tests_integration_guard \
   "$tests_workflow" \
   "$tests_guard_before_setup_fixture" \
-  "      - *guard-no-project-repositories" \
-  "      - *validate-wrapper"
+  "before-setup"
 assert_tests_workflow_contract_rejected \
   "tests-guard-before-setup" \
   "$tests_guard_before_setup_fixture"
@@ -4509,11 +4507,10 @@ assert_tests_workflow_contract_rejected \
   "$tests_guard_without_strict_fixture"
 
 tests_integration_guard_removed_fixture="$TMP_DIR/tests-integration-guard-removed.yml"
-replace_exact_line_once \
+mutate_tests_integration_guard \
   "$tests_workflow" \
   "$tests_integration_guard_removed_fixture" \
-  "      - *guard-no-project-repositories" \
-  "      # integration repository guard removed"
+  "removed"
 assert_tests_workflow_contract_rejected \
   "tests-integration-guard-removed" \
   "$tests_integration_guard_removed_fixture"
@@ -8836,7 +8833,7 @@ assert_yaml_safety_fixture_valid() {
   if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
     assert_eq \
       "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
-      "32"
+      "33"
     assert_eq \
       "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/release-status.yml)" \
       ".github/workflows/release-status.yml"
@@ -11824,6 +11821,10 @@ echo "[selfcheck] private semantic request/source/protocol regressions (offline 
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_env_semantic.py" RuntimeProfileTest ProtocolTest SourceTest
 echo "[selfcheck] fixed non-secret runtime inventory regressions"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_inventory.py"
+echo "[selfcheck] protected stage read-only snapshot boundaries"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_readonly_snapshot.py"
+echo "[selfcheck] snapshot canonical Flyway disposable PostgreSQL safety"
+CLB_SNAPSHOT_DISPOSABLE_PG=1 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_snapshot_postgres.py"
 echo "[selfcheck] fixed read-only package-plan channel and frozen collector"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_expat_rebaseline.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_package_plan_collector.py"

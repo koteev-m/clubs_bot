@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from copy import deepcopy
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / 'scripts/tests/linux-semantic'
@@ -48,11 +49,128 @@ def bounded_clb195_gcc(stderr):
     return match[0].decode('ascii').strip()
 
 
+class LogsPolicyTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        raw = (ROOT / '.github/workflows/tests.yml').read_bytes()
+        cls.workflow = json.loads(subprocess.run(['ruby', '-ryaml', '-rjson', '-e',
+            'puts JSON.generate(YAML.safe_load(STDIN.read, aliases: true))'],
+            input=raw, capture_output=True, check=True, timeout=10).stdout)
+
+    def validate(self, workflow):
+        return subprocess.run(['ruby', '-I', str(ROOT / 'scripts'),
+            '-rvalidate-workflow-capabilities', '-rjson', '-e',
+            'TestsWorkflow.validate(WorkflowCapabilityPolicy, JSON.parse(STDIN.read))'],
+            input=json.dumps(workflow), capture_output=True, text=True, timeout=10)
+
+    def test_exact_job_contract_rejects_skips_bypasses_and_unbounded_time(self):
+        self.assertEqual(self.validate(self.workflow).returncode, 0)
+        mutations = []
+        for name in ('logs-policy', 'tests-required'):
+            for key, value in (('if', 'false'), ('continue-on-error', True),
+                               ('timeout-minutes', 0), ('timeout-minutes', 360),
+                               ('needs', []), ('permissions', {'contents': 'write'})):
+                changed = deepcopy(self.workflow)
+                changed['jobs'][name][key] = value
+                mutations.append(changed)
+            changed = deepcopy(self.workflow)
+            del changed['jobs'][name]
+            mutations.append(changed)
+        for key in ('if', 'needs'):
+            changed = deepcopy(self.workflow)
+            del changed['jobs']['tests-required'][key]
+            mutations.append(changed)
+        for name in ('logs-policy', 'tests-required'):
+            step_index = -2 if name == 'logs-policy' else 0
+            for key, value in (('if', 'false'), ('continue-on-error', True),
+                               ('run', 'exit 0\n')):
+                changed = deepcopy(self.workflow)
+                changed['jobs'][name]['steps'][step_index][key] = value
+                mutations.append(changed)
+        for mutation in ('skip-tests', 'IT-inputs', 'no-setup-guard', 'no-H2-env'):
+            changed = deepcopy(self.workflow)
+            job = changed['jobs']['logs-policy']
+            if mutation == 'skip-tests':
+                job['steps'][-2]['run'] = job['steps'][-2]['run'].replace(
+                    ':app-bot:checkLogsPolicy', ':app-bot:checkLogsPolicy -x test')
+            elif mutation == 'IT-inputs':
+                job['steps'][-2]['run'] += './gradlew test -PrunIT=true\n'
+            elif mutation == 'no-setup-guard':
+                del job['steps'][8]
+            else:
+                del job['steps'][-2]['env']['FLYWAY_LOCATIONS']
+            mutations.append(changed)
+        for i, workflow in enumerate(mutations):
+            with self.subTest(mutation=i):
+                self.assertNotEqual(self.validate(workflow).returncode, 0)
+
+    def test_actual_aggregate_requires_success_for_every_worker(self):
+        job = self.workflow['jobs']['tests-required']
+        self.assertEqual(job['if'], 'always()')
+        workers = {'unit-tests', 'integration-tests', 'logs-policy'}
+        self.assertEqual(set(job['needs']), workers)
+        body = job['steps'][0]['run']
+        success = {name: {'result': 'success'} for name in workers}
+
+        def run(value):
+            return subprocess.run(['bash', '-e', '-c', body], capture_output=True,
+                env=dict(os.environ, TESTS_NEEDS_JSON=json.dumps(value)), timeout=5)
+
+        self.assertEqual(run(success).returncode, 0)
+        for worker in workers:
+            for result in ('failure', 'cancelled', 'skipped', 'timed_out', 'unknown', None):
+                with self.subTest(worker=worker, result=result):
+                    changed = deepcopy(success)
+                    changed[worker]['result'] = result
+                    self.assertNotEqual(run(changed).returncode, 0)
+            for value in ({}, None, 'success'):
+                changed = deepcopy(success)
+                changed[worker] = value
+                self.assertNotEqual(run(changed).returncode, 0)
+        for value in ({}, [], None, dict(success, unexpected={'result': 'success'})):
+            self.assertNotEqual(run(value).returncode, 0)
+
+    def test_actual_scan_command_propagates_unsuccessful_attempts(self):
+        # Execute the actual workflow shell with controlled commands, not Gradle
+        # or a live daemon. A successful --stop must not hide a failed scan.
+        body = self.workflow['jobs']['logs-policy']['steps'][-2]['run']
+        with tempfile.TemporaryDirectory(prefix='clb569-logs-command-') as directory:
+            root = Path(directory)
+            gradle = root / 'gradlew'
+            gradle.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FIXTURE_CALLS"\n'
+                              'if [ "$1" = "--stop" ]; then exit 0; fi\n'
+                              'exit "$FIXTURE_EXIT"\n')
+            gradle.chmod(0o700)
+            (root / 'sleep').write_text('#!/bin/sh\nexit 0\n')
+            (root / 'sleep').chmod(0o700)
+            calls = root / 'calls'
+            for code in (0, 1, 124, 143):
+                with self.subTest(exit=code):
+                    calls.write_text('')
+                    child = subprocess.run(['bash', '-e', '-c', body], cwd=root,
+                        env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
+                                 FIXTURE_CALLS=str(calls), FIXTURE_EXIT=str(code)),
+                        capture_output=True, timeout=5)
+                    self.assertEqual(child.returncode == 0, code == 0)
+                    attempts = [line for line in calls.read_text().splitlines() if line != '--stop']
+                    self.assertEqual(len(attempts), 1 if code == 0 else 2)
+                    self.assertTrue(all(':app-bot:checkLogsPolicy' in line for line in attempts))
+
+    def test_gradle_test_and_MDC_prerequisites_remain(self):
+        text = (ROOT / 'app-bot/build.gradle.kts').read_text()
+        block = text.split('tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {', 1)[1].split(
+            '\n// ----------------------------------------------------------------------', 1)[0]
+        self.assertIn('dependsOn("test")', block)
+        self.assertIn('layout.projectDirectory.dir("src")', block)
+        self.assertIn('rootProject.layout.projectDirectory.dir("miniapp")', block)
+
+
 class HarnessTest(unittest.TestCase):
     def test_workflow_contract_and_existing_jobs_unchanged(self):
         raw = (ROOT / '.github/workflows/tests.yml').read_bytes()
         original = raw.split(b'\n  amd64-runtime-prototype:\n')[0]
-        self.assertEqual(hashlib.sha256(original).hexdigest(),
+        historical = (HERE / 'native-adapter/ci/tests.yml.candidate').read_bytes()
+        self.assertEqual(hashlib.sha256(historical.split(b'\n  amd64-runtime-prototype:\n')[0]).hexdigest(),
                          '010df3d58cf1ab89ef3978c517f3e6c124649cb656f918c4674aa30c2a319a60')
         # Psych is only the independent YAML test oracle on runner, never the
         # semantic runtime; no custom constructors or project execution.
@@ -60,7 +178,19 @@ class HarnessTest(unittest.TestCase):
             'puts JSON.generate(YAML.safe_load(STDIN.read, aliases: true))'],
             input=raw, capture_output=True, check=True)
         workflow = json.loads(result.stdout)
-        self.assertEqual(set(workflow['jobs']), {'unit-tests', 'integration-tests', 'amd64-runtime-prototype'})
+        self.assertEqual(set(workflow['jobs']), {'unit-tests', 'integration-tests', 'logs-policy',
+                                                'tests-required', 'amd64-runtime-prototype'})
+        old = json.loads(subprocess.run(['ruby', '-ryaml', '-rjson', '-e',
+            'puts JSON.generate(YAML.safe_load(STDIN.read, aliases: true))'],
+            input=historical, capture_output=True, check=True).stdout)
+        self.assertEqual(workflow['jobs']['unit-tests'], old['jobs']['unit-tests'])
+        integration = old['jobs']['integration-tests']
+        moved = next(step for step in integration['steps'] if step['name'].startswith('Logs policy scan'))
+        integration['steps'].remove(moved)
+        self.assertEqual(workflow['jobs']['integration-tests'], integration)
+        self.assertEqual(workflow['jobs']['logs-policy']['steps'][-2], moved)
+        self.assertEqual({k: v for k, v in workflow.items() if k != 'jobs'},
+                         {k: v for k, v in old.items() if k != 'jobs'})
         job = workflow['jobs']['amd64-runtime-prototype']
         self.assertEqual(job['if'], "github.event_name == 'workflow_dispatch'")
         self.assertEqual(job['runs-on'], 'ubuntu-24.04')
@@ -147,7 +277,7 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(text.count(command), 1)
         self.assertIn('python3 -B "$ROOT_DIR/scripts/tests/test_gitleaks_runtime_allowlist.py"', text)
         self.assertLess(text.index(command), text.index('validate_keyless_action_inventory()'))
-        self.assertIn("$'unit-tests\\nintegration-tests\\namd64-runtime-prototype'", text)
+        self.assertIn("$'unit-tests\\nintegration-tests\\nlogs-policy\\ntests-required\\namd64-runtime-prototype'", text)
         self.assertNotIn("$'unit-tests\\nintegration-tests'", text)
         self.assertIn('assert_tests_workflow_contract_rejected "tests-native-$native_mutation"', text)
 

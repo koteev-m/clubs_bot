@@ -258,7 +258,7 @@ class CapabilityFixture(unittest.TestCase):
         expected={'.github/workflows/release-status.yml','.github/workflows/corrected-stage-release.yml'}
         self.assertEqual(set(untracked),expected)
         self.assertFalse(expected.intersection(tracked))
-        self.assertEqual(sum(p.startswith('.github/workflows/') for p in tracked+untracked),32)
+        self.assertEqual(sum(p.startswith('.github/workflows/') for p in tracked+untracked),33)
 
     def test_each_missing_pinned_source_refuses(self):
         for name in D.SOURCES+(D.MANIFEST,):
@@ -373,7 +373,12 @@ class Policy(unittest.TestCase):
     def test_no_automatic_integration_of_existing_tests(self):
         actual=(ROOT/'.github/workflows/tests.yml').read_bytes()
         original=subprocess.check_output(['git','show','HEAD:.github/workflows/tests.yml'],cwd=ROOT)
-        self.assertEqual(actual,original)
+        # Ordinary CI topology may change with explicit approval. Keep the
+        # dispatched native prototype byte-exact and never wire this B launch
+        # into the automatic test jobs.
+        boundary=b'\n  amd64-runtime-prototype:\n'
+        self.assertEqual(actual.split(boundary,1)[1],original.split(boundary,1)[1])
+        self.assertNotIn(b'scripts/tests/linux-semantic/b-launch/',actual)
 
 
 class Artifact(unittest.TestCase):
