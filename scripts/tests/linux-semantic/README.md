@@ -239,7 +239,8 @@ one `amd64-runtime-prototype` job, only on `workflow_dispatch`, using the standa
 `ubuntu-24.04` x64 runner, `contents: read`, no Environment or deployment secrets,
 exact `github.sha` checkout and `persist-credentials: false`. Its bounded
 75-minute timeout covers the 65-minute command budget plus cleanup/artifact time. Existing triggers,
-unit/integration jobs and YAML anchors are unchanged; workflow inventory is 26.
+unit/integration test coverage and YAML anchors are preserved. Logs Policy now has
+its own 45-minute job and an always-run `tests-required` aggregate; workflow inventory is 33.
 The capability validator has a runner-label rule only for this exact manual job;
 its permissions still use the unchanged `contents: read` policy. Other jobs still
 require `ubuntu-latest`; no self-hosted/slim/ARM runner or emulation setup is added.
@@ -251,9 +252,10 @@ selected on a new feature branch without merging it first. For example (text onl
 gh workflow run tests.yml --repo koteev-m/clubs_bot --ref APPROVED_FEATURE_BRANCH
 ```
 
-This dispatch also runs the existing **unit-tests** and **integration-tests** jobs
-(including their Gradle/SEC-02 checks and Postgres fixture); their conditions were
-not narrowed. A plain feature-branch push triggers **Smoke**, which uses `**`;
+This dispatch also runs **unit-tests**, **integration-tests**, **logs-policy**
+and the **tests-required** aggregate (including the full Gradle test prerequisites,
+SEC-02 scan and Postgres fixture); their conditions were not narrowed. The main
+ruleset must require `tests-required` for merge enforcement. A plain feature-branch push triggers **Smoke**, which uses `**`;
 Tests itself runs on PR events, pushes to main, or manual dispatch. Opening a PR
 also triggers the existing PR workflows, with this manual-only job skipped.
 The existing `tests-${{ github.ref }}` concurrency/cancel policy is unchanged.

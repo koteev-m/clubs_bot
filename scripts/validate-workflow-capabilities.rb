@@ -17,6 +17,7 @@ require_relative "validate-stage-runtime-feasibility-workflow"
 require_relative "validate-stage-principal-uid-workflow"
 require_relative "validate-clb91-b-native-workflow"
 require_relative "validate-clb91-b-postwait-canary-workflow"
+require_relative "validate-tests-workflow"
 
 module WorkflowCapabilityPolicy
   module_function
@@ -2344,6 +2345,7 @@ module WorkflowCapabilityPolicy
       Clb91BPostwaitCanaryWorkflow.validate(self, workflow) if path == Clb91BPostwaitCanaryWorkflow::PATH
       Clb91BNativeWorkflow.validate(self, workflow) if path == Clb91BNativeWorkflow::PATH
       Clb91BNativeWorkflow.sources(self, root) if path == Clb91BNativeWorkflow::PATH
+      TestsWorkflow.validate(self, workflow) if path == TestsWorkflow::PATH
       validate_privileged_trigger(path, triggers, jobs)
       validate_release_status_contract(path, workflow, triggers, jobs, raw)
       top_level = workflow.reject { |key, _value| key == "jobs" }

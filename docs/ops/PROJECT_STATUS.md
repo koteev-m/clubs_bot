@@ -1,5 +1,37 @@
 # Project status checkpoint
 
+## CLB569_CI_REPAIR_ROUND_3 — local CI preparation, 2026-11-13
+
+- Local candidate on `codex/stage-readonly-snapshot`, HEAD
+  `ac3ecbe72b14b4b6e56d8528eb0a05af35511890`, main
+  `aed1e5831ca807f1c8ab2d58dbc952efc899207b`; no commit or publication.
+  The three workflow inventory expectations remain 33/32/34.
+- [Tests workflow](../../.github/workflows/tests.yml): Logs Policy retains the
+  complete `checkLogsPolicy → test` graph, H2/MDC prerequisites, source selection,
+  strict dependency/setup guards and existing retries in its own 45-minute job.
+  Unit/integration commands and coverage are preserved. `tests-required` uses
+  `always()` and accepts only success from unit, integration and Logs Policy;
+  failure, cancellation, skip, timeout and missing/unknown results fail closed.
+- Merge enforcement is BLOCKED on GitHub configuration: the effective main rules
+  currently require only `lint` and `release-state`. An administrator must add
+  `tests-required` (GitHub Actions) to required status checks, retaining both
+  existing checks and strict up-to-date policy. No GitHub settings changed.
+- Real local `:app-bot:checkLogsPolicy` with strict dependency verification:
+  1139 tests, 0 failures/errors/skips, then SEC-02 source scan PASS (1m56s with
+  existing compilation outputs). Cold hosted execution/timeouts are unverified;
+  the independent 45-minute limit includes setup and both existing attempts.
+- Music failure remains UNKNOWN: the saved Ktor3.3.1 response SaveBody mismatch
+  is not a demonstrated production upload defect. Isolated PR/main and repeated
+  tests, and the full app-bot prerequisite suite, passed. No Music logic,
+  assertions, API, DB, deployment, stage runtime or snapshot security changes.
+- Focused checks PASS: host diagnostic68/68, CI harness17/17, B-launch51/51
+  (a further stale workflow count32 was reproduced and corrected to33);
+  native Linux Runner10/10, job controls6/6, production YAML/capability corpus
+  and Tests contract negatives. Self-review and separate read-only agent review
+  found no actionable P0/P1/P2. New hosted CI has not been run.
+- Next: review this local CI delta and arrange the required-check configuration;
+  no publication, dispatch or runtime permission is granted by this checkpoint.
+
 ## CLB_STAGE_SNAPSHOT_FINAL_FIX — local, 2026-11-13
 
 - PARTIAL_BLOCKED: [final two-finding correction](stage-protected-readonly-snapshot.md#final-two-finding-correction--2026-11-13).
