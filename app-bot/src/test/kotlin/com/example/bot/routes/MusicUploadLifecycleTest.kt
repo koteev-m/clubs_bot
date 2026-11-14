@@ -6,6 +6,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.MultiPartData
 import io.ktor.http.content.PartData
+import io.ktor.server.plugins.requestsize.RequestTooLargeException
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.writeFully
@@ -25,12 +26,52 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class MusicUploadLifecycleTest {
     @get:Rule
     val deadline: Timeout = Timeout.seconds(20)
+
+    @Test
+    fun `failed multipart body preserves request limit instead of empty upload`() =
+        runBlocking {
+            val before = tempFiles()
+            val failure = RequestTooLargeException(16)
+            val body = ByteChannel().apply { cancel(failure) }
+            val parts = Parts(file(body))
+
+            val thrown = assertFailsWith<RequestTooLargeException> { receive(parts) }
+
+            assertTrue(generateSequence<Throwable>(thrown) { it.cause }.any { it === failure })
+            assertEquals(1, parts.disposed)
+            assertEquals(before, tempFiles())
+        }
+
+    @Test
+    fun `read helper preserves failed channel cause and removes temp`() =
+        runBlocking {
+            for (failure in listOf(
+                RequestTooLargeException(16),
+                CancellationException("synthetic closed channel cancellation"),
+                IOException("synthetic closed channel failure"),
+                OutOfMemoryError("synthetic closed channel fatal error"),
+            )) {
+                val before = tempFiles()
+                val body = ByteChannel().apply { cancel(failure) }
+
+                val thrown = assertFailsWith<Throwable> { readLimitedWithShaToTempFile({ body }, 16) }
+
+                when (failure) {
+                    is RequestTooLargeException -> assertIs<RequestTooLargeException>(thrown)
+                    is CancellationException -> assertIs<CancellationException>(thrown)
+                    else -> assertIs<IOException>(thrown)
+                }
+                assertTrue(generateSequence<Throwable>(thrown) { it.cause }.any { it === failure })
+                assertEquals(before, tempFiles())
+            }
+        }
 
     @Test
     fun `late multipart failure removes already saved file`() =

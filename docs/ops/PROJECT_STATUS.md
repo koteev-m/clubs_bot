@@ -1,5 +1,51 @@
 # Project status checkpoint
 
+## PR #569 — multipart CI repair, 2026-11-14
+
+- Continuation of the existing Draft PR on `codex/stage-readonly-snapshot`, input
+  `db348d1da9a9d32c1e8a13688f261ffefffbaf03`. Isolated detached worktree:
+  `/private/tmp/clb569-multipart-investigation-20261114`; original checkout and
+  prior PR worktree have pre-existing dirty files, preserved separately.
+  Identity guard PASS; active foreign instructions = 0.
+- Hosted comparison: [Build & Static failure](https://github.com/koteev-m/clubs_bot/actions/runs/43502299574)
+  and [Build success](https://github.com/koteev-m/clubs_bot/actions/runs/43502299899)
+  checked out the same merge `ca39e99464314c502f4f17535561a32b6838369b` with
+  Java 21 / Ktor 3.3.1. Commands differ: combined `staticCheck build` versus
+  separate static/unit/build steps. Cache warnings do not establish causation.
+- Confirmed application defect: Ktor 3.3.1 `readAvailable` may return EOF on a
+  failed channel without throwing `closedCause`. The upload helper then treats
+  the failed part as an empty file. The parser closes its body before rethrowing;
+  a late producer failure can interrupt an already-started 400 response.
+  A bounded controlled test-host schedule reproduces the exact 111-byte
+  Content-Length / zero-byte body failure on the input code. This proves the
+  mechanism; exact scheduling in the hosted failure remains an inference.
+- Minimal fix checks `closedCause` after the copy loop, before accepting the
+  saved file. Existing exception handling emits the JSON 413. Upload/request
+  limits, cancellation/part disposal, security headers and temp-file ownership
+  remain covered. Existing route assertions now also check body byte length.
+- RED: targeted22 tests, three new regression failures, including exact111/0;
+  existing AdminMusic tests pass. GREEN: targeted24 tests (AdminMusic10,
+  lifecycle11, controlled race1, JsonErrorPages2), zero failures/errors/skips.
+  Independent read-only review: PASS, no actionable P0/P1/P2.
+- Final `./gradlew staticCheck build --no-build-cache --no-configuration-cache
+  --console=plain` PASS (2m26s, 121 tasks:22 executed/99 up-to-date). Unit XML:
+  1742 tests, zero failures/errors; one existing GuestFlowStartTest skip.
+  App-bot1142/1142 PASS; detektGate, ktlint, Logs Policy and coverage gate PASS.
+  The preceding gate failed only a new test's line wrapping; that formatting
+  was corrected and affected tasks rerun. No retry masks an assertion failure.
+  JaCoCo emitted class-data mismatch warnings for existing RefundRequest/
+  CancelRequest types; coverage verification still passed, with no gate change.
+- Evidence/logs/XML: `/private/tmp/clb569-multipart-evidence-20261114/`.
+  Independent final read-only review and diff/whitespace checks PASS.
+  PostgreSQL IT not rerun: this delta changes no DB/transaction code.
+  Local macOS/arm64 Java21.0.2 differs from hosted Ubuntu/x64 Temurin21.0.13;
+  new hosted CI and exact hosted failure scheduling remain unverified.
+- Successful local tests/review satisfy the user's condition for commit and
+  ordinary non-force push to the existing PR branch. This checkpoint records
+  local evidence before publication; actual commit/push and one bounded hosted
+  run identity read belong to the handoff. No new PR, merge, deploy, dispatch
+  or Ruleset change. Next: assess the new hosted CI result after publication.
+
 ## CLB569_CI_REPAIR_ROUND_3 — local CI preparation, 2026-11-13
 
 - Local candidate on `codex/stage-readonly-snapshot`, HEAD
