@@ -217,7 +217,9 @@ class AdminMusicRoutesTest {
                     }
 
                 assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
-                assertTrue(response.bodyAsText().contains(ErrorCodes.payload_too_large))
+                val body = response.bodyAsText()
+                assertTrue(body.contains(ErrorCodes.payload_too_large))
+                assertEquals(body.encodeToByteArray().size.toString(), response.headers[HttpHeaders.ContentLength])
                 assertEquals(0, assetsRepo.streamCreateCalls.get())
                 assertEquals(null, itemsRepo.getById(item.id)?.coverAssetId)
                 assertEquals(before, musicUploadTempFiles())
@@ -285,7 +287,9 @@ class AdminMusicRoutesTest {
                     }
 
                 assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
-                assertTrue(response.bodyAsText().contains(ErrorCodes.payload_too_large))
+                val body = response.bodyAsText()
+                assertTrue(body.contains(ErrorCodes.payload_too_large))
+                assertEquals(body.encodeToByteArray().size.toString(), response.headers[HttpHeaders.ContentLength])
                 assertEquals(NO_STORE_CACHE_CONTROL, response.headers[HttpHeaders.CacheControl])
                 assertEquals(MINI_APP_VARY_HEADER, response.headers[HttpHeaders.Vary])
                 assertEquals(0, assetsRepo.streamCreateCalls.get())

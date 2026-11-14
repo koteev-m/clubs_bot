@@ -265,6 +265,40 @@ jobs:
           done
           exit 1
 
+      - name: Upload integration test reports
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: integration-test-reports
+          path: "**/build/reports/tests/**"
+          if-no-files-found: ignore
+
+      - name: Upload jacoco reports (optional)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: jacoco-reports
+          path: "**/build/reports/jacoco/**"
+          if-no-files-found: ignore
+
+  # checkLogsPolicy includes app-bot:test (H2/MDC) before the source scan.
+  # Give this existing task graph its own budget, independent of the full IT run.
+  logs-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=60000"
+    steps:
+      - *checkout
+      - *guard-no-dynamic-versions
+      - *guard-no-dynamic-plugins
+      - *guard-no-dynamic-catalogs
+      - *validate-wrapper
+      - *setup-jdk
+      - *setup-gradle
+      - *env-versions
+      - *guard-no-project-repositories
+
       - name: Logs policy scan (SEC-02) (retry x2)
         env:
           TELEGRAM_BOT_TOKEN: 111111:TEST_BOT_TOKEN
@@ -285,21 +319,40 @@ jobs:
           done
           exit 1
 
-      - name: Upload integration test reports
+      - name: Upload logs policy and prerequisite test reports
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: integration-test-reports
-          path: "**/build/reports/tests/**"
+          name: logs-policy-reports
+          path: |
+            app-bot/build/reports/logs-policy/**
+            app-bot/build/reports/tests/**
           if-no-files-found: ignore
 
-      - name: Upload jacoco reports (optional)
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: jacoco-reports
-          path: "**/build/reports/jacoco/**"
-          if-no-files-found: ignore
+  # Require this check in the main ruleset; a skipped worker must not count green.
+  tests-required:
+    if: always()
+    needs: [unit-tests, integration-tests, logs-policy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every test and logs policy worker to succeed
+        env:
+          TESTS_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+
+          expected = {"unit-tests", "integration-tests", "logs-policy"}
+          needs = json.loads(os.environ["TESTS_NEEDS_JSON"])
+          if not isinstance(needs, dict) or set(needs) != expected:
+              raise SystemExit("tests gate: missing or unexpected worker")
+          failed = [name for name in sorted(expected) if not isinstance(needs[name], dict) or needs[name].get("result") != "success"]
+          if failed:
+              raise SystemExit("tests gate: workers did not succeed: " + ", ".join(failed))
+          print("tests gate: every mandatory worker succeeded")
+          PYTHON
 
   amd64-runtime-prototype:
     if: github.event_name == 'workflow_dispatch'

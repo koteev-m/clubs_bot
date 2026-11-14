@@ -246,6 +246,8 @@ private suspend fun ByteReadChannel.copyMusicUpload(
         digest.update(buffer, 0, read)
         output.write(buffer, 0, read)
     }
+    // Ktor may return EOF for a failed channel without throwing its cause.
+    closedCause?.let { throw it }
     return total
 }
 
