@@ -22,7 +22,7 @@ SELFCHECK = ROOT / "scripts/selfcheck-quality-gates.sh"
 spec = importlib.util.spec_from_file_location("sharding", ROOT / "scripts/run-corrected-stage-shard.py")
 sharding = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sharding)
-WORKERS = ["lint-core"] + ["corrected-" + shard for shard in sharding.SHARDS]
+WORKERS = ["lint-scope", "lint-core"] + ["corrected-" + shard for shard in sharding.SHARDS]
 
 
 def workflow_model():
@@ -184,6 +184,99 @@ class ShardCoverageTest(unittest.TestCase):
         self.assertFalse(sharding.accepted(result, [case.id()]))
 
 
+class LintScopeTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name)
+        self.git("init", "--quiet", "-b", "main", "--template=")
+        self.style = "miniapp/src/index.css"
+        self.protected = "scripts/deploy/release.sh"
+        for name in ("README.md", self.style, "miniapp/src/widgets/ToastHost.tsx", self.protected):
+            self.write(name, "base")
+        self.base = self.commit()
+
+    def git(self, *args):
+        return subprocess.check_output(["git", "-c", "core.hooksPath=/dev/null",
+                                        "-c", "user.name=Fixture", "-c", "user.email=test@example.invalid",
+                                        "-c", "commit.gpgsign=false", *args], cwd=self.repo,
+                                       text=True, stderr=subprocess.PIPE).strip()
+
+    def write(self, name, value):
+        file = self.repo / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(value + "\n")
+
+    def commit(self):
+        self.git("add", "-A")
+        self.git("commit", "-qm", "fixture")
+        return self.git("rev-parse", "HEAD")
+
+    def mode(self, base=None, candidate=None, revision=None, ok=True):
+        head = self.git("rev-parse", "HEAD")
+        env = {**os.environ, "GITHUB_EVENT_NAME": "pull_request" if candidate else "push",
+               "LINT_BASE": base or self.base, "GITHUB_SHA": revision or head,
+               "LINT_CANDIDATE": candidate or head}
+        result = subprocess.run([sys.executable, "-I", "-S", "-B", str(ROOT / "scripts/lint-scope.py")],
+                                cwd=self.repo, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode == 0, ok, result.stderr)
+        return result.stdout.strip()
+
+    def test_push_checks_whole_range_and_falls_back_for_unknown_and_renamed_paths(self):
+        self.write("README.md", "doc")
+        self.commit()
+        self.assertEqual("mode=docs", self.mode())
+        self.write("miniapp/src/widgets/ToastHost.tsx", "presentation edit")
+        self.commit()
+        self.assertEqual("mode=ui", self.mode())
+        self.write(self.style, ".test {}")
+        self.commit()
+        self.assertEqual("mode=ui", self.mode())
+        self.git("mv", self.protected, "miniapp/README.md")
+        self.commit()
+        self.write("README.md", "last commit touches only docs")
+        self.commit()
+        self.assertEqual("mode=full", self.mode())
+        self.assertEqual("mode=full", self.mode(base="0" * 40))
+        self.mode(base="1" * 40, ok=False)
+        self.mode(revision=self.base, ok=False)
+
+    def test_pr_uses_branch_and_merge_diffs_with_verified_parents(self):
+        self.git("switch", "-qc", "candidate")
+        self.write("README.md", "documentation")
+        head = self.commit()
+        self.git("switch", "-q", "main")
+        self.write(self.protected, "advanced base")
+        base = self.commit()
+        self.git("merge", "--no-ff", "-qm", "merge", head)
+        self.assertEqual("mode=docs", self.mode(base=base, candidate=head))
+        self.mode(base=self.base, candidate=head, ok=False)
+        self.write(self.protected, "change in merged result")
+        self.git("add", "-A")
+        self.git("commit", "--amend", "--no-edit", "-q")
+        self.assertEqual("mode=full", self.mode(base=base, candidate=head))
+
+    def test_sensitive_candidate_change_already_on_base_is_still_full(self):
+        self.git("switch", "-qc", "candidate")
+        self.write(self.protected, "shared")
+        self.write("README.md", "docs")
+        head = self.commit()
+        self.git("switch", "-q", "main")
+        self.write(self.protected, "shared")
+        base = self.commit()
+        self.git("merge", "--no-ff", "-qm", "merge", head)
+        self.assertEqual("mode=full", self.mode(base=base, candidate=head))
+
+    def test_mode_changes_and_whitespace_are_not_fast_successes(self):
+        self.write("README.md", "trailing ")
+        self.commit()
+        self.mode(ok=False)
+        (self.repo / "README.md").unlink()
+        (self.repo / "README.md").symlink_to(self.protected)
+        self.commit()
+        self.assertEqual("mode=full", self.mode())
+
+
 class LintTopologyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -264,6 +357,7 @@ class LintTopologyTest(unittest.TestCase):
 
     def test_actual_aggregator_success_failure_cancelled_and_unexpected_skipped(self):
         success = {worker: {"result": "success", "outputs": {}} for worker in WORKERS}
+        success["lint-scope"]["outputs"]["mode"] = "full"
         self.assertEqual(0, self.aggregate(success).returncode)
         for worker in WORKERS:
             for status in ("failure", "cancelled", "skipped", "neutral", "", None):
@@ -280,6 +374,60 @@ class LintTopologyTest(unittest.TestCase):
         for needs in ({}, [], None, {**success, "release-state": {"result": "success"}}):
             with self.subTest(needs=needs):
                 self.assertNotEqual(0, self.aggregate(needs).returncode)
+
+    def test_fast_lint_requires_exact_skips_and_successful_mandatory_jobs(self):
+        needs = {worker: {"result": "skipped"} for worker in WORKERS}
+        needs["lint-core"] = {"result": "success"}
+        for mode in ("docs", "ui"):
+            needs["lint-scope"] = {"result": "success", "outputs": {"mode": mode}}
+            self.assertEqual(0, self.aggregate(needs).returncode)
+            for job in WORKERS:
+                changed = copy.deepcopy(needs)
+                changed[job]["result"] = "cancelled"
+                self.assertNotEqual(0, self.aggregate(changed).returncode)
+        for mode in ("", "unknown", None):
+            needs["lint-scope"]["outputs"] = {"mode": mode} if mode else {}
+            self.assertNotEqual(0, self.aggregate(needs).returncode)
+
+    def test_release_status_fails_for_unsuccessful_or_absent_scope(self):
+        command = self.workflow["jobs"]["release-state"]["steps"][0]["run"]
+        for result, mode, ok in (("success", "docs", True), ("success", "ui", True),
+                                 ("success", "full", True), ("success", "", False),
+                                 ("success", "other", False), ("cancelled", "full", False),
+                                 ("skipped", "docs", False), ("failure", "full", False)):
+            with self.subTest(result=result, mode=mode):
+                run = subprocess.run(["bash", "-e", "-c", command],
+                                     env={**os.environ, "MODE": mode, "SCOPE_RESULT": result})
+                self.assertEqual(run.returncode == 0, ok)
+
+    def test_range_wrapper_distinguishes_changed_policy_from_git_error(self):
+        command = self.workflow["jobs"]["lint-scope"]["steps"][1]["run"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, status in (("git", '"$DIFF_STATUS"'), ("ruby", "0")):
+                stub = root / name
+                stub.write_text("#!/bin/sh\nexit " + status + "\n")
+                stub.chmod(0o700)
+            output = root / "output"
+            for base, code, expected in (("1" * 40, 1, 0), ("1" * 40, 128, 128), ("0" * 40, 128, 0)):
+                output.write_text("")
+                env = {**os.environ, "PATH": directory + os.pathsep + os.environ["PATH"],
+                       "GITHUB_OUTPUT": str(output), "GITHUB_EVENT_NAME": "push", "GITHUB_SHA": "2" * 40,
+                       "LINT_BASE": base, "DIFF_STATUS": str(code)}
+                result = subprocess.run(["bash", "-e", "-c", command], env=env)
+                self.assertEqual(expected, result.returncode)
+                self.assertEqual("" if expected else "mode=full\n", output.read_text())
+
+    def test_scope_output_and_fast_checks_cannot_be_disabled(self):
+        for step in range(len(self.workflow["jobs"]["lint-scope"]["steps"])):
+            model = copy.deepcopy(self.workflow)
+            model["jobs"]["lint-scope"]["steps"][step]["if"] = "false"
+            self.assertNotEqual(0, self.validate(model).returncode)
+        for trigger, spec in (("pull_request", {"paths": ["README.md"]}),
+                              ("push", {"branches": ["main"], "paths-ignore": ["scripts/**"]})):
+            model = copy.deepcopy(self.workflow)
+            model["on"][trigger] = spec
+            self.assertNotEqual(0, self.validate(model).returncode)
 
     def test_all_existing_lint_release_state_mutation_contracts(self):
         # Execute the existing shell regression block itself, including negative
@@ -311,6 +459,7 @@ class LintTopologyTest(unittest.TestCase):
                     #!/bin/bash
                     printf '%s %s\\n' "${0##*/}" "$*" >> "$PROBE_LOG"
                     if [[ "$*" == *validate-lint-workflow.rb* ]]; then exit "${TOPOLOGY_EXIT:-0}"; fi
+                    if [[ "$*" == *test_project_identity_guard.py* ]]; then exit "${GUARD_EXIT:-0}"; fi
                     if [[ "$*" == *test_stat_fixture.py* ]]; then exit "${STAT_FIXTURE_EXIT:-0}"; fi
                     if [[ "$*" == *test_lint_sharding.py* ]]; then exit "${REGRESSION_EXIT:-0}"; fi
                     if [[ "$*" == *run-corrected-stage-shard.py* ]]; then exit "${INVENTORY_EXIT:-0}"; fi
@@ -330,10 +479,11 @@ class LintTopologyTest(unittest.TestCase):
                     self.assertEqual(status, result.returncode)
                     self.assertEqual(1, log.read_text().count(full))
                     self.assertEqual(1, log.read_text().count("test_stat_fixture.py"))
+                    self.assertEqual(1, log.read_text().count("test_project_identity_guard.py"))
             args = ["--ci-delegated-release-state-and-corrected-stage"]
             for override, status in (({}, 0), ({"TOPOLOGY_EXIT": "31"}, 31),
                                      ({"REGRESSION_EXIT": "32"}, 32), ({"INVENTORY_EXIT": "33"}, 33),
-                                     ({"STAT_FIXTURE_EXIT": "34"}, 34)):
+                                     ({"STAT_FIXTURE_EXIT": "34"}, 34), ({"GUARD_EXIT": "35"}, 35)):
                 log.write_text("")
                 result = subprocess.run(["bash", "-e", "-u", "-o", "pipefail", "-c", script, "probe", *args],
                                         env={**env, **override}, capture_output=True)

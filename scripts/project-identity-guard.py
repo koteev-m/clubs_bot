@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only clubs-local identity gate; loaded/session instructions require agent attestation.
+"""Read-only clubs-local identity gate for the repository and filesystem instruction scope.
 
 No network, repair, source-content scan, or platform-state inspection. The fixed
 primary checkout anchors identity; registered worktrees need not share its name.
@@ -24,6 +24,7 @@ STOP = 'STOP_PROJECT_CONTEXT_CONTAMINATION'
 OK = 'PROJECT_IDENTITY_OK'
 INSTRUCTIONS = ('AGENTS.override.md', 'AGENTS.md')
 PATH_OVERRIDES = ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR')
+CODEX_CLI = Path('/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex')
 
 
 class Rejected(Exception):
@@ -96,6 +97,38 @@ def normalize_remote(raw: str) -> str | None:
             return None
     path = path.removesuffix('/').removesuffix('.git')
     return REPOSITORY if path.lower() == REPOSITORY else None
+
+
+def verified_codex_config(env: dict[str, str]) -> set[str]:
+    """Validate scoped auth settings as Git multivars; only helper order matters."""
+    if 'GIT_CONFIG_COUNT' not in env:
+        return set()  # The caller still rejects orphaned and unknown GIT_* names.
+    reason = 'unmodelled_git_override'
+    count = env['GIT_CONFIG_COUNT']
+    require(count in {str(n) for n in range(11)}, reason)  # At most five entries per host.
+    names = {'GIT_CONFIG_COUNT'}
+    settings: dict[str, list[str]] = {}
+    for index in range(int(count)):
+        key, value = f'GIT_CONFIG_KEY_{index}', f'GIT_CONFIG_VALUE_{index}'
+        require(key in env and value in env, reason)
+        settings.setdefault(env[key], []).append(env[value])
+        names.update((key, value))
+
+    for host in ('chatgpt.com', 'chatgpt-staging.com'):
+        scope = f'https://{host}/backend-api/codex/sites/git/'
+        helpers = settings.pop(f'credential.{scope}.helper', [])
+        if not helpers:
+            continue
+        require(len(helpers) == 2 and helpers[0] == '', reason)  # Reset inherited helpers first.
+        # Match literal shell words, never interpret the command or trust a path from the environment.
+        command = rf"""!exec[ \t]+(['"]?){re.escape(str(CODEX_CLI))}\1[ \t]+git-credential"""
+        require(re.fullmatch(command, helpers[1]) is not None, reason)
+        require(CODEX_CLI.resolve() == CODEX_CLI and CODEX_CLI.is_file() and os.access(CODEX_CLI, os.X_OK), reason)
+        require(settings.pop(f'credential.{scope}.useHttpPath', []) == ['true'], reason)
+        require(settings.pop(f'http.{scope}.followRedirects', []) == ['false'], reason)
+        require(settings.pop(f'http.{scope}.proactiveAuth', []) in ([], ['auto']), reason)
+    require(not settings, reason)
+    return names
 
 
 def git(cwd: Path, env: dict[str, str], *args: str) -> str:
@@ -191,10 +224,11 @@ def check(args: argparse.Namespace, *, cwd: Path, env: dict[str, str],
                     'ambiguous_index')
         stage = 'git_override_status'
         expected = dict(zip(PATH_OVERRIDES, (directory, top, index, common)))
+        codex_config = verified_codex_config(env)
         for key, value in env.items():
             if key in expected:
                 require(bool(value) and (cwd / value).resolve() == expected[key], 'unsafe_git_override')
-            elif key.startswith('GIT_'):
+            elif key.startswith('GIT_') and key not in codex_config:
                 # Do not let config/object/discovery/trace overrides change identity
                 # or cause trace writes. --no-pager disables the environment's
                 # legitimate GIT_PAGER; neither other control changes identity.
