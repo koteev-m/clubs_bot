@@ -168,6 +168,108 @@ class GuardTests(unittest.TestCase):
                 self.assert_stop(self.check(env={**self.env, key: value}))
         self.assertFalse((self.base / 'must-not-exist').exists())
 
+    def codex_env(self):
+        cli = self.base / 'codex'
+        cli.write_text('#!/bin/sh\n: > "$0.called"\n')
+        cli.chmod(0o755)
+        location = mock.patch.object(guard, 'CODEX_CLI', cli)
+        location.start()
+        self.addCleanup(location.stop)
+        helper = f'!exec {cli} git-credential'
+        env = {**self.env, 'GIT_CONFIG_COUNT': '10'}
+        for offset, host in ((0, 'chatgpt.com'), (5, 'chatgpt-staging.com')):
+            url = f'https://{host}/backend-api/codex/sites/git/'
+            entries = [(f'credential.{url}.helper', ''), (f'credential.{url}.helper', helper),
+                       (f'credential.{url}.useHttpPath', 'true'), (f'http.{url}.proactiveAuth', 'auto'),
+                       (f'http.{url}.followRedirects', 'false')]
+            for i, (key, value) in enumerate(entries, start=offset):
+                env[f'GIT_CONFIG_KEY_{i}'] = key
+                env[f'GIT_CONFIG_VALUE_{i}'] = value
+        return env
+
+    def test_complete_codex_profile_reaches_only_local_identity_commands_unchanged(self):
+        env = self.codex_env()
+        before = env.copy()
+        with mock.patch.object(guard.subprocess, 'run', wraps=subprocess.run) as run:
+            self.assert_ok(self.check(cwd=self.worktree, env=env, expected_head=self.head))
+        self.assertTrue(run.called)
+        for call in run.call_args_list:
+            argv = call.args[0]
+            self.assertEqual(argv[:3], ['git', '--no-optional-locks', '--no-pager'])
+            self.assertTrue(argv[3] == 'rev-parse' or argv[3:5] in
+                            (['worktree', 'list'], ['config', '--get-all'], ['remote', 'get-url']))
+            self.assertTrue(call.kwargs['env'] is env)  # Do not dump the environment on failure.
+        self.assertTrue(env == before)
+        self.assertFalse((self.base / 'codex.called').exists())
+
+    def test_independent_hosts_settings_and_literal_helper_spelling(self):
+        env = self.codex_env()
+        env['GIT_CONFIG_VALUE_1'] = f"!exec\t'{guard.CODEX_CLI}' git-credential"
+        env['GIT_CONFIG_VALUE_6'] = f'!exec "{guard.CODEX_CLI}"  git-credential'
+        # One host, optional proactiveAuth, interleaved hosts, and no overrides.
+        for indices in ([4, 2, 0, 1], [5, 8, 9, 6, 7], [9, 0, 5, 4, 3, 2, 7, 8, 6, 1], []):
+            config = {**self.env, 'GIT_CONFIG_COUNT': str(len(indices))}
+            for dest, src in enumerate(indices):
+                for field in ('KEY', 'VALUE'):
+                    config[f'GIT_CONFIG_{field}_{dest}'] = env[f'GIT_CONFIG_{field}_{src}']
+            with self.subTest(indices=indices):
+                self.assert_ok(self.check(env=config))
+        self.assertFalse((self.base / 'codex.called').exists())
+
+    def test_redirected_helper_binary_rejected_before_git(self):
+        env = self.codex_env()
+        renamed = self.base / 'elsewhere'
+        guard.CODEX_CLI.rename(renamed)
+        guard.CODEX_CLI.symlink_to(renamed)
+        with mock.patch.object(guard, 'git') as invoke:
+            self.assert_stop(self.check(env=env), 'unmodelled_git_override')
+            invoke.assert_not_called()
+
+    def test_invalid_codex_overrides_stop_before_git(self):
+        env = self.codex_env()
+        changes = [
+            {'GIT_CONFIG_COUNT': count} for count in ('', '9', '11', '010', '-1', '1' * 5000)
+        ] + [
+            {'GIT_CONFIG_KEY_10': 'core.bare', 'GIT_CONFIG_VALUE_10': 'true'},
+            {'GIT_CONFIG_KEY_01': env['GIT_CONFIG_KEY_1']},
+            {'GIT_CONFIG_PARAMETERS': 'untrusted'}, {'GIT_CONFIG_GLOBAL': '/fixture/config'},
+            {'GIT_CONFIG_KEY_1': 'credential.helper'},
+            {'GIT_CONFIG_KEY_1': 'credential.https://chatgpt.com/.helper'},
+            {'GIT_CONFIG_KEY_1': env['GIT_CONFIG_KEY_1'].replace('chatgpt.com', 'chatgpt.com.invalid')},
+            {'GIT_CONFIG_KEY_1': env['GIT_CONFIG_KEY_1'].replace('https:', 'http:')},
+            {'GIT_CONFIG_KEY_3': env['GIT_CONFIG_KEY_8']},
+            {'GIT_CONFIG_VALUE_0': env['GIT_CONFIG_VALUE_1'], 'GIT_CONFIG_VALUE_1': ''},
+            {'GIT_CONFIG_VALUE_1': env['GIT_CONFIG_VALUE_1'] + ' --extra'},
+            {'GIT_CONFIG_VALUE_1': env['GIT_CONFIG_VALUE_1'] + '\n'},
+            {'GIT_CONFIG_VALUE_1': '!exec /untrusted/codex git-credential',
+             'GIT_CONFIG_VALUE_6': '!exec /untrusted/codex git-credential',
+             'CODEX_APP_RUNTIME_CLI_PATH': '/untrusted/codex'},
+            {'GIT_CONFIG_VALUE_6': '!untrusted'}, {'GIT_CONFIG_VALUE_1': 'not-ascii-\u2603'},
+            {'GIT_CONFIG_VALUE_2': 'false'}, {'GIT_CONFIG_VALUE_3': 'unexpected'},
+            {'GIT_CONFIG_VALUE_9': 'true'}, {'GIT_TRACE': '/fixture/trace'},
+        ]
+        for key in ('remote.origin.url', 'url.https://invalid/.insteadOf', 'include.path',
+                    'core.worktree', 'core.hooksPath', 'http.extraHeader', 'http.sslVerify'):
+            changes.append({'GIT_CONFIG_KEY_0': key})
+        with mock.patch.object(guard, 'git') as invoke:
+            for number, change in enumerate(changes):
+                with self.subTest(change=number):
+                    self.assert_stop(self.check(env={**env, **change}), 'unmodelled_git_override')
+            for name in ('GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_2', 'GIT_CONFIG_VALUE_0'):
+                with self.subTest(missing=name):
+                    self.assert_stop(self.check(env={k: v for k, v in env.items() if k != name}),
+                                     'unmodelled_git_override')
+            invoke.assert_not_called()
+
+    def test_codex_profile_preserves_identity_checks(self):
+        env = self.codex_env()
+        self.assert_stop(self.check(cwd=self.foreign, env=env))
+        self.assert_stop(self.check(env=env, expected_head='0' * 40), 'expected_head_mismatch')
+        self.assert_stop(self.check(env=env, scope=[str(self.foreign)]), 'foreign_instruction_scope')
+        self.assert_stop(self.check(env={**env, 'GIT_DIR': str(self.foreign / '.git')}), 'unsafe_git_override')
+        self.git(self.worktree, 'remote', 'set-url', 'origin', 'https://example.invalid/foreign')
+        self.assert_stop(self.check(cwd=self.worktree, env=env), 'origin_mismatch_or_ambiguous')
+
     def test_legitimate_git_pager_is_disabled_not_cleared(self):
         marker = self.base / 'pager-must-not-run'
         env = {**self.env, 'GIT_PAGER': f'touch {marker}'}
@@ -302,27 +404,25 @@ class GuardTests(unittest.TestCase):
         self.assertNotIn(secret, output)
         self.assertNotIn(str(self.base), output)
 
-    def test_integration_agent_attestation_then_machine_then_substantive_action(self):
+    def test_only_work_in_verified_project_and_authorized_scope(self):
         # This is an orchestration demonstration with declared agent observations,
         # NOT an implementation of platform/session instruction inspection.
         def sequence(active_foreign=False, audit=False, both_named=False,
                      metadata_authorized=False, task='CLB-110', cwd=None):
-            events = ['agent_checks_loaded_chain']
+            events = []
             # Foreign *controlling* instructions always stop. Authorized audit
             # metadata may be present as data, never as clubs mutation authority.
             if active_foreign:
                 return events + [guard.STOP]
             if audit and not (both_named and metadata_authorized):
                 return events + [guard.STOP]
-            events.append('agent_attests_explicit_audit_scope' if audit else 'agent_attests_clubs_only')
             result = self.check(cwd=cwd, task_id=task)
             events.append(result['verdict'])
             if result['verdict'] == guard.OK:
                 events.append('substantive_action')
             return events
 
-        self.assertEqual(sequence(), ['agent_checks_loaded_chain', 'agent_attests_clubs_only',
-                                      guard.OK, 'substantive_action'])
+        self.assertEqual(sequence(), [guard.OK, 'substantive_action'])
         for kwargs in ({'active_foreign': True}, {'task': 'HT-1'}, {'audit': True},
                        {'active_foreign': True, 'audit': True, 'both_named': True}):
             with self.subTest(kwargs=kwargs):
@@ -360,11 +460,7 @@ class ContractTests(unittest.TestCase):
 
     def test_agent_instruction_contract_and_local_script_link(self):
         instructions = (ROOT / 'AGENTS.md').read_text()
-        for term in ('active loaded instruction chain', 'active foreign instructions = 0',
-                     'DOCUMENTED_INCIDENT_REFERENCE', 'ACTIVE_FOREIGN_INSTRUCTION',
-                     guard.OK, guard.STOP, 'hidden platform/session instruction state',
-                     'metadata-level comparison', 'clubs-owned journal', '--expected-head',
-                     '--scope', '--instruction-path'):
+        for term in (guard.OK, guard.STOP, '--task-id', '--expected-head', '--scope', '--instruction-path'):
             self.assertIn(term, instructions)
         self.assertIn('scripts/project-identity-guard.py', instructions)
         self.assertTrue(SCRIPT.is_file())

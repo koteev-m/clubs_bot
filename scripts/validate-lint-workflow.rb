@@ -26,9 +26,9 @@ reject_custom_shell_override("workflow defaults") if workflow.key?("defaults")
 reject_contract("workflow-level concurrency is forbidden") if workflow.key?("concurrency")
 triggers = workflow["on"] || workflow[true]
 reject_contract("workflow triggers must be a mapping") unless triggers.is_a?(Hash)
-reject_contract("pull_request trigger is missing") unless triggers.key?("pull_request")
+reject_contract("triggers must cover all pull requests") unless triggers.keys.sort == %w[pull_request push] && triggers["pull_request"].nil?
 push = triggers["push"]
-unless push.is_a?(Hash) && push["branches"] == ["main"]
+unless push == {"branches" => ["main"]}
   reject_contract("push trigger must target only main")
 end
 unless workflow["permissions"] == {"contents" => "read"}
@@ -38,10 +38,11 @@ end
 jobs = workflow["jobs"]
 reject_contract("jobs must be a mapping") unless jobs.is_a?(Hash)
 shards = %w[authority executor import-root support]
-workers = ["lint-core"] + shards.map { |shard| "corrected-#{shard}" }
+workers = ["lint-scope", "lint-core"] + shards.map { |shard| "corrected-#{shard}" }
 unless jobs.keys == workers + ["lint", "release-state"]
   reject_contract("mandatory worker/aggregator job inventory changed")
 end
+full_scope = "needs.lint-scope.outputs.mode == 'full'"
 lint = jobs["lint-core"]
 release_state = jobs["release-state"]
 unless lint.is_a?(Hash) && release_state.is_a?(Hash)
@@ -58,8 +59,9 @@ reject_contract("release-state timeout must be exactly 50 minutes") unless relea
 
 [["lint-core", lint], ["release-state", release_state]].each do |job_name, job|
   reject_custom_shell_override("#{job_name} job defaults") if job.key?("defaults")
-  reject_contract("job-level if is forbidden") if job.key?("if")
-  reject_contract("jobs must not depend on each other") if job.key?("needs")
+  expected_if = job_name == "release-state" ? "always()" : nil
+  reject_contract("invalid job scope condition") unless job["if"] == expected_if
+  reject_contract("jobs must depend only on the change range") unless job["needs"] == "lint-scope"
   reject_contract("job continues on error") if job.key?("continue-on-error")
   reject_contract("job-level permissions must inherit the shared read-only boundary") if job.key?("permissions")
 end
@@ -110,6 +112,7 @@ expected_lint_steps = [
   "Upload lint reports",
 ]
 expected_release_steps = [
+  "Require verified change range",
   "Checkout exact candidate",
   "Verify Python 3.11+",
   "Validate release-state structure",
@@ -129,6 +132,18 @@ end
   end
   run = step["run"]
   reject_contract("step hides failure with || true") if run.is_a?(String) && run.include?("|| true")
+end
+
+scope_result = one_step(release_steps, "Require verified change range")
+unless scope_result == {
+  "name" => "Require verified change range",
+  "env" => {"SCOPE_RESULT" => "${{ needs.lint-scope.result }}", "MODE" => "${{ needs.lint-scope.outputs.mode }}"},
+  "run" => <<~'BASH',
+    test "$SCOPE_RESULT" = success
+    [[ "$MODE" == docs || "$MODE" == ui || "$MODE" == full ]]
+  BASH
+}
+  reject_contract("release-state must fail on missing or unsuccessful change range")
 end
 
 checkout = one_step(release_steps, "Checkout exact candidate")
@@ -155,8 +170,9 @@ reject_contract("Python version check is conditional") if python_check.key?("if"
 delegated = one_step(lint_steps, "Quality gate regression self-check")
 structural = one_step(release_steps, "Validate release-state structure")
 suite = one_step(release_steps, "Run strict release-state suite")
-[delegated, structural, suite].each do |step|
-  reject_contract("mandatory invocation is conditional") if step.key?("if")
+reject_contract("structural validator is conditional") if structural.key?("if")
+[delegated, suite].each do |step|
+  reject_contract("full suite scope changed") unless step["if"] == full_scope
 end
 unless delegated["run"] == "./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage"
   reject_contract("lint must invoke the exact delegated selfcheck mode")
@@ -201,7 +217,7 @@ shards.each do |shard|
     reject_custom_shell_override("#{name} run step") if step.key?("shell")
   end
   expected_job = {
-    "name" => name, "runs-on" => "ubuntu-latest", "timeout-minutes" => 120,
+    "name" => name, "needs" => "lint-scope", "if" => full_scope, "runs-on" => "ubuntu-latest", "timeout-minutes" => 120,
     "concurrency" => {
       "group" => "lint-#{name}-${{ github.workflow }}-${{ github.ref }}",
       "cancel-in-progress" => true,
@@ -242,14 +258,19 @@ expected_aggregator = {
       import json
       import os
 
-      expected = {"lint-core", "corrected-authority", "corrected-executor", "corrected-import-root", "corrected-support"}
+      shards = {"corrected-authority", "corrected-executor", "corrected-import-root", "corrected-support"}
       needs = json.loads(os.environ["LINT_NEEDS_JSON"])
-      if not isinstance(needs, dict) or set(needs) != expected:
+      if not isinstance(needs, dict) or set(needs) != shards | {"lint-core", "lint-scope"}:
           raise SystemExit("lint gate: missing or unexpected worker")
-      failed = [name for name in sorted(expected) if not isinstance(needs[name], dict) or needs[name].get("result") != "success"]
-      if failed:
-          raise SystemExit("lint gate: workers did not succeed: " + ", ".join(failed))
-      print("lint gate: every mandatory worker succeeded")
+      if needs["lint-scope"]["result"] != "success" or needs["lint-core"]["result"] != "success":
+          raise SystemExit("lint gate: required scope/core check did not succeed")
+      mode = needs["lint-scope"]["outputs"].get("mode")
+      if mode not in ("docs", "ui", "full"):
+          raise SystemExit("lint gate: missing or invalid scope")
+      expected = "success" if mode == "full" else "skipped"
+      if any(needs[shard]["result"] != expected for shard in shards):
+          raise SystemExit("lint gate: unexpected corrected-stage shard result")
+      print("lint gate: required workers succeeded for", mode)
       PY
     PYTHON
   }],
@@ -259,6 +280,7 @@ reject_contract("lint aggregator must require every worker success, always and f
 
 # The core gates still execute on every PR/main run, in their existing order.
 lint_steps.each do |step|
+  next if step == delegated
   next if step["name"] == "Upload lint reports" && step["if"] == "always()"
   reject_contract("core step became conditional") if step.key?("if")
 end
@@ -280,6 +302,47 @@ expected_setup = [
   },
 ]
 reject_contract("core checkout/JDK/cache setup changed") unless lint_steps.first(3) == expected_setup
+
+scope = jobs.fetch("lint-scope")
+expected_scope = {
+  "runs-on" => "ubuntu-latest", "timeout-minutes" => 10,
+  "outputs" => {"mode" => "${{ steps.range.outputs.mode }}"},
+  "steps" => [
+    expected_setup.first,
+    {
+      "name" => "Check lint workflow and change range", "id" => "range",
+      "env" => {"LINT_BASE" => "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}",
+                "LINT_CANDIDATE" => candidate_sha},
+      "run" => <<~'BASH',
+        ruby scripts/validate-lint-workflow.rb .github/workflows/lint.yml
+        if [[ "$GITHUB_EVENT_NAME" == push && "$LINT_BASE" == 0000000000000000000000000000000000000000 ]]; then
+          echo 'mode=full' >> "$GITHUB_OUTPUT"
+        elif git diff --quiet "$LINT_BASE" "$GITHUB_SHA" -- scripts/lint-scope.py; then
+          python3 -I -S -B scripts/lint-scope.py >> "$GITHUB_OUTPUT"
+        else
+          status=$?
+          [[ "$status" == 1 ]] || exit "$status"
+          echo 'mode=full' >> "$GITHUB_OUTPUT"
+        fi
+      BASH
+    },
+    {
+      "name" => "Validate payment hardening structure", "if" => "steps.range.outputs.mode != 'full'",
+      "run" => "python3 -B scripts/validate-payment-hardening.py --structural .",
+    },
+    {
+      "name" => "Build changed Mini App UI", "if" => "steps.range.outputs.mode == 'ui'",
+      "working-directory" => "miniapp",
+      "run" => <<~'BASH',
+        npx --yes pnpm@9.15.9 install --frozen-lockfile --ignore-scripts
+        npm run typecheck
+        npm run build -- --outDir "$RUNNER_TEMP/lint-miniapp-dist"
+      BASH
+    },
+  ],
+}
+reject_contract("lint scope decision or fast checks changed") unless scope == expected_scope
+
 expected_reports = {
   "name" => "Upload lint reports", "if" => "always()",
   "uses" => "actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882",
