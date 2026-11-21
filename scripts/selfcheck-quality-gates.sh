@@ -1351,7 +1351,8 @@ validate_detekt_static_workflow() {
   fi
 
   assert_job_has_no_direct_key "$file" "detekt" "continue-on-error"
-  assert_job_has_no_direct_key "$file" "detekt" "if"
+  assert_job_direct_key_line "$file" "detekt" "if" "    if: needs.changes.outputs.mode != 'docs' && needs.changes.outputs.mode != 'ui'"
+  assert_job_direct_key_line "$file" "detekt" "needs" "    needs: changes"
   assert_detekt_step_order "$file"
 
   assert_step_direct_key_line \
@@ -1508,10 +1509,6 @@ validate_tests_workflow_contract() {
   local trigger_contract
   local jobs_contract
   local job_name
-  local guard_name
-  local unit_run
-  local integration_run
-  local logs_policy_run
   local postgres_wait_run
   local repository_guard_run
 
@@ -1525,7 +1522,7 @@ validate_tests_workflow_contract() {
   if ! trigger_contract="$(normalize_top_level_trigger_contract "$file")"; then
     fail "Tests workflow top-level trigger block is missing or ambiguous: $file"
   fi
-  if [ "$trigger_contract" != $'pull_request:\npush:\n  branches: [ main ]\nworkflow_dispatch:' ]; then
+  if [ "$trigger_contract" != $'workflow_call:\nworkflow_dispatch:' ]; then
     fail "Tests workflow trigger contract changed: $file"
   fi
 
@@ -1552,17 +1549,17 @@ validate_tests_workflow_contract() {
   ' "$file")"; then
     fail "Tests workflow jobs block is missing or ambiguous: $file"
   fi
-  if [ "$jobs_contract" != $'unit-tests\nintegration-tests\nlogs-policy\ntests-required\namd64-runtime-prototype' ]; then
-    fail "Tests workflow must contain exactly unit-tests, integration-tests, logs-policy, tests-required and amd64-runtime-prototype: $file"
+  if [ "$jobs_contract" != $'unit-tests\nintegration-tests\ntests-required\namd64-runtime-prototype' ]; then
+    fail "Tests workflow must contain exactly unit-tests, integration-tests, tests-required and amd64-runtime-prototype: $file"
   fi
 
-  for job_name in unit-tests integration-tests logs-policy; do
+  for job_name in unit-tests integration-tests; do
     assert_job_line "$file" "$job_name" "    runs-on: ubuntu-latest"
     assert_job_has_no_direct_key "$file" "$job_name" "if"
     assert_job_has_no_direct_key "$file" "$job_name" "continue-on-error"
     assert_job_has_no_direct_key "$file" "$job_name" "permissions"
   done
-  assert_job_line "$file" "amd64-runtime-prototype" "    if: github.event_name == 'workflow_dispatch'"
+  assert_job_line "$file" "amd64-runtime-prototype" "    if: github.event_name == 'workflow_dispatch' && github.workflow_ref == format('koteev-m/clubs_bot/.github/workflows/tests.yml@{0}', github.ref)"
   assert_job_line "$file" "amd64-runtime-prototype" "    runs-on: ubuntu-24.04"
   assert_job_line "$file" "amd64-runtime-prototype" "    timeout-minutes: 75"
   assert_job_line "$file" "amd64-runtime-prototype" "      contents: read"
@@ -1570,14 +1567,6 @@ validate_tests_workflow_contract() {
   if grep -Fq "continue-on-error:" "$file"; then
     fail "Tests workflow contains a fail-open continue-on-error contract: $file"
   fi
-
-  for guard_name in \
-    "Guard: no project-level repositories" \
-    "Guard: no dynamic dependency versions" \
-    "Guard: no dynamic versions in plugin blocks" \
-    "Guard: no dynamic versions in version catalogs"; do
-    assert_exact_line "$file" "        name: \"$guard_name\""
-  done
 
   if ! repository_guard_run="$(
     normalize_anchored_step_run_contract \
@@ -1589,110 +1578,13 @@ validate_tests_workflow_contract() {
   fi
   assert_eq \
     "$repository_guard_run" \
-    $'./gradlew help \\\n--dependency-verification=strict \\\n--no-configuration-cache \\\n--no-build-cache \\\n--console=plain'
+    $'./scripts/retry-command.sh --maven-429 ./gradlew help \\\n--dependency-verification=strict \\\n--no-configuration-cache \\\n--no-build-cache \\\n--console=plain'
   assert_job_line "$file" "unit-tests" "      - &guard-no-project-repositories"
   assert_job_line "$file" "integration-tests" "      - *guard-no-project-repositories"
-  assert_job_line "$file" "logs-policy" "      - *guard-no-project-repositories"
-
-  if ! awk '
-    $0 == "  unit-tests:" {
-      in_job = 1
-      jobs++
-      next
-    }
-    in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ { in_job = 0 }
-    in_job && $0 == "      - &validate-wrapper" && stage == 0 { stage = 1; next }
-    in_job && $0 == "      - &setup-jdk" && stage == 1 { stage = 2; next }
-    in_job && $0 == "      - &setup-gradle" && stage == 2 { stage = 3; next }
-    in_job && $0 == "      - &env-versions" && stage == 3 { stage = 4; next }
-    in_job && $0 == "      - &guard-no-project-repositories" && stage == 4 {
-      stage = 5
-      next
-    }
-    in_job && $0 == "      - name: Run unit tests (retry x3)" && stage == 5 {
-      stage = 6
-    }
-    END { exit !(jobs == 1 && stage == 6) }
-  ' "$file"; then
-    fail "unit-tests repository guard must run after Wrapper/JDK/Gradle setup and before tests: $file"
-  fi
-
-  if ! awk '
-    $0 == "  integration-tests:" {
-      in_job = 1
-      jobs++
-      next
-    }
-    in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ { in_job = 0 }
-    in_job && $0 == "      - *validate-wrapper" && stage == 0 { stage = 1; next }
-    in_job && $0 == "      - *setup-jdk" && stage == 1 { stage = 2; next }
-    in_job && $0 == "      - *setup-gradle" && stage == 2 { stage = 3; next }
-    in_job && $0 == "      - *env-versions" && stage == 3 { stage = 4; next }
-    in_job && $0 == "      - *guard-no-project-repositories" && stage == 4 {
-      stage = 5
-      next
-    }
-    in_job && $0 == "      - name: Wait for Postgres (5432)" && stage == 5 {
-      stage = 6
-    }
-    END { exit !(jobs == 1 && stage == 6) }
-  ' "$file"; then
-    fail "integration-tests repository guard must run after Wrapper/JDK/Gradle setup and before tests: $file"
-  fi
-
-  if ! unit_run="$(normalize_step_run_contract "$file" "unit-tests" "Run unit tests (retry x3)")"; then
-    fail "unit test command is missing or ambiguous in $file"
-  fi
-  assert_step_has_no_direct_key "$file" "unit-tests" "Run unit tests (retry x3)" "if"
-  assert_step_has_no_direct_key \
-    "$file" \
-    "unit-tests" \
-    "Run unit tests (retry x3)" \
-    "continue-on-error"
-  assert_contains \
-    "$unit_run" \
-    'if ./gradlew clean test --no-configuration-cache $extra --console=plain --stacktrace; then'
-  assert_contains "$unit_run" "exit 1"
 
   assert_job_line "$file" "integration-tests" "    services:"
   assert_job_line "$file" "integration-tests" "      postgres:"
   assert_job_line "$file" "integration-tests" "        image: postgres:16-alpine@sha256:46258a3eb38adf37e77ca5bd41f93ca8b1034f925cf37190a7a8015ba151f3ca"
-
-  if ! integration_run="$(normalize_step_run_contract "$file" "integration-tests" "Run integration tests (retry x3)")"; then
-    fail "integration test command is missing or ambiguous in $file"
-  fi
-  assert_step_has_no_direct_key \
-    "$file" \
-    "integration-tests" \
-    "Run integration tests (retry x3)" \
-    "if"
-  assert_step_has_no_direct_key \
-    "$file" \
-    "integration-tests" \
-    "Run integration tests (retry x3)" \
-    "continue-on-error"
-  assert_contains \
-    "$integration_run" \
-    'if ./gradlew test -PrunIT=true --no-configuration-cache $extra --console=plain --stacktrace; then'
-  assert_contains "$integration_run" "exit 1"
-
-  if ! logs_policy_run="$(normalize_step_run_contract "$file" "logs-policy" "Logs policy scan (SEC-02) (retry x2)")"; then
-    fail "standalone logs-policy command is missing or ambiguous in $file"
-  fi
-  assert_step_has_no_direct_key \
-    "$file" \
-    "logs-policy" \
-    "Logs policy scan (SEC-02) (retry x2)" \
-    "if"
-  assert_step_has_no_direct_key \
-    "$file" \
-    "logs-policy" \
-    "Logs policy scan (SEC-02) (retry x2)" \
-    "continue-on-error"
-  assert_contains \
-    "$logs_policy_run" \
-    'if ./gradlew :app-bot:checkLogsPolicy --no-configuration-cache $extra --no-daemon --stacktrace; then'
-  assert_contains "$logs_policy_run" "exit 1"
 
   if ! postgres_wait_run="$(normalize_step_run_contract "$file" "integration-tests" "Wait for Postgres (5432)")"; then
     fail "PostgreSQL readiness step is missing or ambiguous in $file"
@@ -1784,7 +1676,7 @@ validate_trivy_action_inventory() {
 
 validate_trivy_filesystem_workflow() {
   local file="$1"
-  assert_exact_line "$file" "  pull_request:"
+  assert_exact_line "$file" "  workflow_call:"
   assert_job_has_no_direct_key "$file" "trivy" "if"
   assert_job_has_no_direct_key "$file" "trivy" "continue-on-error"
   assert_step_direct_key_line \
@@ -1847,7 +1739,7 @@ validate_trivy_runtime_workflow() {
     "Inventory Trivy JVM runtime artifacts" \
     "uses" \
     "        $approved_trivy_action_active_line"
-  assert_step_has_no_direct_key "$file" "trivy" "Inventory Trivy JVM runtime artifacts" "if"
+  assert_step_direct_key_line "$file" "trivy" "Inventory Trivy JVM runtime artifacts" "if" "        if: needs.changes.outputs.mode != 'docs' && needs.changes.outputs.mode != 'ui'"
   assert_step_has_no_direct_key \
     "$file" \
     "trivy" \
@@ -1865,7 +1757,7 @@ validate_trivy_runtime_workflow() {
     "Trivy JVM runtime scan" \
     "uses" \
     "        $approved_trivy_action_active_line"
-  assert_step_has_no_direct_key "$file" "trivy" "Trivy JVM runtime scan" "if"
+  assert_step_direct_key_line "$file" "trivy" "Trivy JVM runtime scan" "if" "        if: needs.changes.outputs.mode != 'docs' && needs.changes.outputs.mode != 'ui'"
   assert_step_has_no_direct_key "$file" "trivy" "Trivy JVM runtime scan" "continue-on-error"
   assert_step_with_contract \
     "$file" \
@@ -2227,7 +2119,7 @@ expect(
     {"contents": "write"},
     "trusted main dependency submission permissions",
 )
-expect(dependency.jobs(), ["submit"], "dependency workflow jobs")
+expect(dependency.jobs(), ["changes", "submit"], "dependency workflow jobs")
 
 submission_steps = [
     "Checkout",
@@ -2238,7 +2130,7 @@ submission_steps = [
 expect(dependency.steps("submit"), submission_steps, "dependency submission steps")
 expect(
     dependency.job_scalar("submit", "if"),
-    "github.event_name == 'push' || github.ref == 'refs/heads/main'",
+    "(github.event_name == 'push' && needs.changes.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')",
     "manual submission main-branch guard",
 )
 expect(
@@ -2306,7 +2198,7 @@ dependency.assert_steps_unguarded("submit", submission_steps)
 expect(sca.top_scalar("name"), "SCA Gate", "required SCA workflow name")
 expect(
     sca.top_block("on"),
-    "push:\n  branches: [ main ]\npull_request:",
+    "workflow_dispatch:",
     "SCA triggers",
 )
 expect(sca.top_mapping("permissions"), {"contents": "read"}, "SCA permissions")
@@ -2365,7 +2257,7 @@ sca.assert_steps_unguarded("dependency-check", sca_steps)
 
 expect(security.top_scalar("name"), "Security Scan (Trivy)", "Security Scan name")
 expect(security.top_mapping("permissions"), {"contents": "read", "security-events": "write"}, "Trivy permissions")
-expect(security.jobs(), ["trivy"], "Trivy jobs")
+expect(security.jobs(), ["changes", "trivy"], "Trivy jobs")
 security_steps = [
     "Checkout",
     "Set up JDK 21",
@@ -2667,7 +2559,7 @@ expect(
 )
 expect(
     security.step_scalar("trivy", "Assert Trivy JVM runtime outputs", "if"),
-    "${{ always() && steps.trivy-output.outcome == 'success' }}",
+    "${{ always() && needs.changes.outputs.mode != 'docs' && needs.changes.outputs.mode != 'ui' && steps.trivy-output.outcome == 'success' }}",
     "Trivy JVM output assertion guard",
 )
 expect(
@@ -2762,22 +2654,12 @@ for shell_step in (
         f"{shell_step} shell",
     )
 security.assert_no_fail_open("trivy", security_steps)
-security.assert_steps_unguarded(
-    "trivy",
-    [
-        "Checkout",
-        "Set up JDK 21",
-        "Gradle cache & setup",
-        "Build resolved JVM runtime dependencies (blocking)",
-        "Prepare trusted Trivy output directory",
-        "Trivy filesystem scan",
-        "Assert fresh Trivy JVM inventory path",
-        "Inventory Trivy JVM runtime artifacts",
-        "Verify Trivy JVM analyzer coverage",
-        "Assert fresh Trivy JVM SARIF path",
-        "Trivy JVM runtime scan",
-    ],
-)
+security.assert_steps_unguarded("trivy", ["Checkout", "Prepare trusted Trivy output directory", "Trivy filesystem scan"])
+for step in ("Set up JDK 21", "Gradle cache & setup", "Build resolved JVM runtime dependencies (blocking)",
+             "Assert fresh Trivy JVM inventory path", "Inventory Trivy JVM runtime artifacts",
+             "Verify Trivy JVM analyzer coverage", "Assert fresh Trivy JVM SARIF path", "Trivy JVM runtime scan"):
+    expect(security.step_scalar("trivy", step, "if"), "needs.changes.outputs.mode != 'docs' && needs.changes.outputs.mode != 'ui'", f"JVM scope for {step}")
+expect(security.job_scalar("trivy", "needs"), "changes", "Trivy change range")
 
 for workflow in (dependency, sca, security):
     if "secrets." in "\n".join(workflow.lines):
@@ -3684,7 +3566,7 @@ anchor_indexes = [
 alias_indexes = [
     index for index, line in enumerate(lines) if line.rstrip("\r\n") == alias
 ]
-if len(anchor_indexes) != 1 or len(alias_indexes) != 2:
+if len(anchor_indexes) != 1 or len(alias_indexes) != 1:
     raise SystemExit("remove_tests_repository_guard: guard anchor/alias is ambiguous")
 
 anchor_start = anchor_indexes[0]
@@ -3708,8 +3590,7 @@ target.write_text("".join(kept), encoding="utf-8")
 PY
 }
 
-# Aliases now occur in both integration-tests and logs-policy. Mutate only the
-# intended integration prerequisite, retaining strict rejection of ambiguity.
+# Mutate the integration prerequisite, retaining strict rejection of ambiguity.
 mutate_tests_integration_guard() {
   python3 - "$1" "$2" "$3" <<'PYTHON'
 from pathlib import Path
@@ -4522,7 +4403,7 @@ for native_mutation in job runner trigger; do
   case "$native_mutation" in
     job) native_before="  amd64-runtime-prototype:"; native_after="  unexpected-native-job:" ;;
     runner) native_before="    runs-on: ubuntu-24.04"; native_after="    runs-on: ubuntu-latest" ;;
-    trigger) native_before="    if: github.event_name == 'workflow_dispatch'"; native_after="    if: true" ;;
+    trigger) native_before="    if: github.event_name == 'workflow_dispatch' && github.workflow_ref == format('koteev-m/clubs_bot/.github/workflows/tests.yml@{0}', github.ref)"; native_after="    if: github.event_name == 'workflow_dispatch'" ;;
   esac
   replace_exact_line_once "$tests_workflow" "$native_fixture" "$native_before" "$native_after"
   assert_tests_workflow_contract_rejected "tests-native-$native_mutation" "$native_fixture"
@@ -6351,7 +6232,7 @@ replace_job_line_once \
   "$dependency_submission_workflow" \
   "$dependency_submission_guard_fixture" \
   "submit" \
-  "    if: github.event_name == 'push' || github.ref == 'refs/heads/main'" \
+  "    if: (github.event_name == 'push' && needs.changes.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')" \
   "    if: always()"
 assert_validation_rejected \
   "dependency-submission-dispatch-without-main-guard" \
@@ -6406,7 +6287,7 @@ sca_trusted_trigger_fixture="$TMP_DIR/sca-trusted-trigger.yml"
 replace_exact_line_once \
   "$sca_workflow" \
   "$sca_trusted_trigger_fixture" \
-  "  pull_request:" \
+  "  workflow_dispatch:" \
   "  workflow_""run:"
 assert_validation_rejected \
   "sca-workflow-""run-trigger" \
@@ -7748,7 +7629,7 @@ when "workflow-without-permissions"
   YAML
 when "ambiguous-inherited-default"
   replace_once(
-    workflows.join("build.yml"),
+    workflows.join("tests.yml"),
     "permissions:\n  contents: read\n\n",
     ""
   )
@@ -8831,9 +8712,10 @@ assert_yaml_safety_fixture_valid() {
     fail "capability reader rejected safe alias fixture: $fixture_name"
   assert_no_ruby_backtrace "$fixture_name" "$yaml_log" "$capability_log"
   if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
+    # Check the actual paths. A missing workflow plus an extra one also fails.
     assert_eq \
-      "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
-      "33"
+      "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | LC_ALL=C sort)" \
+      "$(git -C "$ROOT_DIR" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | LC_ALL=C sort)"
     assert_eq \
       "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/release-status.yml)" \
       ".github/workflows/release-status.yml"
@@ -9623,7 +9505,8 @@ reject_contract("permissions must be exactly contents: read") unless workflow["p
 jobs = workflow["jobs"]
 lint = jobs.is_a?(Hash) ? jobs["lint-core"] : nil
 reject_contract("lint job is missing") unless lint.is_a?(Hash)
-reject_contract("lint job must not have if") if lint.key?("if")
+reject_contract("invalid payment job scope") unless lint["needs"] == "lint-scope" &&
+  lint["if"] == %q{contains(fromJSON('["backend", "ui-backend", "full"]'), needs.lint-scope.outputs.mode)}
 reject_contract("lint job must not continue on error") if lint["continue-on-error"]
 steps = lint["steps"]
 reject_contract("lint steps are missing") unless steps.is_a?(Array)
@@ -9860,13 +9743,12 @@ assert_lint_payment_runtime_rejected "lint-payment-step-if-always" "$lint_step_i
 lint_job_if="$(copy_payment_hardening_fixture lint-payment-job-if)"
 replace_payment_text_once \
   "$lint_job_if/.github/workflows/lint.yml" \
-  '  lint-core:
-    name: lint-core
-    runs-on: ubuntu-latest' \
-  '  lint-core:
-    name: lint-core
-    if: always()
-    runs-on: ubuntu-latest'
+  "    timeout-minutes: 120
+    needs: lint-scope
+    if: contains(fromJSON('[\"backend\", \"ui-backend\", \"full\"]'), needs.lint-scope.outputs.mode)" \
+  '    timeout-minutes: 120
+    needs: lint-scope
+    if: always()'
 assert_lint_payment_runtime_rejected "lint-payment-job-if" "$lint_job_if"
 
 lint_changed_command="$(copy_payment_hardening_fixture lint-payment-changed-command)"
@@ -11227,7 +11109,7 @@ copy_lint_release_state_fixture() {
   local fixture_name="$1"
   local fixture_root="$TMP_DIR/lint-release-state-$fixture_name"
   mkdir -p "$fixture_root/.github/workflows"
-  cp "$ROOT_DIR/.github/workflows/lint.yml" "$fixture_root/.github/workflows/lint.yml"
+  cp "$ROOT_DIR/.github/workflows/lint.yml" "$ROOT_DIR/.github/workflows/secret-scan.yml" "$fixture_root/.github/workflows/"
   printf '%s\n' "$fixture_root"
 }
 
@@ -11240,6 +11122,10 @@ import sys
 
 path = Path(sys.argv[1])
 fixture_case = sys.argv[2]
+if not fixture_case.startswith(("lint-", "shell-lint-")) and fixture_case not in (
+    "shell-workflow-default", "workflow-cancelling-concurrency",
+):
+    path = path.with_name("secret-scan.yml")
 text = path.read_text(encoding="utf-8")
 
 
@@ -11254,7 +11140,7 @@ candidate = "${{ github.event_name == 'pull_request' && github.event.pull_reques
 strict_command = "PYTHONDONTWRITEBYTECODE=1 python3 scripts/tests/test_quiesced_release_state.py --strict-ci"
 fail_open_shell = '''bash -c 'bash "$1" || true' -- {0}'''
 
-if fixture_case == "shell-workflow-default":
+if fixture_case in ("shell-workflow-default", "shell-release-workflow-default"):
     replace_once(
         "jobs:\n",
         f"defaults:\n  run:\n    shell: {fail_open_shell}\n\njobs:\n",
@@ -11321,7 +11207,7 @@ elif fixture_case == "release-concurrency-duplicated":
         "      cancel-in-progress: false\n"
     )
     replace_once(block, block + block)
-elif fixture_case == "workflow-cancelling-concurrency":
+elif fixture_case in ("workflow-cancelling-concurrency", "release-workflow-cancelling-concurrency"):
     replace_once(
         "jobs:\n",
         "concurrency:\n  group: lint-${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n",
@@ -11443,6 +11329,7 @@ for lint_release_fixture in \
   release-concurrency-cancel-true \
   release-concurrency-duplicated \
   workflow-cancelling-concurrency \
+  release-workflow-cancelling-concurrency \
   suite-removed \
   suite-duplicated \
   suite-reduced-selection \
@@ -11472,6 +11359,7 @@ done
 calibrate_lint_release_state_fail_open_shell
 for lint_release_shell_fixture in \
   shell-workflow-default \
+  shell-release-workflow-default \
   shell-lint-job-default \
   shell-release-job-default \
   shell-lint-delegated-step \

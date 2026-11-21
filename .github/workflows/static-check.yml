@@ -1,13 +1,20 @@
 name: static-check
 on:
-  pull_request:
+  workflow_call:
   push:
-    branches: [ main, master ]
+    branches: [ master ]
 permissions:
   contents: read
   security-events: write
 jobs:
+  changes:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/change-scope.yml
+
   detekt:
+    needs: changes
+    if: needs.changes.outputs.mode != 'docs' && needs.changes.outputs.mode != 'ui'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7

@@ -1,9 +1,7 @@
 name: Tests
 
 on:
-  pull_request:
-  push:
-    branches: [ main ]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -176,36 +174,37 @@ jobs:
       - &guard-no-project-repositories
         name: "Guard: no project-level repositories"
         run: |
-          ./gradlew help \
+          ./scripts/retry-command.sh --maven-429 ./gradlew help \
             --dependency-verification=strict \
             --no-configuration-cache \
             --no-build-cache \
             --console=plain
 
-      - name: Run unit tests (retry x3)
+      # These tasks share the H2 test results in one Gradle graph. PG uses
+      # a separate profile because runIT also changes the Flyway locations.
+      - name: Build, H2 tests, coverage and logs policy
         env:
           CI: "true"
-        run: |
-          set -e
-          for i in 1 2 3; do
-            extra=""
-            if [ "$i" -gt 1 ]; then extra="--refresh-dependencies"; fi
-            echo "Attempt $i: ./gradlew clean test --no-configuration-cache $extra"
-            if ./gradlew clean test --no-configuration-cache $extra --console=plain --stacktrace; then
-              exit 0
-            fi
-            ./gradlew --stop || true
-            echo "Retrying in 20s..."
-            sleep 20
-          done
-          exit 1
+          TELEGRAM_BOT_TOKEN: 111111:TEST_BOT_TOKEN
+          NOTIFICATIONS_ENABLED: "false"
+          FLYWAY_LOCATIONS: classpath:db/migration/h2
+        run: >-
+          ./gradlew build coverageGate :app-bot:checkLogsPolicy ktlintCheck detektGate
+          dependencyGuard verifyResolvedProductionDependencyGraph
+          -PktorEnforcedVersion=3.3.1 --dependency-verification=strict
+          --no-configuration-cache --console=plain --stacktrace
 
-      - name: Upload unit test reports
+      - name: Upload H2, coverage and logs policy reports
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: unit-test-reports
-          path: "**/build/reports/tests/**"
+          name: jvm-test-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/reports/jacoco/**
+            **/build/reports/ktlint/**
+            **/build/reports/detekt/**
+            app-bot/build/reports/logs-policy/**
           if-no-files-found: ignore
 
   integration-tests:
@@ -247,23 +246,17 @@ jobs:
           done
           echo "postgres not ready" && exit 1
 
-      - name: Run integration tests (retry x3)
+      - name: Run PostgreSQL integration profile
         env:
           CI: "true"
+        # Docker-dependent JUnit tests can be skipped by assumptions. Require fresh PG migration results.
         run: |
-          set -e
-          for i in 1 2 3; do
-            extra=""
-            if [ "$i" -gt 1 ]; then extra="--refresh-dependencies"; fi
-            echo "Attempt $i: ./gradlew test -PrunIT=true --no-configuration-cache $extra"
-            if ./gradlew test -PrunIT=true --no-configuration-cache $extra --console=plain --stacktrace; then
-              exit 0
-            fi
-            ./gradlew --stop || true
-            echo "Retrying in 20s..."
-            sleep 20
-          done
-          exit 1
+          started=$(python3 -c 'import time; print(time.time_ns())')
+          ./gradlew test -PrunIT=true :core-data:test --rerun --dependency-verification=strict --no-configuration-cache --console=plain --stacktrace
+          suite=com.example.bot.data.migration.FlywayPostgresSmokeTest
+          python3 scripts/validate-payment-hardening.py --verify-junit-xml \
+            "core-data/build/test-results/test/TEST-${suite}.xml" "$suite" "$started" \
+            'postgres migrations run with jsonb defaults' 'postgres atomic refund migration preserves legacy actions'
 
       - name: Upload integration test reports
         if: always()
@@ -273,70 +266,13 @@ jobs:
           path: "**/build/reports/tests/**"
           if-no-files-found: ignore
 
-      - name: Upload jacoco reports (optional)
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: jacoco-reports
-          path: "**/build/reports/jacoco/**"
-          if-no-files-found: ignore
-
-  # checkLogsPolicy includes app-bot:test (H2/MDC) before the source scan.
-  # Give this existing task graph its own budget, independent of the full IT run.
-  logs-policy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      GRADLE_OPTS: "-Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=60000"
-    steps:
-      - *checkout
-      - *guard-no-dynamic-versions
-      - *guard-no-dynamic-plugins
-      - *guard-no-dynamic-catalogs
-      - *validate-wrapper
-      - *setup-jdk
-      - *setup-gradle
-      - *env-versions
-      - *guard-no-project-repositories
-
-      - name: Logs policy scan (SEC-02) (retry x2)
-        env:
-          TELEGRAM_BOT_TOKEN: 111111:TEST_BOT_TOKEN
-          NOTIFICATIONS_ENABLED: "false"
-          FLYWAY_LOCATIONS: classpath:db/migration/h2
-        run: |
-          set -e
-          for i in 1 2; do
-            extra=""
-            if [ "$i" -gt 1 ]; then extra="--refresh-dependencies"; fi
-            echo "Attempt $i: ./gradlew :app-bot:checkLogsPolicy --no-configuration-cache $extra"
-            if ./gradlew :app-bot:checkLogsPolicy --no-configuration-cache $extra --no-daemon --stacktrace; then
-              exit 0
-            fi
-            ./gradlew --stop || true
-            echo "Retrying in 20s..."
-            sleep 20
-          done
-          exit 1
-
-      - name: Upload logs policy and prerequisite test reports
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: logs-policy-reports
-          path: |
-            app-bot/build/reports/logs-policy/**
-            app-bot/build/reports/tests/**
-          if-no-files-found: ignore
-
-  # Require this check in the main ruleset; a skipped worker must not count green.
   tests-required:
     if: always()
-    needs: [unit-tests, integration-tests, logs-policy]
+    needs: [unit-tests, integration-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every test and logs policy worker to succeed
+      - name: Require H2 and PostgreSQL checks to succeed
         env:
           TESTS_NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
@@ -344,7 +280,7 @@ jobs:
           import json
           import os
 
-          expected = {"unit-tests", "integration-tests", "logs-policy"}
+          expected = {"unit-tests", "integration-tests"}
           needs = json.loads(os.environ["TESTS_NEEDS_JSON"])
           if not isinstance(needs, dict) or set(needs) != expected:
               raise SystemExit("tests gate: missing or unexpected worker")
@@ -355,7 +291,7 @@ jobs:
           PYTHON
 
   amd64-runtime-prototype:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.workflow_ref == format('koteev-m/clubs_bot/.github/workflows/tests.yml@{0}', github.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:

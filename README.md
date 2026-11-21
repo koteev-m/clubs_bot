@@ -36,32 +36,30 @@ Task order by mode:
 
 - `full` mode: `formatAll` → `staticCheck` → `test` → `test -PrunIT=true`.
 - `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate` → resolved production dependency graph + `app-bot` runtime distribution → `test -PrunIT=true` → `secret-scan`.
-- `lint` mode: `detektGate` + changed-files `ktlint` (тот же контракт, что и в GitHub Actions lint gate).
+- `lint` mode: `detektGate` + changed-files `ktlint`.
 - `secret-scan` mode: локальный gitleaks через Docker (тот же образ, что в GitHub Actions). Если Docker недоступен — шаг завершается с понятной ошибкой.
 - `scripts/selfcheck-quality-gates.sh` без аргументов: полный локальный regression selfcheck для shell-обвязки quality gates, включая strict release-state suite и полный corrected-stage suite. Старый режим `--ci-delegated-release-state` делегирует только release-state и по-прежнему полностью выполняет corrected-stage. Lint использует узкий режим `--ci-delegated-release-state-and-corrected-stage`: structural validation, inventory и regression contracts сохраняются; выполнение suites передаётся обязательным workflow jobs.
 
 ## PR quality gates (blocking)
 
-Every PR is blocked until all gates are green:
+GitHub требует статусы `lint` и `release-state`. Для PR CI проверяет изменения ветки и результат её слияния с базой. Для push в `main` используется весь диапазон push.
 
-- **Lint workflow** (`.github/workflows/lint.yml`) запускает параллельно `lint-core`, четыре corrected-stage shards и отдельный `release-state`. Core сохраняет обязательный Payment hardening runtime, delegated selfcheck, `./gradlew detektGate`, changed-files `ktlint` и upload отчётов на каждом PR/main run. Финальный job с именем `lint` использует `if: always()` и принимает только явный `success` от core и всех четырёх shards: failure, cancelled, skipped или отсутствующий worker блокируют gate.
-  `release-state` остаётся отдельным required context и не входит в aggregator: он checkout-ит exact PR head SHA (или `github.sha` для push), запускает structural validator и ровно один strict full run authoritative 73-test suite. Его SHA-keyed non-cancelling concurrency сохранён. Core и каждый corrected shard сохраняют ref-oriented cancelling policy в раздельных группах; sibling jobs не отменяют друг друга.
-  `scripts/corrected-stage-shards.json` распределяет все unittest classes между `authority`, `executor`, `import-root` и `support`. `python3 -B scripts/run-corrected-stage-shard.py --check` сверяет исходные test declarations, полный unittest discovery и mapping; каждый discovered test принадлежит ровно одному shard. Новые методы mapped class включаются автоматически, новый unmapped class или duplicate/omitted coverage блокируют проверку. Shard runner отклоняет skips, expected failures и неполное выполнение. Полный suite и production executor/helper не меняются.
-  Локальная проверка topology: `ruby scripts/validate-lint-workflow.rb .github/workflows/lint.yml` и `python3 -B scripts/tests/test_lint_sharding.py`. Каждый shard выполняется командой `python3 -B scripts/run-corrected-stage-shard.py <shard>` в свежем процессе; no-argument selfcheck продолжает напрямую выполнять оба полных suites.
-  Baseline wiring: `app-bot` uses `config/detekt/baseline-main.xml` + `config/detekt/baseline-test.xml`; остальные модули используют `config/detekt/baseline-<module>.xml`.
-  Historical debt фиксируется baseline-файлами, новые нарушения в PR блокируют CI.
-- **Coverage gate** (`.github/workflows/coverage.yml`) runs `./gradlew coverageGate` (и верификация, и генерация `jacocoTestReport` для upload артефактов).
+- **Документация** проходит проверку diff, Gitleaks по исходникам и истории, Trivy по файлам и структурную проверку релиза. Gitleaks использует закреплённый контейнер.
+- **Mini App** проходит typecheck, Vitest, сборку Vite и проверку ресурсов. Изменения клиентских платежей, авторизации и общего HTTP-транспорта также проходят backend-проверки. Для упакованных ресурсов CI проверяет образ и запускает контейнерный smoke.
+- **Backend** проходит сборку с H2, линтеры, покрытие, проверки платежей и логирования, проверку графа зависимостей и отдельный профиль с PostgreSQL.
+- **CI, инфраструктура, общие зависимости и критические контракты** проходят полный набор, включая четыре corrected-stage shard и строгую release-state suite. Для смешанных правок CI объединяет проверки. Неизвестный путь включает полный набор.
+- `lint` проверяет результаты применимых workers. `release-state` требует успеха Gitleaks и применимого анализа безопасности. Строгая release-suite проверяет точную ревизию с отдельной очередью по SHA. Обязательный worker со статусом cancelled, failure или skipped блокирует слияние.
+- **Coverage** входит в общий H2-запуск и публикует отчёты JaCoCo.
   Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments contour is at least **60%**.
   Critical contour classes: `BookingA3RoutesKt`, `SecuredBookingRoutesKt`, `CheckinRoutesKt`, `CheckinCompatRoutesKt`, `HostCheckinRoutesKt`, `PaymentsCancelRefundRoutesKt`, `PaymentsFinalizeRoutesKt`, `BookingState`, `PaymentsObservability`, `UiCheckinMetrics`.
-- **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
-- **SCA gate** (`.github/workflows/sca.yml`) keeps the required check name `SCA Gate / dependency-check` for branch-protection compatibility. It is read-only and fail-closed: every JVM module must produce a non-empty, fully resolved production `runtimeClasspath` graph. This gate verifies graph integrity; it is not a CVE scanner.
-- **Runtime and package scanning** (`.github/workflows/security-scan.yml` and `.github/workflows/docker-publish.yml`) is the PR vulnerability gate and remains fail-closed. The filesystem scan builds the `app-bot` distribution first, so Trivy scans resolved runtime JARs together with repository manifests and the pnpm lockfile; the image scan validates the released container. HIGH and CRITICAL findings block the check.
-- **Resolved JVM dependency submission** (`.github/workflows/dependency-submission.yml`) runs only from trusted `main` code (push to `main`, or a manual dispatch guarded to `main`). After the same strict graph verification, the official Gradle action submits direct and transitive dependencies with the built-in `GITHUB_TOKEN`. Pull requests never submit snapshots and receive no write permission.
+- **SCA** проверяет полностью разрешённый production `runtimeClasspath` каждого JVM-модуля в обязательном JVM-запуске. Самостоятельный `sca.yml` доступен вручную.
+- **Trivy** проверяет файлы репозитория. Для JVM он также проверяет фактические JAR дистрибутива, а при проверке образа — установленные пакеты. HIGH и CRITICAL блокируют соответствующий gate.
+- **Dependency Submission** публикует проверенный Gradle-граф из доверенного `main` при полном маршруте или при явном ручном запуске. Публикация образа, подпись и provenance сохраняют собственный порядок на `main` и release-тегах.
 - **DependencyGuard** remains a separate blocking build-integrity check for version alignment, dynamic/SNAPSHOT coordinates and unexpectedly empty configurations. It is not a CVE scanner.
 
 No personal API key is required for this architecture. Main-only dependency submission uses GitHub's built-in token, while Trivy remains pinned to the repository's approved action and binary versions. Do not add new vulnerability suppressions to make a finding green; upgrade the dependency or document a narrowly scoped, time-bounded exception through the normal security review.
 
-Repository workflow wiring само по себе не изменяет branch protection или rulesets. Read-only проверка GitHub ruleset `main-required-ci` (ID `21949427`, 2026-09-15) подтвердила required contexts `lint` и `release-state`, оба от GitHub Actions, со strict required status checks. Sharding сохраняет эти имена и не изменяет GitHub settings.
+На 2026-11-21 правила ветки `main` требуют `lint` и `release-state` от GitHub Actions и актуальную базу PR.
 
 ### Required GitHub repository settings
 
@@ -72,7 +70,7 @@ These settings cannot be proven from the repository and remain **UNKNOWN** until
 3. optionally enable **Dependabot security updates** after agreeing the automatic security-PR policy;
 4. leave **Automatic dependency submission** disabled because this repository supplies an explicit, validated Gradle submission workflow. Running both would create duplicate snapshots.
 
-Do not add a Dependabot version-update schedule unless that separate product decision is approved. If `SCA Gate / dependency-check` is already required by branch protection, keep that exact check required. Rename it only in a coordinated change that updates branch protection at the same time.
+Do not add a Dependabot version-update schedule unless that separate product decision is approved.
 
 ### First keyless-SCA rollout
 
@@ -98,7 +96,7 @@ Gate не отключаем. Для подтверждённого ложног
 ### Локальное воспроизведение security gates
 
 ```bash
-# lint contract как в CI (detekt по всем модулям + changed-files ktlint)
+# Локальный профиль lint (detekt по всем модулям + changed-files ktlint)
 scripts/verify.sh lint
 
 # resolved production JVM graph: непустой direct/transitive graph обязателен
@@ -118,7 +116,7 @@ docker run --rm -v "$PWD:/repo" -w /repo \
   detect --source . --redact --verbose
 ```
 
-Local graph/distribution commands prove dependency resolution and the artifact surface; PR vulnerability evaluation remains the responsibility of the pinned, fail-closed Trivy workflow. Итоговый blocking-эффект в GitHub зависит от двух условий одновременно: workflow должен завершиться ошибкой и соответствующий check должен быть добавлен в branch protection как Required.
+Локальные команды проверяют разрешение зависимостей и состав дистрибутива. В PR обязательный `release-state` учитывает результат Trivy.
 
 Browse API routes for clubs/events currently rely on in-memory repositories shipped with the app module; a production-grade database module will replace them in future iterations without changing the public API surface. Responses are JSON (UTF-8) with `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data` and stable ETags even for `304 Not Modified` replies.
 

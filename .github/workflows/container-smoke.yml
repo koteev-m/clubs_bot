@@ -1,9 +1,7 @@
 name: Container Smoke
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -34,13 +32,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-
-      - name: Set up JDK 21 (for potential Gradle pre-steps)
-        uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: gradle
 
       - name: Build app image
         run: docker build -t app-bot:ci .

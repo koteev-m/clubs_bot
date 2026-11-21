@@ -13,8 +13,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/change-scope.yml
+
   submit:
-    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    needs: changes
+    if: (github.event_name == 'push' && needs.changes.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
