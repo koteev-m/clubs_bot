@@ -54,10 +54,10 @@ def process_module():
     return module(raw, 'snapshot_process')
 
 
-def capture(args, data=b'', *, env=None, fds=(), timeout=90, limit=LIMIT, _processor=None):
+def capture(args, data=b'', *, env=None, timeout=90, limit=LIMIT, _processor=None):
     process = _processor if _processor is not None else process_module()
     try:
-        return process.capture(args, data, env=env, fds=fds, timeout=timeout, limit=limit)
+        return process.capture(args, data, env=env, timeout=timeout, limit=limit)
     except process.CleanupFailure:
         raise CleanupRefused() from None
     except process.ProcessFailure:
@@ -125,8 +125,9 @@ def payload(source):
 
 
 def ssh_args(env, pin_fd):
+    # OpenSSH closes inherited descriptors at startup. The runner holds the sealed pin until SSH exits.
     return ['/usr/bin/ssh', '-F', '/dev/null', '-o', 'BatchMode=yes',
-        '-o', 'StrictHostKeyChecking=yes', '-o', f'UserKnownHostsFile=/proc/self/fd/{pin_fd}',
+        '-o', 'StrictHostKeyChecking=yes', '-o', f'UserKnownHostsFile=/proc/{os.getpid()}/fd/{pin_fd}',
         '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'KnownHostsCommand=none',
         '-o', 'VerifyHostKeyDNS=no', '-o', 'ProxyCommand=none', '-o', 'ProxyJump=none',
         '-o', 'PermitLocalCommand=no', '-o', 'ForwardAgent=no', '-o', 'ClearAllForwardings=yes',
@@ -341,7 +342,7 @@ def run(env):
         os.lseek(fd, 0, os.SEEK_SET)
         child_env = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C',
                      'SSH_AUTH_SOCK': env.get('SSH_AUTH_SOCK', '')}
-        raw = capture(ssh_args(env, fd), payload(source), env=child_env, fds=(fd,),
+        raw = capture(ssh_args(env, fd), payload(source), env=child_env,
                       _processor=module(source[PROCESS], 'snapshot_process'))
         return sanitize(raw)
     finally:
