@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Portable CI wiring/failure controls, not a native semantic execution claim."""
-import hashlib
 import importlib.util
 import json
 import lzma
@@ -18,6 +17,8 @@ from copy import deepcopy
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / 'scripts/tests/linux-semantic'
+DIRECT_DISPATCH = ("github.event_name == 'workflow_dispatch' && "
+                   "github.workflow_ref == format('koteev-m/clubs_bot/.github/workflows/tests.yml@{0}', github.ref)")
 
 def load(name, file):
     spec = importlib.util.spec_from_file_location(name, HERE / file)
@@ -66,7 +67,11 @@ class LogsPolicyTest(unittest.TestCase):
     def test_exact_job_contract_rejects_skips_bypasses_and_unbounded_time(self):
         self.assertEqual(self.validate(self.workflow).returncode, 0)
         mutations = []
-        for name in ('logs-policy', 'tests-required'):
+        for key, value in (('defaults', {'run': {'shell': 'true {0}'}}), ('env', {'BASH_ENV': '/tmp/fixture'})):
+            changed = deepcopy(self.workflow)
+            changed[key] = value
+            mutations.append(changed)
+        for name in ('unit-tests', 'integration-tests', 'tests-required'):
             for key, value in (('if', 'false'), ('continue-on-error', True),
                                ('timeout-minutes', 0), ('timeout-minutes', 360),
                                ('needs', []), ('permissions', {'contents': 'write'})):
@@ -80,8 +85,8 @@ class LogsPolicyTest(unittest.TestCase):
             changed = deepcopy(self.workflow)
             del changed['jobs']['tests-required'][key]
             mutations.append(changed)
-        for name in ('logs-policy', 'tests-required'):
-            step_index = -2 if name == 'logs-policy' else 0
+        for name in ('unit-tests', 'integration-tests', 'tests-required'):
+            step_index = -2 if name != 'tests-required' else 0
             for key, value in (('if', 'false'), ('continue-on-error', True),
                                ('run', 'exit 0\n')):
                 changed = deepcopy(self.workflow)
@@ -89,7 +94,7 @@ class LogsPolicyTest(unittest.TestCase):
                 mutations.append(changed)
         for mutation in ('skip-tests', 'IT-inputs', 'no-setup-guard', 'no-H2-env'):
             changed = deepcopy(self.workflow)
-            job = changed['jobs']['logs-policy']
+            job = changed['jobs']['unit-tests']
             if mutation == 'skip-tests':
                 job['steps'][-2]['run'] = job['steps'][-2]['run'].replace(
                     ':app-bot:checkLogsPolicy', ':app-bot:checkLogsPolicy -x test')
@@ -100,6 +105,15 @@ class LogsPolicyTest(unittest.TestCase):
             else:
                 del job['steps'][-2]['env']['FLYWAY_LOCATIONS']
             mutations.append(changed)
+        # Each worker can be scheduled first. PG must check every dependency source before Gradle starts.
+        for index in (1, 2, 3):
+            for move_after_setup in (False, True):
+                changed = deepcopy(self.workflow)
+                steps = changed['jobs']['integration-tests']['steps']
+                guard = steps.pop(index)
+                if move_after_setup:
+                    steps.insert(8, guard)
+                mutations.append(changed)
         for i, workflow in enumerate(mutations):
             with self.subTest(mutation=i):
                 self.assertNotEqual(self.validate(workflow).returncode, 0)
@@ -107,7 +121,7 @@ class LogsPolicyTest(unittest.TestCase):
     def test_actual_aggregate_requires_success_for_every_worker(self):
         job = self.workflow['jobs']['tests-required']
         self.assertEqual(job['if'], 'always()')
-        workers = {'unit-tests', 'integration-tests', 'logs-policy'}
+        workers = {'unit-tests', 'integration-tests'}
         self.assertEqual(set(job['needs']), workers)
         body = job['steps'][0]['run']
         success = {name: {'result': 'success'} for name in workers}
@@ -130,31 +144,68 @@ class LogsPolicyTest(unittest.TestCase):
         for value in ({}, [], None, dict(success, unexpected={'result': 'success'})):
             self.assertNotEqual(run(value).returncode, 0)
 
-    def test_actual_scan_command_propagates_unsuccessful_attempts(self):
-        # Execute the actual workflow shell with controlled commands, not Gradle
-        # or a live daemon. A successful --stop must not hide a failed scan.
-        body = self.workflow['jobs']['logs-policy']['steps'][-2]['run']
-        with tempfile.TemporaryDirectory(prefix='clb569-logs-command-') as directory:
+    def test_maven_retry_is_bounded_and_limited_to_plugin_resolution(self):
+        help_step = self.workflow['jobs']['unit-tests']['steps'][8]['run']
+        rate_limit = "Could not GET 'https://repo.maven.apache.org/maven2/lib.pom'. Received status code 429 from server: Too Many Requests"
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            gradle = root / 'gradlew'
-            gradle.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FIXTURE_CALLS"\n'
-                              'if [ "$1" = "--stop" ]; then exit 0; fi\n'
-                              'exit "$FIXTURE_EXIT"\n')
-            gradle.chmod(0o700)
-            (root / 'sleep').write_text('#!/bin/sh\nexit 0\n')
-            (root / 'sleep').chmod(0o700)
+            (root / 'scripts').mkdir()
+            (root / 'scripts/retry-command.sh').symlink_to(ROOT / 'scripts/retry-command.sh')
             calls = root / 'calls'
-            for code in (0, 1, 124, 143):
-                with self.subTest(exit=code):
+            gradle = root / 'gradlew'
+            gradle.write_text('#!/bin/sh\necho "$*" >>calls\n'
+                              'if [ "$(wc -l <calls)" -gt "$FAIL_N" ]; then exit 0; fi\n'
+                              'echo "$DIAGNOSTIC" >&2\nexit 37\n')
+            gradle.chmod(0o700)
+            for diagnostic, failures, expected_calls, code in (
+                (rate_limit, 1, 2, 0), (rate_limit, 4, 3, 37),
+                ('Dependency verification failed', 1, 1, 37),
+                ('Repository policy violation', 1, 1, 37),
+            ):
+                with self.subTest(diagnostic=diagnostic, failures=failures):
                     calls.write_text('')
-                    child = subprocess.run(['bash', '-e', '-c', body], cwd=root,
-                        env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
-                                 FIXTURE_CALLS=str(calls), FIXTURE_EXIT=str(code)),
-                        capture_output=True, timeout=5)
-                    self.assertEqual(child.returncode == 0, code == 0)
-                    attempts = [line for line in calls.read_text().splitlines() if line != '--stop']
-                    self.assertEqual(len(attempts), 1 if code == 0 else 2)
-                    self.assertTrue(all(':app-bot:checkLogsPolicy' in line for line in attempts))
+                    env = dict(os.environ, RETRY_DELAY_SECONDS='0', RETRY_MAX_ATTEMPTS='3',
+                               DIAGNOSTIC=diagnostic, FAIL_N=str(failures))
+                    result = subprocess.run(['bash', '-e', '-c', help_step], cwd=root, env=env, capture_output=True)
+                    self.assertEqual(result.returncode, code)
+                    self.assertEqual(calls.read_text().splitlines(), [
+                        'help --dependency-verification=strict --no-configuration-cache --no-build-cache --console=plain'
+                    ] * expected_calls)
+            # A failing H2 or PG test must fail that workflow on its first attempt.
+            for job in ('unit-tests', 'integration-tests'):
+                calls.write_text('')
+                step = self.workflow['jobs'][job]['steps'][-2]['run']
+                result = subprocess.run(['bash', '-e', '-c', step], cwd=root, env=dict(
+                    os.environ, DIAGNOSTIC=rate_limit, FAIL_N='2'), capture_output=True)
+                self.assertEqual(result.returncode, 37)
+                self.assertEqual(len(calls.read_text().splitlines()), 1)
+
+    def test_postgres_profile_requires_fresh_executed_migrations(self):
+        step = self.workflow['jobs']['integration-tests']['steps'][-2]['run']
+        suite = 'com.example.bot.data.migration.FlywayPostgresSmokeTest'
+        names = ('postgres migrations run with jsonb defaults', 'postgres atomic refund migration preserves legacy actions')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').symlink_to(ROOT / 'scripts', target_is_directory=True)
+            output = root / 'core-data/build/test-results/test' / f'TEST-{suite}.xml'
+            output.parent.mkdir(parents=True)
+            gradle = root / 'gradlew'
+            gradle.write_text('#!/bin/sh\ncp fixture.xml "$REPORT"\n')
+            gradle.chmod(0o700)
+            for skipped in (False, True):
+                cases = ''.join(f'<testcase name="{name}()" classname="{suite}">' +
+                                ('<skipped/>' if skipped else '') + '</testcase>' for name in names)
+                (root / 'fixture.xml').write_text(
+                    f'<testsuite name="{suite}" tests="2" skipped="{2 if skipped else 0}" failures="0" errors="0">'
+                    + cases + '</testsuite>')
+                result = subprocess.run(['bash', '-e', '-c', step], cwd=root,
+                                        env=dict(os.environ, REPORT=str(output)), capture_output=True)
+                self.assertEqual(result.returncode == 0, not skipped, result.stderr)
+            gradle.write_text('#!/bin/sh\nexit 0\n')
+            output.unlink()
+            result = subprocess.run(['bash', '-e', '-c', step], cwd=root, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b'PH-TEST-RESULT', result.stderr + result.stdout)
 
     def test_gradle_test_and_MDC_prerequisites_remain(self):
         text = (ROOT / 'app-bot/build.gradle.kts').read_text()
@@ -166,33 +217,19 @@ class LogsPolicyTest(unittest.TestCase):
 
 
 class HarnessTest(unittest.TestCase):
-    def test_workflow_contract_and_existing_jobs_unchanged(self):
+    def test_native_workflow_contract(self):
         raw = (ROOT / '.github/workflows/tests.yml').read_bytes()
         original = raw.split(b'\n  amd64-runtime-prototype:\n')[0]
-        historical = (HERE / 'native-adapter/ci/tests.yml.candidate').read_bytes()
-        self.assertEqual(hashlib.sha256(historical.split(b'\n  amd64-runtime-prototype:\n')[0]).hexdigest(),
-                         '010df3d58cf1ab89ef3978c517f3e6c124649cb656f918c4674aa30c2a319a60')
         # Psych is only the independent YAML test oracle on runner, never the
         # semantic runtime; no custom constructors or project execution.
         result = subprocess.run(['ruby', '-ryaml', '-rjson', '-e',
             'puts JSON.generate(YAML.safe_load(STDIN.read, aliases: true))'],
             input=raw, capture_output=True, check=True)
         workflow = json.loads(result.stdout)
-        self.assertEqual(set(workflow['jobs']), {'unit-tests', 'integration-tests', 'logs-policy',
+        self.assertEqual(set(workflow['jobs']), {'unit-tests', 'integration-tests',
                                                 'tests-required', 'amd64-runtime-prototype'})
-        old = json.loads(subprocess.run(['ruby', '-ryaml', '-rjson', '-e',
-            'puts JSON.generate(YAML.safe_load(STDIN.read, aliases: true))'],
-            input=historical, capture_output=True, check=True).stdout)
-        self.assertEqual(workflow['jobs']['unit-tests'], old['jobs']['unit-tests'])
-        integration = old['jobs']['integration-tests']
-        moved = next(step for step in integration['steps'] if step['name'].startswith('Logs policy scan'))
-        integration['steps'].remove(moved)
-        self.assertEqual(workflow['jobs']['integration-tests'], integration)
-        self.assertEqual(workflow['jobs']['logs-policy']['steps'][-2], moved)
-        self.assertEqual({k: v for k, v in workflow.items() if k != 'jobs'},
-                         {k: v for k, v in old.items() if k != 'jobs'})
         job = workflow['jobs']['amd64-runtime-prototype']
-        self.assertEqual(job['if'], "github.event_name == 'workflow_dispatch'")
+        self.assertEqual(job['if'], DIRECT_DISPATCH)
         self.assertEqual(job['runs-on'], 'ubuntu-24.04')
         self.assertEqual(job['permissions'], {'contents': 'read'})
         self.assertEqual(job['timeout-minutes'], 75)
@@ -277,7 +314,7 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(text.count(command), 1)
         self.assertIn('python3 -B "$ROOT_DIR/scripts/tests/test_gitleaks_runtime_allowlist.py"', text)
         self.assertLess(text.index(command), text.index('validate_keyless_action_inventory()'))
-        self.assertIn("$'unit-tests\\nintegration-tests\\nlogs-policy\\ntests-required\\namd64-runtime-prototype'", text)
+        self.assertIn("$'unit-tests\\nintegration-tests\\ntests-required\\namd64-runtime-prototype'", text)
         self.assertNotIn("$'unit-tests\\nintegration-tests'", text)
         self.assertIn('assert_tests_workflow_contract_rejected "tests-native-$native_mutation"', text)
 
@@ -327,7 +364,7 @@ class HarnessTest(unittest.TestCase):
             path = root / '.github/workflows/tests.yml'
             raw = path.read_text()
             prefix, job = raw.split('\n  amd64-runtime-prototype:\n')
-            for before, after in (("github.event_name == 'workflow_dispatch'", 'true'),
+            for before, after in ((DIRECT_DISPATCH, "github.event_name == 'workflow_dispatch'"),
                                   ('ubuntu-24.04', 'ubuntu-latest'),
                                   ('contents: read', 'contents: write'),
                                   ('    permissions:', '    environment: stage\n    permissions:')):

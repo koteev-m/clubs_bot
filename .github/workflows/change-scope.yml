@@ -1,0 +1,51 @@
+name: Change scope
+
+on:
+  workflow_call:
+    outputs:
+      mode:
+        value: ${{ jobs.changes.outputs.mode }}
+      image:
+        value: ${{ jobs.changes.outputs.image }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.range.outputs.mode }}
+      image: ${{ steps.range.outputs.image }}
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine change range
+        id: range
+        env:
+          LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          LINT_CANDIDATE: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_REF" == refs/tags/* || ( "$GITHUB_EVENT_NAME" == push && "$LINT_BASE" == 0000000000000000000000000000000000000000 ) ]]; then
+            printf '%s\n' mode=full image=true >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$LINT_BASE" "$GITHUB_SHA" -- scripts/lint-scope.py; then
+            python3 -I -S -B scripts/lint-scope.py >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            [[ "$status" == 1 ]] || exit "$status"
+            printf '%s\n' mode=full image=true >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require a recognized suite
+        env:
+          MODE: ${{ steps.range.outputs.mode }}
+          IMAGE: ${{ steps.range.outputs.image }}
+        run: |
+          case "$MODE/$IMAGE" in
+            docs/false|ui/false|ui/true|backend/true|ui-backend/true|full/true) ;;
+            *) echo 'Missing or inconsistent change scope' >&2; exit 1 ;;
+          esac

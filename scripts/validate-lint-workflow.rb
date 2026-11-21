@@ -17,6 +17,10 @@ begin
     File.binread(path),
     ".github/workflows/lint.yml"
   )
+  security = WorkflowYamlSafety.safe_load_workflow(
+    File.binread(File.join(File.dirname(path), "secret-scan.yml")),
+    ".github/workflows/secret-scan.yml"
+  )
 rescue WorkflowYamlSafety::ModelError, Psych::SyntaxError, SystemCallError, ArgumentError => error
   reject_contract("workflow is unreadable or malformed: #{error.message}")
 end
@@ -35,16 +39,28 @@ unless workflow["permissions"] == {"contents" => "read"}
   reject_contract("permissions must be exactly contents: read")
 end
 
+reject_contract("release workflow triggers changed") unless (security["on"] || security[true]) == triggers
+reject_custom_shell_override("release workflow defaults") if security.key?("defaults")
+reject_contract("release workflow concurrency is forbidden") if security.key?("concurrency")
+security_jobs = security.fetch("jobs", {})
+security_needs = %w[lint-scope gitleaks security-analysis static-analysis]
+unless security_jobs.is_a?(Hash) && security_jobs.keys.sort == (security_needs + ["release-state"]).sort
+  reject_contract("missing or unexpected security/release worker")
+end
+
 jobs = workflow["jobs"]
 reject_contract("jobs must be a mapping") unless jobs.is_a?(Hash)
 shards = %w[authority executor import-root support]
-workers = ["lint-scope", "lint-core"] + shards.map { |shard| "corrected-#{shard}" }
-unless jobs.keys == workers + ["lint", "release-state"]
+workers = %w[lint-scope miniapp jvm pr-image container-smoke lint-core] + shards.map { |shard| "corrected-#{shard}" }
+unless jobs.keys == workers + ["lint"]
   reject_contract("mandatory worker/aggregator job inventory changed")
 end
 full_scope = "needs.lint-scope.outputs.mode == 'full'"
+backend_scope = %q{contains(fromJSON('["backend", "ui-backend", "full"]'), needs.lint-scope.outputs.mode)}
+ui_scope = %q{contains(fromJSON('["ui", "ui-backend", "full"]'), needs.lint-scope.outputs.mode)}
+image_scope = "needs.lint-scope.outputs.image == 'true'"
 lint = jobs["lint-core"]
-release_state = jobs["release-state"]
+release_state = security_jobs["release-state"]
 unless lint.is_a?(Hash) && release_state.is_a?(Hash)
   reject_contract("lint and release-state jobs must be mappings")
 end
@@ -59,11 +75,13 @@ reject_contract("release-state timeout must be exactly 50 minutes") unless relea
 
 [["lint-core", lint], ["release-state", release_state]].each do |job_name, job|
   reject_custom_shell_override("#{job_name} job defaults") if job.key?("defaults")
-  expected_if = job_name == "release-state" ? "always()" : nil
+  expected_if = job_name == "release-state" ? "always()" : backend_scope
   reject_contract("invalid job scope condition") unless job["if"] == expected_if
-  reject_contract("jobs must depend only on the change range") unless job["needs"] == "lint-scope"
+  expected_needs = job_name == "release-state" ? security_needs : "lint-scope"
+  reject_contract("required worker dependencies changed") unless job["needs"] == expected_needs
   reject_contract("job continues on error") if job.key?("continue-on-error")
-  reject_contract("job-level permissions must inherit the shared read-only boundary") if job.key?("permissions")
+  expected_permissions = job_name == "release-state" ? {"contents" => "read"} : nil
+  reject_contract("required job permissions changed") unless job["permissions"] == expected_permissions
 end
 
 lint_concurrency = lint["concurrency"]
@@ -105,14 +123,12 @@ expected_lint_steps = [
   "Checkout",
   "Set up JDK 21",
   "Gradle cache & setup",
+  "Validate payment hardening structure",
   "Payment hardening required runtime",
   "Quality gate regression self-check",
-  "Run detekt gate (blocking, baseline-aware)",
-  "Run ktlint gate (baseline-aware; Kotlin changes only)",
-  "Upload lint reports",
 ]
 expected_release_steps = [
-  "Require verified change range",
+  "Require verified change range and security checks",
   "Checkout exact candidate",
   "Verify Python 3.11+",
   "Validate release-state structure",
@@ -134,13 +150,20 @@ end
   reject_contract("step hides failure with || true") if run.is_a?(String) && run.include?("|| true")
 end
 
-scope_result = one_step(release_steps, "Require verified change range")
+scope_result = one_step(release_steps, "Require verified change range and security checks")
 unless scope_result == {
-  "name" => "Require verified change range",
-  "env" => {"SCOPE_RESULT" => "${{ needs.lint-scope.result }}", "MODE" => "${{ needs.lint-scope.outputs.mode }}"},
+  "name" => "Require verified change range and security checks",
+  "env" => {
+    "SCOPE_RESULT" => "${{ needs.lint-scope.result }}", "MODE" => "${{ needs.lint-scope.outputs.mode }}",
+    "GITLEAKS" => "${{ needs.gitleaks.result }}", "SECURITY" => "${{ needs.security-analysis.result }}",
+    "STATIC" => "${{ needs.static-analysis.result }}",
+  },
   "run" => <<~'BASH',
     test "$SCOPE_RESULT" = success
-    [[ "$MODE" == docs || "$MODE" == ui || "$MODE" == full ]]
+    test "$GITLEAKS" = success
+    test "$SECURITY" = success
+    test "$STATIC" = success
+    case "$MODE" in docs|ui|backend|ui-backend|full) ;; *) exit 1 ;; esac
   BASH
 }
   reject_contract("release-state must fail on missing or unsuccessful change range")
@@ -260,16 +283,28 @@ expected_aggregator = {
 
       shards = {"corrected-authority", "corrected-executor", "corrected-import-root", "corrected-support"}
       needs = json.loads(os.environ["LINT_NEEDS_JSON"])
-      if not isinstance(needs, dict) or set(needs) != shards | {"lint-core", "lint-scope"}:
+      scope = needs["lint-scope"]
+      mode = scope["outputs"]["mode"]
+      image = scope["outputs"]["image"]
+      if mode not in ("docs", "ui", "backend", "ui-backend", "full") or image not in ("true", "false"):
+          raise SystemExit("lint gate: invalid change scope")
+      backend = mode in ("backend", "ui-backend", "full")
+      if (backend and image != "true") or (mode == "docs" and image != "false"):
+          raise SystemExit("lint gate: inconsistent packaging scope")
+      required = {
+          "lint-scope": True,
+          "miniapp": mode in ("ui", "ui-backend", "full"),
+          "lint-core": backend,
+          "jvm": backend,
+          "container-smoke": image == "true",
+          "pr-image": image == "true" and os.environ["GITHUB_EVENT_NAME"] == "pull_request",
+          **{shard: mode == "full" for shard in shards},
+      }
+      if set(needs) != set(required):
           raise SystemExit("lint gate: missing or unexpected worker")
-      if needs["lint-scope"]["result"] != "success" or needs["lint-core"]["result"] != "success":
-          raise SystemExit("lint gate: required scope/core check did not succeed")
-      mode = needs["lint-scope"]["outputs"].get("mode")
-      if mode not in ("docs", "ui", "full"):
-          raise SystemExit("lint gate: missing or invalid scope")
-      expected = "success" if mode == "full" else "skipped"
-      if any(needs[shard]["result"] != expected for shard in shards):
-          raise SystemExit("lint gate: unexpected corrected-stage shard result")
+      for name, applies in required.items():
+          if needs[name]["result"] != ("success" if applies else "skipped"):
+              raise SystemExit(f"lint gate: unexpected result for {name}")
       print("lint gate: required workers succeeded for", mode)
       PY
     PYTHON
@@ -278,10 +313,17 @@ expected_aggregator = {
 reject_contract("lint aggregator must require every worker success, always and fail-closed") unless
   aggregator == expected_aggregator
 
-# The core gates still execute on every PR/main run, in their existing order.
+payment_structure = one_step(lint_steps, "Validate payment hardening structure")
+unless payment_structure == {
+  "name" => "Validate payment hardening structure", "if" => "needs.lint-scope.outputs.mode != 'full'",
+  "run" => "python3 -B scripts/validate-payment-hardening.py .",
+}
+  reject_contract("backend payment structure check changed")
+end
+
+# All remaining core gates execute whenever a backend or full run is required.
 lint_steps.each do |step|
-  next if step == delegated
-  next if step["name"] == "Upload lint reports" && step["if"] == "always()"
+  next if [delegated, payment_structure].include?(step)
   reject_contract("core step became conditional") if step.key?("if")
 end
 expected_setup = [
@@ -303,62 +345,37 @@ expected_setup = [
 ]
 reject_contract("core checkout/JDK/cache setup changed") unless lint_steps.first(3) == expected_setup
 
-scope = jobs.fetch("lint-scope")
-expected_scope = {
-  "runs-on" => "ubuntu-latest", "timeout-minutes" => 10,
-  "outputs" => {"mode" => "${{ steps.range.outputs.mode }}"},
+unless jobs.fetch("lint-scope") == {"uses" => "./.github/workflows/change-scope.yml"}
+  reject_contract("change scope workflow must run unconditionally")
+end
+{
+  "jvm" => ["tests.yml", backend_scope],
+  "pr-image" => ["docker-image.yml", "github.event_name == 'pull_request' && #{image_scope}"],
+  "container-smoke" => ["container-smoke.yml", image_scope],
+}.each do |name, (file, condition)|
+  expected = {"uses" => "./.github/workflows/#{file}", "needs" => "lint-scope", "if" => condition}
+  reject_contract("#{name} worker changed") unless jobs.fetch(name) == expected
+end
+miniapp = jobs.fetch("miniapp")
+unless miniapp == {
+  "needs" => "lint-scope", "if" => ui_scope, "runs-on" => "ubuntu-latest", "timeout-minutes" => 15,
+  "defaults" => {"run" => {"working-directory" => "miniapp"}},
   "steps" => [
-    expected_setup.first,
+    {"name" => "Checkout", "uses" => expected_setup.first.fetch("uses"), "with" => {"persist-credentials" => false}},
     {
-      "name" => "Check lint workflow and change range", "id" => "range",
-      "env" => {"LINT_BASE" => "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}",
-                "LINT_CANDIDATE" => candidate_sha},
-      "run" => <<~'BASH',
-        ruby scripts/validate-lint-workflow.rb .github/workflows/lint.yml
-        if [[ "$GITHUB_EVENT_NAME" == push && "$LINT_BASE" == 0000000000000000000000000000000000000000 ]]; then
-          echo 'mode=full' >> "$GITHUB_OUTPUT"
-        elif git diff --quiet "$LINT_BASE" "$GITHUB_SHA" -- scripts/lint-scope.py; then
-          python3 -I -S -B scripts/lint-scope.py >> "$GITHUB_OUTPUT"
-        else
-          status=$?
-          [[ "$status" == 1 ]] || exit "$status"
-          echo 'mode=full' >> "$GITHUB_OUTPUT"
-        fi
-      BASH
-    },
-    {
-      "name" => "Validate payment hardening structure", "if" => "steps.range.outputs.mode != 'full'",
-      "run" => "python3 -B scripts/validate-payment-hardening.py --structural .",
-    },
-    {
-      "name" => "Build changed Mini App UI", "if" => "steps.range.outputs.mode == 'ui'",
-      "working-directory" => "miniapp",
+      "name" => "Check Mini App source and packaged assets",
       "run" => <<~'BASH',
         npx --yes pnpm@9.15.9 install --frozen-lockfile --ignore-scripts
         npm run typecheck
+        npm test
         npm run build -- --outDir "$RUNNER_TEMP/lint-miniapp-dist"
+        bash ../scripts/validate-miniapp-dist.sh "$RUNNER_TEMP/lint-miniapp-dist"
+        bash ../scripts/validate-miniapp-dist.sh dist
       BASH
     },
   ],
 }
-reject_contract("lint scope decision or fast checks changed") unless scope == expected_scope
-
-expected_reports = {
-  "name" => "Upload lint reports", "if" => "always()",
-  "uses" => "actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882",
-  "with" => {
-    "name" => "lint-reports",
-    "path" => "**/build/reports/detekt/**\n**/build/reports/ktlint/**\n",
-    "if-no-files-found" => "ignore",
-  },
-}
-reject_contract("lint reports contract changed") unless lint_steps.last == expected_reports
-reject_contract("detekt command changed") unless one_step(lint_steps,
-  "Run detekt gate (blocking, baseline-aware)")["run"] == "./gradlew detektGate --console=plain --stacktrace"
-ktlint = one_step(lint_steps, "Run ktlint gate (baseline-aware; Kotlin changes only)")
-reject_contract("ktlint command changed") unless ktlint["run"] == "./scripts/ktlint-changed.sh" && ktlint["env"] == {
-  "VERIFY_TO_SHA" => "${{ github.sha }}",
-  "VERIFY_FROM_SHA" => "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}",
-}
+  reject_contract("Mini App checks changed")
+end
 
 puts "quality-gate: lint/release-state delegation contract verified"

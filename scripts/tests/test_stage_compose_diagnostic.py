@@ -1393,16 +1393,17 @@ StageComposeDiagnosticWorkflow.validate(WorkflowCapabilityPolicy,w)
             self.assertIn(name, selfcheck)
         ruby = '''require "validate-workflow-yaml"; require "validate-workflow-capabilities";
 root=Pathname.new(ARGV[0]); paths=WorkflowYamlSafety.visible_workflows(root);
-raise "inventory: expected 33, actual #{paths.length}" unless paths.length == 33;
+expected=WorkflowYamlSafety.visible_workflows(Pathname.new(ARGV[1]));
+raise "workflow inventory differs" unless paths.sort == expected.sort;
 raise "yaml" unless WorkflowYamlSafety.run(root) == 0;
 WorkflowCapabilityPolicy.run(root);
 '''
         def validate(root):
-            return subprocess.run(['ruby', '-I', str(ROOT / 'scripts'), '-e', ruby, str(root)],
+            return subprocess.run(['ruby', '-I', str(ROOT / 'scripts'), '-e', ruby, str(root), str(ROOT)],
                                   capture_output=True, text=True, timeout=30)
         child = validate(ROOT)
         self.assertEqual(child.returncode, 0, child.stderr)
-        # Exercise the same fixed-count guard on real Git-visible inventories.
+        # Exercise the same path inventory check on real Git-visible inventories.
         # Negative fixtures must fail at inventory, not a later missing source pin.
         paths = subprocess.check_output(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--',
             ':(glob).github/workflows/*.yml', ':(glob).github/workflows/*.yaml'], cwd=ROOT).split(b'\0')
@@ -1418,14 +1419,14 @@ WorkflowCapabilityPolicy.run(root);
             with self.subTest(inventory='missing-one'):
                 child = validate(fixture)
                 self.assertNotEqual(child.returncode, 0)
-                self.assertIn('inventory: expected 33, actual 32', child.stderr)
+                self.assertIn('workflow inventory differs', child.stderr)
             removed.write_bytes(retained)
             extra = fixture / '.github/workflows/clb91-unexpected-inventory.yml'
             self.assertFalse(extra.exists()); extra.write_bytes(retained)
             with self.subTest(inventory='extra-one'):
                 child = validate(fixture)
                 self.assertNotEqual(child.returncode, 0)
-                self.assertIn('inventory: expected 33, actual 34', child.stderr)
+                self.assertIn('workflow inventory differs', child.stderr)
 
 
 class EndToEndTest(unittest.TestCase):

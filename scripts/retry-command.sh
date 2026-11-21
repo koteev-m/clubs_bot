@@ -23,6 +23,31 @@ case "$delay_seconds" in
     ;;
 esac
 
+if [ "$1" = "--maven-429" ]; then
+  shift
+  if [ "${1:-}" != "./gradlew" ] || [ "${2:-}" != "help" ]; then
+    echo "The Maven retry applies only to Gradle help." >&2
+    exit 2
+  fi
+  log=$(mktemp)
+  trap 'rm -f "$log"' EXIT
+  for ((attempt=1; attempt<=max_attempts; attempt++)); do
+    if "$@" >"$log" 2>&1; then
+      cat "$log"
+      exit 0
+    else
+      status=$?
+    fi
+    cat "$log"
+    if [ "$attempt" -eq "$max_attempts" ] ||
+       ! grep -Eq "Could not (GET|HEAD) 'https://repo\.maven\.apache\.org/maven2/[^']+'\. Received status code 429 " "$log"; then
+      exit "$status"
+    fi
+    echo "Maven Central rate limited Gradle help; retrying after $((delay_seconds * attempt))s." >&2
+    sleep "$((delay_seconds * attempt))"
+  done
+fi
+
 attempt=1
 while true; do
   if "$@"; then

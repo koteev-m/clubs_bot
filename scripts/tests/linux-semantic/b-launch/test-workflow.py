@@ -258,7 +258,8 @@ class CapabilityFixture(unittest.TestCase):
         expected={'.github/workflows/release-status.yml','.github/workflows/corrected-stage-release.yml'}
         self.assertEqual(set(untracked),expected)
         self.assertFalse(expected.intersection(tracked))
-        self.assertEqual(sum(p.startswith('.github/workflows/') for p in tracked+untracked),33)
+        self.assertEqual({p for p in tracked+untracked if p.startswith('.github/workflows/')},
+                         {p.relative_to(ROOT).as_posix() for p in (ROOT/'.github/workflows').glob('*.yml')})
 
     def test_each_missing_pinned_source_refuses(self):
         for name in D.SOURCES+(D.MANIFEST,):
@@ -374,10 +375,13 @@ class Policy(unittest.TestCase):
         actual=(ROOT/'.github/workflows/tests.yml').read_bytes()
         original=subprocess.check_output(['git','show','HEAD:.github/workflows/tests.yml'],cwd=ROOT)
         # Ordinary CI topology may change with explicit approval. Keep the
-        # dispatched native prototype byte-exact and never wire this B launch
+        # directly dispatched native prototype body byte-exact and never wire this B launch
         # into the automatic test jobs.
         boundary=b'\n  amd64-runtime-prototype:\n'
-        self.assertEqual(actual.split(boundary,1)[1],original.split(boundary,1)[1])
+        condition, body = actual.split(boundary,1)[1].split(b'\n',1)
+        self.assertEqual(condition, b"    if: github.event_name == 'workflow_dispatch' && "
+                         b"github.workflow_ref == format('koteev-m/clubs_bot/.github/workflows/tests.yml@{0}', github.ref)")
+        self.assertEqual(body,original.split(boundary,1)[1].split(b'\n',1)[1])
         self.assertNotIn(b'scripts/tests/linux-semantic/b-launch/',actual)
 
 

@@ -238,9 +238,8 @@ The existing [Tests workflow](../../../.github/workflows/tests.yml) now includes
 one `amd64-runtime-prototype` job, only on `workflow_dispatch`, using the standard
 `ubuntu-24.04` x64 runner, `contents: read`, no Environment or deployment secrets,
 exact `github.sha` checkout and `persist-credentials: false`. Its bounded
-75-minute timeout covers the 65-minute command budget plus cleanup/artifact time. Existing triggers,
-unit/integration test coverage and YAML anchors are preserved. Logs Policy now has
-its own 45-minute job and an always-run `tests-required` aggregate; workflow inventory is 33.
+75-minute timeout covers the 65-minute command budget plus cleanup/artifact time.
+SEC-02 shares the H2 worker's test results. The PostgreSQL profile runs separately.
 The capability validator has a runner-label rule only for this exact manual job;
 its permissions still use the unchanged `contents: read` policy. Other jobs still
 require `ubuntu-latest`; no self-hosted/slim/ARM runner or emulation setup is added.
@@ -252,12 +251,11 @@ selected on a new feature branch without merging it first. For example (text onl
 gh workflow run tests.yml --repo koteev-m/clubs_bot --ref APPROVED_FEATURE_BRANCH
 ```
 
-This dispatch also runs **unit-tests**, **integration-tests**, **logs-policy**
-and the **tests-required** aggregate (including the full Gradle test prerequisites,
-SEC-02 scan and Postgres fixture); their conditions were not narrowed. The main
-ruleset must require `tests-required` for merge enforcement. A plain feature-branch push triggers **Smoke**, which uses `**`;
-Tests itself runs on PR events, pushes to main, or manual dispatch. Opening a PR
-also triggers the existing PR workflows, with this manual-only job skipped.
+This dispatch also runs **unit-tests** (H2 build, SEC-02 and coverage),
+**integration-tests** (PostgreSQL) and their **tests-required** aggregate.
+On ordinary PRs and pushes to main, Lint calls this workflow for changes that need
+JVM checks. The required `lint` status includes the result. The native prototype
+runs only on explicit Tests dispatch.
 The existing `tests-${{ github.ref }}` concurrency/cancel policy is unchanged.
 
 [`run-amd64-ci.py`](run-amd64-ci.py) records run/attempt/checkout, native runner,

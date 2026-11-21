@@ -243,6 +243,14 @@ module WorkflowCapabilityPolicy
       "contents" => "read",
       "security-events" => "write",
     },
+    [".github/workflows/secret-scan.yml", "security-analysis"] => {
+      "contents" => "read",
+      "security-events" => "write",
+    },
+    [".github/workflows/secret-scan.yml", "static-analysis"] => {
+      "contents" => "read",
+      "security-events" => "write",
+    },
     [".github/workflows/security-scan.yml", "trivy"] => {
       "contents" => "read",
       "security-events" => "write",
@@ -284,13 +292,13 @@ module WorkflowCapabilityPolicy
       "push" => {"branches" => ["main"]},
     },
     ".github/workflows/security-scan.yml" => {
-      "push" => {"branches" => ["main", "master"], "tags" => ["v*"]},
-      "pull_request" => nil,
+      "push" => {"branches" => ["master"], "tags" => ["v*"]},
+      "workflow_call" => nil,
       "workflow_dispatch" => nil,
     },
     ".github/workflows/static-check.yml" => {
-      "pull_request" => nil,
-      "push" => {"branches" => ["main", "master"]},
+      "workflow_call" => nil,
+      "push" => {"branches" => ["master"]},
     },
     ".github/workflows/deploy-ssh.yml" => {
       "workflow_dispatch" => {
@@ -1139,7 +1147,8 @@ module WorkflowCapabilityPolicy
     validate_exact_value(
       job.reject { |key, _value| key == "steps" },
       {
-        "if" => "github.event_name == 'push' || github.ref == 'refs/heads/main'",
+        "needs" => "changes",
+        "if" => "(github.event_name == 'push' && needs.changes.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')",
         "runs-on" => "ubuntu-latest",
         "timeout-minutes" => 30,
         "permissions" => {"contents" => "write"},
@@ -1950,13 +1959,26 @@ module WorkflowCapabilityPolicy
     expected = EXPECTED_TRIGGERS[path]
     return unless expected
     validate_exact_value(triggers, expected, "#{path}: privileged trigger contract")
+    if path == ".github/workflows/secret-scan.yml"
+      {"security-analysis" => "security-scan", "static-analysis" => "static-check"}.each do |name, target|
+        validate_exact_value(jobs[name], {"uses" => "./.github/workflows/#{target}.yml"}, "#{path}/#{name}")
+      end
+      validate_exact_value(jobs["lint-scope"], {
+        "permissions" => {"contents" => "read"}, "uses" => "./.github/workflows/change-scope.yml",
+      }, "#{path}: release-state change scope")
+    end
+    if [DEPENDENCY_SUBMISSION_WORKFLOW, ".github/workflows/security-scan.yml", ".github/workflows/static-check.yml"].include?(path)
+      validate_exact_value(jobs["changes"], {
+        "permissions" => {"contents" => "read"}, "uses" => "./.github/workflows/change-scope.yml",
+      }, "#{path}: change scope")
+    end
     if path == CANONICAL_PUBLISHER
       guard = jobs.dig(CANONICAL_PUBLISHER_JOB, "if")
       expected_guard = "github.event_name == 'push' || github.ref == 'refs/heads/main'"
       reject("#{path}: workflow_dispatch publisher guard changed") unless guard == expected_guard
     elsif path == ".github/workflows/dependency-submission.yml"
       guard = jobs.dig("submit", "if")
-      expected_guard = "github.event_name == 'push' || github.ref == 'refs/heads/main'"
+      expected_guard = "(github.event_name == 'push' && needs.changes.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')"
       reject("#{path}: trusted dependency submission guard changed") unless guard == expected_guard
     end
   end
@@ -2225,9 +2247,9 @@ module WorkflowCapabilityPolicy
   def validate_pr_image_workflow(workflow)
     context = PR_IMAGE_WORKFLOW
     triggers = workflow_triggers(workflow, context)
-    reject("#{context}: PR image triggers changed") unless triggers.keys.sort == %w[pull_request workflow_dispatch]
+    reject("#{context}: PR image triggers changed") unless triggers.keys.sort == %w[workflow_call workflow_dispatch]
     trigger_key = workflow.key?("on") ? "on" : true
-    validate_exact_value(workflow[trigger_key], {"pull_request" => nil, "workflow_dispatch" => nil}, context)
+    validate_exact_value(workflow[trigger_key], {"workflow_call" => nil, "workflow_dispatch" => nil}, context)
     jobs = workflow.fetch("jobs")
     reject("#{context}: both image matrix and aggregate gate are required") unless
       jobs.keys.sort == %w[build-and-push image-security]
@@ -2417,7 +2439,7 @@ module WorkflowCapabilityPolicy
         expected_runner = (native_prototype || dedicated_native) ? "ubuntu-24.04" : "ubuntu-latest"
         # Only the exact two-entry native matrix validated above may select a runner.
         expected_runner = "${{ matrix.runner }}" if path == PR_IMAGE_WORKFLOW && job_name == "image-security"
-        if native_prototype && job["if"] != "github.event_name == 'workflow_dispatch'"
+        if native_prototype && job["if"] != TestsWorkflow::DIRECT_DISPATCH
           reject("#{context}: native prototype must be manual-only")
         end
         if job.key?("steps") && job["runs-on"] != expected_runner

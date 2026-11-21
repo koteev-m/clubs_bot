@@ -453,7 +453,7 @@
   "source_sha256": {
     ".github/workflows/container-smoke.yml": {
       "algorithm": "SHA-256",
-      "digest": "fb24de70b2046f3fabd7b33f8fa301a24d0540fe93bf3568058dcb30277b4b36"
+      "digest": "360698910e0a0786ed7c400564a8edac9c68fda829d8437be0f676f6005bfc9a"
     },
     ".github/workflows/corrected-stage-release.yml": {
       "algorithm": "SHA-256",
@@ -469,7 +469,7 @@
     },
     ".github/workflows/tests.yml": {
       "algorithm": "SHA-256",
-      "digest": "7e69f8a1cf465f1a07529e3e4d3d047c49664a8ff9985cf484543b168303d383"
+      "digest": "cc6105068b71439769c50ec21d716c3fa196bd4c8ae86f61c769662eed807aa1"
     },
     "app-bot/src/main/kotlin/com/example/bot/deprecated/legacy/web/BookingWebAppRoutes.kt": {
       "algorithm": "SHA-256",

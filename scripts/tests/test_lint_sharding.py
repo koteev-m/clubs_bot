@@ -22,13 +22,13 @@ SELFCHECK = ROOT / "scripts/selfcheck-quality-gates.sh"
 spec = importlib.util.spec_from_file_location("sharding", ROOT / "scripts/run-corrected-stage-shard.py")
 sharding = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sharding)
-WORKERS = ["lint-scope", "lint-core"] + ["corrected-" + shard for shard in sharding.SHARDS]
+WORKERS = ["lint-scope", "miniapp", "jvm", "pr-image", "container-smoke", "lint-core"] + ["corrected-" + shard for shard in sharding.SHARDS]
 
 
-def workflow_model():
+def workflow_model(path=WORKFLOW):
     script = 'require "json"; require "validate-workflow-yaml"; w = WorkflowYamlSafety.safe_load_workflow(File.binread(ARGV[0]), ".github/workflows/lint.yml"); w["on"] = w.delete(true) if w.key?(true); print JSON.generate(w)'
     return json.loads(subprocess.check_output(
-        ["ruby", "-I" + str(ROOT / "scripts"), "-e", script, str(WORKFLOW)], text=True
+        ["ruby", "-I" + str(ROOT / "scripts"), "-e", script, str(path)], text=True
     ))
 
 
@@ -220,26 +220,74 @@ class LintScopeTests(unittest.TestCase):
         result = subprocess.run([sys.executable, "-I", "-S", "-B", str(ROOT / "scripts/lint-scope.py")],
                                 cwd=self.repo, env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode == 0, ok, result.stderr)
-        return result.stdout.strip()
+        values = dict(row.split("=", 1) for row in result.stdout.splitlines())
+        if ok:
+            self.assertEqual(set(values), {"mode", "image"})
+        return values
 
     def test_push_checks_whole_range_and_falls_back_for_unknown_and_renamed_paths(self):
         self.write("README.md", "doc")
         self.commit()
-        self.assertEqual("mode=docs", self.mode())
+        self.assertEqual({"mode": "docs", "image": "false"}, self.mode())
         self.write("miniapp/src/widgets/ToastHost.tsx", "presentation edit")
         self.commit()
-        self.assertEqual("mode=ui", self.mode())
+        self.assertEqual({"mode": "ui", "image": "false"}, self.mode())
         self.write(self.style, ".test {}")
         self.commit()
-        self.assertEqual("mode=ui", self.mode())
+        self.assertEqual({"mode": "ui", "image": "false"}, self.mode())
         self.git("mv", self.protected, "miniapp/README.md")
         self.commit()
         self.write("README.md", "last commit touches only docs")
         self.commit()
-        self.assertEqual("mode=full", self.mode())
-        self.assertEqual("mode=full", self.mode(base="0" * 40))
+        self.assertEqual({"mode": "full", "image": "true"}, self.mode())
+        self.assertEqual({"mode": "full", "image": "true"}, self.mode(base="0" * 40))
         self.mode(base="1" * 40, ok=False)
         self.mode(revision=self.base, ok=False)
+
+    def test_domains_and_mixed_changes_use_the_union_of_their_checks(self):
+        for path, mode, image in (
+            ("docs/guide/new-page.md", "docs", "false"),
+            ("docs/ops/owner-cabinet.md", "docs", "false"),
+            ("miniapp/src/modules/guest/components/HallLegend.tsx", "ui", "false"),
+            ("miniapp/dist/packaged.md", "ui", "true"),
+            ("miniapp/dist/assets/new-asset.js", "ui", "true"),
+            ("app-bot/src/test/kotlin/demo/WorkerTest.kt", "ui-backend", "true"),
+            ("core-data/src/main/resources/db/migration/new.sql", "full", "true"),
+        ):
+            with self.subTest(path=path):
+                self.write(path, "fixture")
+                self.commit()
+                self.assertEqual({"mode": mode, "image": image}, self.mode())
+
+    def test_backend_docs_contracts_dependency_and_security_paths(self):
+        for path, mode in (
+            ("miniapp/src/main/resources/miniapp/assets/js/api.js", "ui-backend"),
+            ("miniapp/src/modules/payments/api/payments.api.ts", "ui-backend"),
+            ("miniapp/src/modules/auth/hooks/useInitData.ts", "ui-backend"),
+            ("miniapp/src/shared/api/http.ts", "ui-backend"),
+            ("miniapp/src/app/CabinetEntry.tsx", "ui-backend"),
+            ("miniapp/src/modules/client/onboarding.api.ts", "ui-backend"),
+            ("app-bot/src/main/kotlin/demo/Music.kt", "backend"),
+            ("core-security/src/main/kotlin/demo/Auth.kt", "full"),
+            ("docs/dr.md", "full"),
+            ("docs/ops/release-rollback.md", "full"),
+            ("docs/ops/owner-team-contract.md", "full"),
+            ("docs/ops/owner-manager-contract.md", "full"),
+            ("app-bot/src/main/kotlin/bot/routes/PaymentsFinalizeRoutes.kt", "full"),
+            ("app-bot/src/main/kotlin/bot/plugins/MigrationsPlugin.kt", "full"),
+            ("app-bot/src/main/kotlin/bot/security/Rbac.kt", "full"),
+            ("app-bot/src/main/kotlin/bot/di/PaymentsModule.kt", "full"),
+            ("app-bot/src/test/kotlin/bot/telegram/webhook/TelegramWebhookIngressWorkerTest.kt", "backend"),
+            ("miniapp/pnpm-lock.yaml", "full"),
+            ("buildSrc/src/main/kotlin/build/Dependencies.kt", "full"),
+            (".github/workflows/tests.yml", "full"),
+            ("unknown/new.file", "full"),
+        ):
+            with self.subTest(path=path):
+                before = self.git("rev-parse", "HEAD")
+                self.write(path, "fixture")
+                self.commit()
+                self.assertEqual({"mode": mode, "image": "true"}, self.mode(base=before))
 
     def test_pr_uses_branch_and_merge_diffs_with_verified_parents(self):
         self.git("switch", "-qc", "candidate")
@@ -249,12 +297,12 @@ class LintScopeTests(unittest.TestCase):
         self.write(self.protected, "advanced base")
         base = self.commit()
         self.git("merge", "--no-ff", "-qm", "merge", head)
-        self.assertEqual("mode=docs", self.mode(base=base, candidate=head))
+        self.assertEqual({"mode": "docs", "image": "false"}, self.mode(base=base, candidate=head))
         self.mode(base=self.base, candidate=head, ok=False)
         self.write(self.protected, "change in merged result")
         self.git("add", "-A")
         self.git("commit", "--amend", "--no-edit", "-q")
-        self.assertEqual("mode=full", self.mode(base=base, candidate=head))
+        self.assertEqual({"mode": "full", "image": "true"}, self.mode(base=base, candidate=head))
 
     def test_sensitive_candidate_change_already_on_base_is_still_full(self):
         self.git("switch", "-qc", "candidate")
@@ -265,7 +313,7 @@ class LintScopeTests(unittest.TestCase):
         self.write(self.protected, "shared")
         base = self.commit()
         self.git("merge", "--no-ff", "-qm", "merge", head)
-        self.assertEqual("mode=full", self.mode(base=base, candidate=head))
+        self.assertEqual({"mode": "full", "image": "true"}, self.mode(base=base, candidate=head))
 
     def test_mode_changes_and_whitespace_are_not_fast_successes(self):
         self.write("README.md", "trailing ")
@@ -274,18 +322,20 @@ class LintScopeTests(unittest.TestCase):
         (self.repo / "README.md").unlink()
         (self.repo / "README.md").symlink_to(self.protected)
         self.commit()
-        self.assertEqual("mode=full", self.mode())
+        self.assertEqual({"mode": "full", "image": "true"}, self.mode())
 
 
 class LintTopologyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.workflow = workflow_model()
+        cls.security = workflow_model(WORKFLOW.with_name("secret-scan.yml"))
 
-    def validate(self, model):
+    def validate(self, model, security=None):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "lint.yml"
             path.write_text(json.dumps(model))
+            path.with_name("secret-scan.yml").write_text(json.dumps(self.security if security is None else security))
             return subprocess.run(["ruby", str(VALIDATOR), str(path)], capture_output=True, text=True)
 
     def test_canonical_topology_and_required_contexts(self):
@@ -293,7 +343,7 @@ class LintTopologyTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("Lint", self.workflow["name"])
         self.assertEqual("lint", self.workflow["jobs"]["lint"]["name"])
-        self.assertEqual("release-state", self.workflow["jobs"]["release-state"]["name"])
+        self.assertEqual("release-state", self.security["jobs"]["release-state"]["name"])
         self.assertNotIn("release-state", self.workflow["jobs"]["lint"]["needs"])
 
     def test_missing_workers_and_aggregator_dependencies_are_rejected(self):
@@ -307,14 +357,13 @@ class LintTopologyTest(unittest.TestCase):
                 with self.subTest(worker=worker, kind=kind):
                     self.assertNotEqual(0, self.validate(model).returncode)
 
-    def test_core_setup_static_gates_and_artifacts_cannot_be_disabled(self):
+    def test_core_setup_and_payment_structure_cannot_be_disabled(self):
         for index, key, value in (
             (0, "with", {"fetch-depth": 1, "persist-credentials": True}),
             (2, "with", {"cache-disabled": True}),
-            (5, "run", "echo detekt omitted"),
-            (6, "run", "echo ktlint omitted"),
-            (7, "if", "success()"),
-            (7, "with", {"name": "missing-reports", "path": "absent"}),
+            (3, "run", "echo payment check omitted"),
+            (4, "if", "false"),
+            (5, "run", "echo selfcheck omitted"),
         ):
             model = copy.deepcopy(self.workflow)
             model["jobs"]["lint-core"]["steps"][index][key] = value
@@ -350,14 +399,14 @@ class LintTopologyTest(unittest.TestCase):
         model["jobs"]["lint"]["steps"][0]["run"] = "echo success"
         self.assertNotEqual(0, self.validate(model).returncode)
 
-    def aggregate(self, needs):
+    def aggregate(self, needs, event="pull_request"):
         command = self.workflow["jobs"]["lint"]["steps"][0]["run"]
         return subprocess.run(["bash", "-e", "-o", "pipefail", "-c", command],
-                              env={**os.environ, "LINT_NEEDS_JSON": json.dumps(needs)}, capture_output=True)
+                              env={**os.environ, "LINT_NEEDS_JSON": json.dumps(needs), "GITHUB_EVENT_NAME": event}, capture_output=True)
 
     def test_actual_aggregator_success_failure_cancelled_and_unexpected_skipped(self):
         success = {worker: {"result": "success", "outputs": {}} for worker in WORKERS}
-        success["lint-scope"]["outputs"]["mode"] = "full"
+        success["lint-scope"]["outputs"] = {"mode": "full", "image": "true"}
         self.assertEqual(0, self.aggregate(success).returncode)
         for worker in WORKERS:
             for status in ("failure", "cancelled", "skipped", "neutral", "", None):
@@ -376,32 +425,66 @@ class LintTopologyTest(unittest.TestCase):
                 self.assertNotEqual(0, self.aggregate(needs).returncode)
 
     def test_fast_lint_requires_exact_skips_and_successful_mandatory_jobs(self):
-        needs = {worker: {"result": "skipped"} for worker in WORKERS}
-        needs["lint-core"] = {"result": "success"}
-        for mode in ("docs", "ui"):
-            needs["lint-scope"] = {"result": "success", "outputs": {"mode": mode}}
-            self.assertEqual(0, self.aggregate(needs).returncode)
-            for job in WORKERS:
-                changed = copy.deepcopy(needs)
-                changed[job]["result"] = "cancelled"
-                self.assertNotEqual(0, self.aggregate(changed).returncode)
-        for mode in ("", "unknown", None):
-            needs["lint-scope"]["outputs"] = {"mode": mode} if mode else {}
+        for mode, image, required in (
+            ("docs", "false", []),
+            ("ui", "false", ["miniapp"]),
+            ("ui", "true", ["miniapp", "container-smoke", "pr-image"]),
+            ("backend", "true", ["jvm", "lint-core", "container-smoke", "pr-image"]),
+            ("ui-backend", "true", ["jvm", "lint-core", "miniapp", "container-smoke", "pr-image"]),
+        ):
+            for event in ("push", "pull_request"):
+                needs = {job: {"result": "skipped"} for job in WORKERS}
+                needs["lint-scope"] = {"result": "success", "outputs": {"mode": mode, "image": image}}
+                for job in required:
+                    if job != "pr-image" or event == "pull_request":
+                        needs[job]["result"] = "success"
+                with self.subTest(mode=mode, image=image, event=event):
+                    self.assertEqual(0, self.aggregate(needs, event).returncode)
+                    for job in WORKERS:
+                        bad = copy.deepcopy(needs)
+                        bad[job]["result"] = "skipped" if needs[job]["result"] == "success" else "cancelled"
+                        self.assertNotEqual(0, self.aggregate(bad, event).returncode)
+        for outputs in ({}, {"mode": "full"}, {"mode": "backend", "image": "false"},
+                        {"mode": "docs", "image": "true"}, {"mode": "other", "image": "true"}):
+            needs["lint-scope"]["outputs"] = outputs
             self.assertNotEqual(0, self.aggregate(needs).returncode)
 
     def test_release_status_fails_for_unsuccessful_or_absent_scope(self):
-        command = self.workflow["jobs"]["release-state"]["steps"][0]["run"]
+        command = self.security["jobs"]["release-state"]["steps"][0]["run"]
+        baseline = {**os.environ, "GITLEAKS": "success", "SECURITY": "success", "STATIC": "success"}
         for result, mode, ok in (("success", "docs", True), ("success", "ui", True),
-                                 ("success", "full", True), ("success", "", False),
+                                 ("success", "full", True), ("success", "backend", True),
+                                 ("success", "ui-backend", True), ("success", "", False),
                                  ("success", "other", False), ("cancelled", "full", False),
                                  ("skipped", "docs", False), ("failure", "full", False)):
             with self.subTest(result=result, mode=mode):
                 run = subprocess.run(["bash", "-e", "-c", command],
-                                     env={**os.environ, "MODE": mode, "SCOPE_RESULT": result})
+                                     env={**baseline, "MODE": mode, "SCOPE_RESULT": result})
                 self.assertEqual(run.returncode == 0, ok)
 
+    def test_release_state_requires_all_security_workers_and_read_only_permissions(self):
+        job = self.security["jobs"]["release-state"]
+        command = job["steps"][0]["run"]
+        success = {"MODE": "ui", "SCOPE_RESULT": "success", "GITLEAKS": "success",
+                   "SECURITY": "success", "STATIC": "success"}
+        for name in ("GITLEAKS", "SECURITY", "STATIC"):
+            for failure in ("failure", "cancelled", "skipped", ""):
+                with self.subTest(name=name, failure=failure):
+                    result = subprocess.run(["bash", "-e", "-c", command], env={**success, name: failure})
+                    self.assertNotEqual(0, result.returncode)
+        for key, value in (("permissions", {"contents": "read", "security-events": "write"}),
+                           ("needs", ["lint-scope"]), ("if", "success()")):
+            changed = copy.deepcopy(self.security)
+            changed["jobs"]["release-state"][key] = value
+            self.assertNotEqual(0, self.validate(self.workflow, changed).returncode)
+        for name in job["needs"]:
+            changed = copy.deepcopy(self.security)
+            del changed["jobs"][name]
+            self.assertNotEqual(0, self.validate(self.workflow, changed).returncode)
+
     def test_range_wrapper_distinguishes_changed_policy_from_git_error(self):
-        command = self.workflow["jobs"]["lint-scope"]["steps"][1]["run"]
+        scope = workflow_model(WORKFLOW.with_name("change-scope.yml"))
+        command = scope["jobs"]["changes"]["steps"][1]["run"]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name, status in (("git", '"$DIFF_STATUS"'), ("ruby", "0")):
@@ -412,16 +495,17 @@ class LintTopologyTest(unittest.TestCase):
             for base, code, expected in (("1" * 40, 1, 0), ("1" * 40, 128, 128), ("0" * 40, 128, 0)):
                 output.write_text("")
                 env = {**os.environ, "PATH": directory + os.pathsep + os.environ["PATH"],
-                       "GITHUB_OUTPUT": str(output), "GITHUB_EVENT_NAME": "push", "GITHUB_SHA": "2" * 40,
+                       "GITHUB_OUTPUT": str(output), "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main",
+                       "GITHUB_SHA": "2" * 40,
                        "LINT_BASE": base, "DIFF_STATUS": str(code)}
                 result = subprocess.run(["bash", "-e", "-c", command], env=env)
                 self.assertEqual(expected, result.returncode)
-                self.assertEqual("" if expected else "mode=full\n", output.read_text())
+                self.assertEqual("" if expected else "mode=full\nimage=true\n", output.read_text())
 
     def test_scope_output_and_fast_checks_cannot_be_disabled(self):
-        for step in range(len(self.workflow["jobs"]["lint-scope"]["steps"])):
+        for step in range(len(self.workflow["jobs"]["miniapp"]["steps"])):
             model = copy.deepcopy(self.workflow)
-            model["jobs"]["lint-scope"]["steps"][step]["if"] = "false"
+            model["jobs"]["miniapp"]["steps"][step]["if"] = "false"
             self.assertNotEqual(0, self.validate(model).returncode)
         for trigger, spec in (("pull_request", {"paths": ["README.md"]}),
                               ("push", {"branches": ["main"], "paths-ignore": ["scripts/**"]})):

@@ -10,51 +10,51 @@ permissions:
 
 jobs:
   lint-scope:
+    uses: ./.github/workflows/change-scope.yml
+
+  miniapp:
+    needs: lint-scope
+    if: contains(fromJSON('["ui", "ui-backend", "full"]'), needs.lint-scope.outputs.mode)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      mode: ${{ steps.range.outputs.mode }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: miniapp
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
-          fetch-depth: 0
           persist-credentials: false
-
-      - name: Check lint workflow and change range
-        id: range
-        env:
-          LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          LINT_CANDIDATE: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: |
-          ruby scripts/validate-lint-workflow.rb .github/workflows/lint.yml
-          if [[ "$GITHUB_EVENT_NAME" == push && "$LINT_BASE" == 0000000000000000000000000000000000000000 ]]; then
-            echo 'mode=full' >> "$GITHUB_OUTPUT"
-          elif git diff --quiet "$LINT_BASE" "$GITHUB_SHA" -- scripts/lint-scope.py; then
-            python3 -I -S -B scripts/lint-scope.py >> "$GITHUB_OUTPUT"
-          else
-            status=$?
-            [[ "$status" == 1 ]] || exit "$status"
-            echo 'mode=full' >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Validate payment hardening structure
-        if: steps.range.outputs.mode != 'full'
-        run: python3 -B scripts/validate-payment-hardening.py --structural .
-
-      - name: Build changed Mini App UI
-        if: steps.range.outputs.mode == 'ui'
-        working-directory: miniapp
+      - name: Check Mini App source and packaged assets
         run: |
           npx --yes pnpm@9.15.9 install --frozen-lockfile --ignore-scripts
           npm run typecheck
+          npm test
           npm run build -- --outDir "$RUNNER_TEMP/lint-miniapp-dist"
+          bash ../scripts/validate-miniapp-dist.sh "$RUNNER_TEMP/lint-miniapp-dist"
+          bash ../scripts/validate-miniapp-dist.sh dist
+
+  jvm:
+    needs: lint-scope
+    if: contains(fromJSON('["backend", "ui-backend", "full"]'), needs.lint-scope.outputs.mode)
+    uses: ./.github/workflows/tests.yml
+
+  pr-image:
+    needs: lint-scope
+    if: github.event_name == 'pull_request' && needs.lint-scope.outputs.image == 'true'
+    uses: ./.github/workflows/docker-image.yml
+
+  container-smoke:
+    needs: lint-scope
+    if: needs.lint-scope.outputs.image == 'true'
+    uses: ./.github/workflows/container-smoke.yml
 
   lint-core:
     name: lint-core
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs: lint-scope
+    if: contains(fromJSON('["backend", "ui-backend", "full"]'), needs.lint-scope.outputs.mode)
     concurrency:
       group: lint-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
@@ -79,6 +79,10 @@ jobs:
           gradle-version: wrapper
           cache-read-only: false
 
+      - name: Validate payment hardening structure
+        if: needs.lint-scope.outputs.mode != 'full'
+        run: python3 -B scripts/validate-payment-hardening.py .
+
       - name: Payment hardening required runtime
         run: |
           python3 scripts/validate-payment-hardening.py \
@@ -88,25 +92,6 @@ jobs:
       - name: Quality gate regression self-check
         run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage
         if: needs.lint-scope.outputs.mode == 'full'
-
-      - name: Run detekt gate (blocking, baseline-aware)
-        run: ./gradlew detektGate --console=plain --stacktrace
-
-      - name: Run ktlint gate (baseline-aware; Kotlin changes only)
-        env:
-          VERIFY_TO_SHA: ${{ github.sha }}
-          VERIFY_FROM_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: ./scripts/ktlint-changed.sh
-
-      - name: Upload lint reports
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: lint-reports
-          path: |
-            **/build/reports/detekt/**
-            **/build/reports/ktlint/**
-          if-no-files-found: ignore
 
   corrected-authority:
     name: corrected-authority
@@ -227,7 +212,7 @@ jobs:
   lint:
     name: lint
     if: always()
-    needs: [lint-scope, lint-core, corrected-authority, corrected-executor, corrected-import-root, corrected-support]
+    needs: [lint-scope, miniapp, jvm, pr-image, container-smoke, lint-core, corrected-authority, corrected-executor, corrected-import-root, corrected-support]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -241,58 +226,27 @@ jobs:
 
           shards = {"corrected-authority", "corrected-executor", "corrected-import-root", "corrected-support"}
           needs = json.loads(os.environ["LINT_NEEDS_JSON"])
-          if not isinstance(needs, dict) or set(needs) != shards | {"lint-core", "lint-scope"}:
+          scope = needs["lint-scope"]
+          mode = scope["outputs"]["mode"]
+          image = scope["outputs"]["image"]
+          if mode not in ("docs", "ui", "backend", "ui-backend", "full") or image not in ("true", "false"):
+              raise SystemExit("lint gate: invalid change scope")
+          backend = mode in ("backend", "ui-backend", "full")
+          if (backend and image != "true") or (mode == "docs" and image != "false"):
+              raise SystemExit("lint gate: inconsistent packaging scope")
+          required = {
+              "lint-scope": True,
+              "miniapp": mode in ("ui", "ui-backend", "full"),
+              "lint-core": backend,
+              "jvm": backend,
+              "container-smoke": image == "true",
+              "pr-image": image == "true" and os.environ["GITHUB_EVENT_NAME"] == "pull_request",
+              **{shard: mode == "full" for shard in shards},
+          }
+          if set(needs) != set(required):
               raise SystemExit("lint gate: missing or unexpected worker")
-          if needs["lint-scope"]["result"] != "success" or needs["lint-core"]["result"] != "success":
-              raise SystemExit("lint gate: required scope/core check did not succeed")
-          mode = needs["lint-scope"]["outputs"].get("mode")
-          if mode not in ("docs", "ui", "full"):
-              raise SystemExit("lint gate: missing or invalid scope")
-          expected = "success" if mode == "full" else "skipped"
-          if any(needs[shard]["result"] != expected for shard in shards):
-              raise SystemExit("lint gate: unexpected corrected-stage shard result")
+          for name, applies in required.items():
+              if needs[name]["result"] != ("success" if applies else "skipped"):
+                  raise SystemExit(f"lint gate: unexpected result for {name}")
           print("lint gate: required workers succeeded for", mode)
           PY
-
-  release-state:
-    name: release-state
-    runs-on: ubuntu-latest
-    timeout-minutes: 50
-    needs: lint-scope
-    if: always()
-    concurrency:
-      group: release-state-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      cancel-in-progress: false
-
-    steps:
-      - name: Require verified change range
-        env:
-          SCOPE_RESULT: ${{ needs.lint-scope.result }}
-          MODE: ${{ needs.lint-scope.outputs.mode }}
-        run: |
-          test "$SCOPE_RESULT" = success
-          [[ "$MODE" == docs || "$MODE" == ui || "$MODE" == full ]]
-
-      - name: Checkout exact candidate
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Verify Python 3.11+
-        run: |
-          python3 - <<'PY'
-          import sys
-
-          if sys.version_info < (3, 11):
-              raise SystemExit(f"Python 3.11+ required; got {sys.version.split()[0]}")
-          print(f"release-state-python: {sys.version.split()[0]}")
-          PY
-
-      - name: Validate release-state structure
-        run: ./scripts/validate-quiesced-deployment.sh .
-
-      - name: Run strict release-state suite
-        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/tests/test_quiesced_release_state.py --strict-ci
-        if: needs.lint-scope.outputs.mode == 'full'
