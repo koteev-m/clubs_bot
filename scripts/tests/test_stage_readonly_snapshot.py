@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Synthetic tests only: no SSH, live Docker, user data or workflow dispatch."""
+"""Synthetic snapshot tests. CLB_SNAPSHOT_LOOPBACK_SSH=1 enables the disposable Linux OpenSSH fixture."""
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import contextlib
+import errno
 import io
 import importlib.util
 import json
 import os
 from pathlib import Path
+import pwd
 import signal
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -257,7 +261,7 @@ class RunnerTests(unittest.TestCase):
 
     def test_strict_ssh_options_and_fixed_remote_command(self):
         args = R.ssh_args(self.env(), 18)
-        for value in ('StrictHostKeyChecking=yes', 'UserKnownHostsFile=/proc/self/fd/18',
+        for value in ('StrictHostKeyChecking=yes', f'UserKnownHostsFile=/proc/{os.getpid()}/fd/18',
                       'GlobalKnownHostsFile=/dev/null', 'ProxyCommand=none', 'ProxyJump=none',
                       'ForwardAgent=no', 'PermitLocalCommand=no', 'ClearAllForwardings=yes'):
             self.assertIn(value, args)
@@ -736,20 +740,91 @@ class LinuxBoundaryTests(unittest.TestCase):
             self.assertEqual(out.getvalue(), '')
             with L.HostLock(str(path)) as lock: lock.check()
 
+
+@unittest.skipUnless(sys.platform == 'linux', 'Linux sealed memfd')
+class LinuxPinTests(unittest.TestCase):
     def test_anonymous_pin_handoff_sealed_and_closed(self):
         env = RunnerTests().env()
-        seen = []
         def fake_capture(args, data, **kwargs):
-            fd = kwargs['fds'][0]
-            seen.append(fd)
-            self.assertEqual(os.pread(fd, 64, 0), b'synthetic-known-hosts')
-            self.assertIn('UserKnownHostsFile=/proc/self/fd/' + str(fd), args)
-            with self.assertRaises(OSError): os.write(fd, b'x')
+            path, = [Path(arg.split('=', 1)[1]) for arg in args if arg.startswith('UserKnownHostsFile=')]
+            self.assertEqual(path.parent, Path(f'/proc/{os.getpid()}/fd'))
+            fd = int(path.name)
+            opened.append(fd)
+            self.assertFalse(os.get_inheritable(fd))
+            self.assertNotIn(fd, kwargs.get('fds', ()))
+            self.assertEqual(path.read_bytes(), b'synthetic-known-hosts')
+            with self.assertRaises(OSError) as sealed:
+                os.write(fd, b'x')
+            self.assertEqual(sealed.exception.errno, errno.EPERM)
+            if reject:
+                raise R.Refused()
             return b'{"protocol":"clb-stage-snapshot-v1","environment":"stage","result":"unavailable","stage_ready":false}\n'
         source = {R.LOCK: b'# synthetic', R.COLLECTOR: b'# synthetic', R.PROCESS: b'# synthetic', R.PIN: b'def validate(env): return b"synthetic-known-hosts"'}
         with patch.object(R, 'sources', return_value=source), patch.object(R, 'capture', side_effect=fake_capture):
-            self.assertEqual(json.loads(R.run(env))['result'], 'unavailable')
-        with self.assertRaises(OSError): os.fstat(seen[0])
+            for reject in (False, True):
+                with self.subTest(reject=reject):
+                    opened = []
+                    if reject:
+                        with self.assertRaises(R.Refused): R.run(env)
+                    else:
+                        self.assertEqual(json.loads(R.run(env))['result'], 'unavailable')
+                    fd, = opened
+                    with self.assertRaises(OSError) as closed: os.fstat(fd)
+                    self.assertEqual(closed.exception.errno, errno.EBADF)
+
+    @unittest.skipUnless(os.environ.get('CLB_SNAPSHOT_LOOPBACK_SSH') == '1', 'disposable Linux sshd opt-in')
+    def test_openssh_accepts_only_the_pinned_loopback_host(self):
+        # Use a fresh agent and two disposable keys. The source admission and the
+        # remote observation are fixtures; the SSH command, pin and capture are real.
+        with tempfile.TemporaryDirectory() as tmp, socket.socket() as listener, contextlib.ExitStack() as cleanup:
+            root = Path(tmp)
+            for name in ('host', 'client'):
+                subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', root / name],
+                               check=True, capture_output=True, timeout=10)
+            agent_socket = root / 'agent.sock'
+            agent = cleanup.enter_context(subprocess.Popen(['ssh-agent', '-D', '-a', agent_socket],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            cleanup.callback(agent.kill)
+            deadline = time.monotonic() + 5
+            while not agent_socket.is_socket():
+                if agent.poll() is not None or time.monotonic() >= deadline:
+                    self.fail('disposable ssh-agent did not start')
+                time.sleep(.02)
+            subprocess.run(['ssh-add', root / 'client'], env={'PATH': os.defpath, 'SSH_AUTH_SOCK': str(agent_socket)},
+                           check=True, capture_output=True, timeout=10)
+
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            listener.settimeout(10)
+            port = listener.getsockname()[1]
+            env = dict(RunnerTests().env(), SSH_USER=pwd.getpwuid(os.getuid()).pw_name, SSH_HOST='127.0.0.1',
+                       SSH_PORT=str(port), SSH_AUTH_SOCK=str(agent_socket))
+
+            def serve_once():
+                with listener.accept()[0] as connection:
+                    subprocess.run(['/usr/sbin/sshd', '-i', '-f', '/dev/null', '-h', root / 'host',
+                        '-o', f'AuthorizedKeysFile={root}/client.pub', '-o', 'StrictModes=no',
+                        '-o', 'AuthenticationMethods=publickey', '-o', 'PasswordAuthentication=no',
+                        '-o', 'KbdInteractiveAuthentication=no'], stdin=connection, stdout=connection,
+                        stderr=subprocess.DEVNULL, timeout=12)
+
+            source = {R.PIN: b'def validate(env): return env["fixture_pin"]', R.PROCESS: (ROOT / R.PROCESS).read_bytes()}
+            expected = SnapshotTests().result()
+            marker = root / 'remote-command-ran'
+            program = f'from pathlib import Path\nPath({str(marker)!r}).touch()\nprint({json.dumps(expected)!r})\n'.encode()
+            with patch.object(R, 'sources', return_value=source), patch.object(R, 'payload', return_value=program), \
+                    ThreadPoolExecutor(max_workers=1) as server:
+                for key in ('client', 'host'):
+                    with self.subTest(pin=key):
+                        public_key = (root / (key + '.pub')).read_bytes().split()[:2]
+                        env['fixture_pin'] = f'[127.0.0.1]:{port} '.encode() + b' '.join(public_key) + b'\n'
+                        connection = server.submit(serve_once)
+                        if key == 'host':
+                            self.assertEqual(json.loads(R.run(env)), expected)
+                        else:
+                            with self.assertRaises(R.Refused): R.run(env)
+                        connection.result(timeout=15)
+                        self.assertEqual(marker.exists(), key == 'host')
 
 
 if __name__ == '__main__':
