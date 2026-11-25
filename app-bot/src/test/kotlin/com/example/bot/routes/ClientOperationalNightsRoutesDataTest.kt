@@ -20,7 +20,7 @@ import javax.sql.DataSource
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-open class ClientOperationalNightsRoutesDataTest : ClientOnboardingRoutesTestBase() {
+open class ClientOperationalNightsRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `opening after midnight keeps the business date and id through retime cancellation reopening and restart`() =
         database { source ->
@@ -184,6 +184,8 @@ open class ClientOperationalNightsRoutesDataTest : ClientOnboardingRoutesTestBas
             assertEquals(1, migrateBookingRulesFixture(source, vendor, "76"))
             assertEquals(1, migrateBookingRulesFixture(source, vendor, "77"))
             assertEquals(1, migrateBookingRulesFixture(source, vendor, "78"))
+            assertEquals(1, migrateBookingRulesFixture(source, vendor, "79"))
+            assertEquals(1, migrateBookingRulesFixture(source, vendor, "80"))
             assertEquals(1, migrateBookingRulesFixture(source, vendor))
             withApp(source, CLOCK) {
                 val path = "$C/clubs/8801/calendar"

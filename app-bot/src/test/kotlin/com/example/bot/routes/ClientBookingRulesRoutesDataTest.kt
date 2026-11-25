@@ -21,7 +21,7 @@ import java.time.ZoneOffset
 import javax.sql.DataSource
 import kotlin.test.assertEquals
 
-open class ClientBookingRulesRoutesDataTest : ClientOnboardingRoutesTestBase() {
+open class ClientBookingRulesRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `defaults and saved rules preview the same calendar across DST and replay after restart`() =
         database { source ->
@@ -39,9 +39,16 @@ open class ClientBookingRulesRoutesDataTest : ClientOnboardingRoutesTestBase() {
                 saved = ok(path, RECIPIENT, payload(), HttpMethod.Patch, KEY)
                 assertEquals("2", saved.string("version"))
                 assertEquals("2026-03-29T04:30+02:00", saved.firstNight().string("cutoffAt"))
-                assertEquals("2026-03-29T04:00+02:00", saved.firstNight().string("arrivalBy"))
-                assertEquals(JsonPrimitive(true), saved.firstNight()["cutoffAfterArrival"])
+                assertEquals(JsonNull, saved.getValue("rules").jsonObject["arrivalMinutes"])
+                assertEquals(JsonNull, saved.firstNight()["arrivalBy"])
+                assertEquals(JsonPrimitive(false), saved.firstNight()["cutoffAfterArrival"])
+                assertEquals(JsonPrimitive(false), saved.firstNight()["arrivalAtOrAfterClose"])
+                // An archived pre-upgrade setting must survive a subsequent three-field PATCH.
+                source.execute(
+                    "UPDATE client_club_booking_rules SET arrival_minutes=15 WHERE club_id=${club.string("id")}",
+                )
             }
+            upgradeClubFixture(source)
             withApp(source, CLOCK) {
                 assertEquals(saved, ok(path, RECIPIENT))
                 assertEquals(saved, ok(path, RECIPIENT, payload(), HttpMethod.Patch, KEY))
@@ -51,7 +58,10 @@ open class ClientBookingRulesRoutesDataTest : ClientOnboardingRoutesTestBase() {
                     .assertClientError(HttpStatusCode.Conflict, "version_conflict")
                 assertEquals("1", source.ruleCommands())
                 assertEquals("1", source.ruleAudits())
-                val cleared = ok(path, RECIPIENT, payload(version = "2", hold = null), HttpMethod.Patch)
+                val threeFields = JsonObject(payload(version = "2", hold = null) - "arrivalMinutes")
+                val cleared = ok(path, RECIPIENT, threeFields, HttpMethod.Patch)
+                assertEquals("15", source.scalar("SELECT arrival_minutes FROM client_club_booking_rules"))
+                assertEquals(JsonNull, cleared.firstNight()["arrivalBy"])
                 assertEquals(JsonNull, cleared["rules"]!!.jsonObject["holdMinutes"])
                 assertEquals("3", cleared.string("version"))
             }
@@ -62,7 +72,7 @@ open class ClientBookingRulesRoutesDataTest : ClientOnboardingRoutesTestBase() {
         database { source ->
             withApp(source, CLOCK) {
                 val path = "$C/clubs/${createClub(RECIPIENT).string("id")}/booking-rules"
-                val malformed = JsonObject(payload() - "arrivalMinutes")
+                val malformed = JsonObject(payload() - "holdMinutes")
                 for (body in listOf(payload(hold = 0), payload(hold = 1441), malformed)) {
                     requestAs(path, RECIPIENT, body, HttpMethod.Patch)
                         .assertClientError(HttpStatusCode.BadRequest, "validation_error")
@@ -150,6 +160,8 @@ open class ClientBookingRulesRoutesDataTest : ClientOnboardingRoutesTestBase() {
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "76"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "77"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "78"))
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "79"))
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "80"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect))
             withApp(source, CLOCK) {
                 val path = "$C/clubs/8801/booking-rules"

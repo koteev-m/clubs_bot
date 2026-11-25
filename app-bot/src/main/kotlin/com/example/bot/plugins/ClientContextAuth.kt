@@ -4,6 +4,7 @@ import com.example.bot.data.client.ClientAudience
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
+import com.example.bot.plugins.target.TargetInitDataCredentials
 import com.example.bot.security.auth.InitDataValidator
 import com.example.bot.security.auth.TelegramUser
 import io.ktor.http.HttpStatusCode
@@ -65,6 +66,7 @@ internal class VerifiedClientIdentity private constructor(
     val connectionKey: String,
     val audience: ClientAudience,
     val username: String?,
+    val managerAuthenticatedAt: java.time.Instant?,
     private val connection: TrustedBotConnection,
 ) {
     fun belongsTo(expected: TrustedBotConnection): Boolean = connection === expected
@@ -73,9 +75,39 @@ internal class VerifiedClientIdentity private constructor(
         fun validate(
             connection: TrustedBotConnection,
             initData: String,
+            strictHeader: Boolean = false,
         ): VerifiedClientIdentity? =
-            connection.verify(initData)?.let {
-                VerifiedClientIdentity(it.id, connection.connectionKey, connection.audience, it.username, connection)
+            connection.verify(initData)?.let { user ->
+                val authenticatedAt =
+                    if (strictHeader &&
+                        connection.connectionKey == "platform" &&
+                        connection.audience == ClientAudience.Platform
+                    ) {
+                        try {
+                            TargetInitDataCredentials
+                                .parse(initData)
+                                .takeIf {
+                                    it.userId == user.id &&
+                                        it.fresh(java.time.Instant.now())
+                                }?.authenticatedAt
+                        } catch (_: IllegalArgumentException) {
+                            null
+                        } catch (_: java.time.DateTimeException) {
+                            null
+                        } catch (_: java.nio.charset.CharacterCodingException) {
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                VerifiedClientIdentity(
+                    user.id,
+                    connection.connectionKey,
+                    connection.audience,
+                    user.username,
+                    authenticatedAt,
+                    connection,
+                )
             }
     }
 }
@@ -112,7 +144,11 @@ internal fun Application.installClientContextAuth(
         }
         val identity =
             try {
-                VerifiedClientIdentity.validate(connection, initData)
+                VerifiedClientIdentity.validate(
+                    connection,
+                    initData,
+                    TargetInitDataCredentials.header(headers, call.request.queryString()) != null,
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

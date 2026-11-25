@@ -1,8 +1,6 @@
 package com.example.bot.data.client.onboarding
 
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.text.Normalizer
@@ -23,7 +21,7 @@ internal class DirectClubOperations(
             listOf("venueName", "countryCode", "city", "cityId", "region", "address", "timezone", "applicationId"),
         )
         session.client(clientId, lock = true)
-        session.member(clientId)
+        session.member(clientId, manage = false)
         val application = savedApplication(clientId, body)
         val previous = application?.let { alreadyCreated(it.long("id")) }
         val fields = fields(body)
@@ -37,7 +35,10 @@ internal class DirectClubOperations(
                 fingerprint,
             )
         val existing = previous ?: duplicate?.long("club_id")
-        if (existing != null) return result(existing, ClubOnboardingOperations(session).get(existing))
+        if (existing != null) {
+            return result(existing, ClubOnboardingOperations(session).replayCreate(existing))
+        }
+        val confirmedOwner = session.requireClubCreationAuthority(clientId)
         val legacyDuplicate =
             sql.row(
                 "SELECT o.club_id FROM client_club_onboarding o JOIN client_club_applications a " +
@@ -83,28 +84,10 @@ internal class DirectClubOperations(
             session.now,
             session.now,
         )
-        listOf(
-            READ_CLUB,
-            MANAGE_TEAM,
-            WRITE_PROFILE,
-            WRITE_LAYOUT,
-            WRITE_CALENDAR,
-            WRITE_BOOKING_RULES,
-            READ_FINANCE,
-            WRITE_FINANCE,
-            READ_MODULES,
-            WRITE_MODULES,
-        ).forEach { permission ->
-            sql.update(
-                "INSERT INTO client_club_grants(client_id,user_id,club_id,permission_code,is_active," +
-                    "created_at,updated_at) VALUES (?,?,?,?,TRUE,?,?)",
-                clientId,
-                session.userId,
-                clubId,
-                permission,
-                session.now,
-                session.now,
-            )
+        if (confirmedOwner) {
+            session.recordBusinessClub(clientId, clubId, checkNotNull(session.userId), "OWNER_CREATE")
+        } else {
+            session.bootstrapLegacyCreator(clientId, clubId)
         }
         session.audit("client.club.create", clientId, clubId, 1)
         return result(clubId, get(clubId))
@@ -121,9 +104,9 @@ internal class DirectClubOperations(
         authorize(profile, write)
         val club =
             sql.row("SELECT name,description,timezone,is_active FROM clubs WHERE id=?", clubId) ?: fail("not_found")
-        val canWrite = hasGrant(profile, WRITE_PROFILE)
-        val canLayout = hasGrant(profile, WRITE_LAYOUT)
-        val canCalendar = hasGrant(profile, WRITE_CALENDAR)
+        val clientId = profile.long("client_id")
+        val permissions = session.profilePermissions(clientId, clubId)
+        val canWrite = WRITE_PROFILE in permissions
         return buildJsonObject {
             put("id", clubId.toString())
             put("clientId", profile.getValue("client_id"))
@@ -137,30 +120,13 @@ internal class DirectClubOperations(
             listOf("city", "address", "unit").forEach { put(it, profile.getValue(it)) }
             put("version", profile.getValue("profile_version"))
             put("savedAt", profile.instant("profile_saved_at").toString())
+            put("permissions", strings(permissions))
+            session.businessRole(clientId, clubId)?.let { put("businessRole", it) }
             put(
-                "permissions",
-                JsonArray(
-                    (
-                        listOf(READ_CLUB) +
-                            (if (canWrite) listOf(WRITE_PROFILE) else emptyList()) +
-                            (if (canLayout) listOf(WRITE_LAYOUT) else emptyList()) +
-                            (if (canCalendar) listOf(WRITE_CALENDAR) else emptyList()) +
-                            listOf(
-                                WRITE_BOOKING_RULES,
-                                MANAGE_TEAM,
-                                READ_FINANCE,
-                                WRITE_FINANCE,
-                                READ_MODULES,
-                                WRITE_MODULES,
-                            ).filter {
-                                hasGrant(profile, it) &&
-                                    (it != MANAGE_TEAM || ClubStaffAccess(session).owns(clubId))
-                            }
-                    ).map(::JsonPrimitive),
-                ),
+                "canPreviewBooking",
+                !club.active() && session.canPreviewClub(clientId, clubId, profile.long("owner_user_id")),
             )
-            put("canPreviewBooking", !club.active() && profile.long("owner_user_id") == session.userId)
-            put("availableActions", JsonArray((if (canWrite) listOf("update") else emptyList()).map(::JsonPrimitive)))
+            put("availableActions", strings(if (canWrite) listOf("update") else emptyList()))
         }
     }
 
@@ -241,23 +207,8 @@ internal class DirectClubOperations(
         profile: DbRow,
         write: Boolean,
     ) {
-        session.member(profile.long("client_id"), manage = false)
-        if (!hasGrant(profile, READ_CLUB) || (write && !hasGrant(profile, WRITE_PROFILE))) fail("not_found")
+        session.requireClubGrant(profile.long("club_id"), WRITE_PROFILE.takeIf { write })
     }
-
-    private fun hasGrant(
-        profile: DbRow,
-        permission: String,
-    ): Boolean =
-        sql.row(
-            "SELECT g.club_id FROM client_club_grants g JOIN client_clubs m ON " +
-                "m.client_id=g.client_id AND m.club_id=g.club_id WHERE g.client_id=? AND " +
-                "g.club_id=? AND g.user_id=? AND g.permission_code=? AND g.is_active=TRUE",
-            profile.long("client_id"),
-            profile.long("club_id"),
-            session.userId,
-            permission,
-        ) != null
 
     private fun result(
         clubId: Long,

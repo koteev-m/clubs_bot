@@ -375,12 +375,14 @@ function ClubProfileEditor({
                 {validationError}
               </p>
             )}
-            <p className="po-muted">
-              Последнее успешное сохранение:{' '}
-              <time dateTime={profile.savedAt}>
-                {new Date(profile.savedAt).toLocaleString('ru-RU')}
-              </time>
-            </p>
+            {profile.savedAt && (
+              <p className="po-muted">
+                Последнее успешное сохранение:{' '}
+                <time dateTime={profile.savedAt}>
+                  {new Date(profile.savedAt).toLocaleString('ru-RU')}
+                </time>
+              </p>
+            )}
             {canWrite && (
               <button
                 className="po-primary"

@@ -76,9 +76,10 @@ describe('onboarding transport and launch privacy', () => {
       hash: 'synthetic',
     }).toString();
     const hash = '#tgWebAppData=' + encodeURIComponent(data);
-    expect(readClientEntry('', hash)).toEqual({ client: true, token });
+    expect(readClientEntry('', hash)).toEqual({ client: true, invitationKind: 'client', token });
     expect(readClientEntry('?startapp=ci_short', '')).toEqual({
       client: false,
+      invitationKind: null,
       token: null,
     });
     window.history.replaceState(null, '', '/app?startapp=ci_' + token + hash);

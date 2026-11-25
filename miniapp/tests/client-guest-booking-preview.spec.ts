@@ -177,7 +177,10 @@ test('opens the owner preview with one read-only snapshot on map, list and card'
   const guests = page.getByRole('spinbutton', { name: 'Количество гостей' });
   await guests.fill('4');
   await expect(guests).toHaveValue('4');
-  await expect(page.getByText(/25\.10\.2026 02:30 UTC\+01:00/)).toBeVisible();
+  const arrivalWindow = page.getByText(/Гость может указать приезд с/);
+  await expect(arrivalWindow).toContainText('02:00 UTC+02:00');
+  await expect(arrivalWindow).toContainText('08:00 UTC+01:00');
+  await expect(page.getByText(/25\.10\.2026 02:30 UTC\+01:00/)).toHaveCount(0);
   await expect(
     page.getByRole('button', { name: 'Удержать стол' }),
   ).toBeDisabled();

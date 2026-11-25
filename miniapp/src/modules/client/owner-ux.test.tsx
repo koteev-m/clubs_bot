@@ -305,6 +305,7 @@ describe('owner UX and client navigation', () => {
               : {
                   ...detail,
                   permissions: ['client.application.manage'],
+                  canCreate: true,
                   clubs: [profile],
                 },
       ),
@@ -314,9 +315,10 @@ describe('owner UX and client navigation', () => {
     expect(location.search).toContain('screen=club&resource=100');
     expect(screen.getByText('Статус: проверка недоступна')).toBeTruthy();
     expect(
-      screen.getByText(
-        'Подтверждённые отчёты о работе клуба в этом кабинете пока не подключены.',
-      ),
+      screen.queryByRole('heading', { name: 'Показатели и отчёты' }),
+    ).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Открыть проверку готовности' }),
     ).toBeTruthy();
     const event = telegram.onEvent.mock.calls.findLast(
       ([name]) => name === 'viewportChanged',
@@ -370,5 +372,124 @@ describe('owner UX and client navigation', () => {
     expect(
       screen.queryByRole('heading', { name: 'Сохранённый клуб' }),
     ).toBeNull();
+  });
+});
+
+it('requires a separate decision for every ambiguous grant before attaching a historical club', async () => {
+  history.replaceState(
+    {},
+    '',
+    '/app?mode=platform-owner&screen=client&resource=20',
+  );
+  const reviewed = [
+    {
+      userId: '51',
+      permission: 'client.club.calendar.write',
+      updatedAt: '2026-11-12T09:00:00Z',
+    },
+    {
+      userId: '52',
+      permission: 'client.club.layout.write',
+      updatedAt: '2026-11-17T06:00:00Z',
+    },
+  ];
+  const data = {
+    ...detail,
+    clubs: [profile],
+    members: [
+      {
+        active: true,
+        userId: '50',
+        telegramUserId: '500',
+        version: '3',
+        username: 'owner',
+        businessOwner: true,
+        businessClubIds: [],
+        businessClubsForReview: [
+          { clubId: '100', clubName: profile.name, grants: reviewed },
+        ],
+        permissions: [],
+        restorablePermissions: [],
+        clubGrants: [],
+      },
+    ],
+  };
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (path, request) =>
+      request?.method === 'POST' ? reply(data.members[0]) : reply(data),
+    );
+  render(<PlatformOnboarding credential="synthetic-platform" />);
+  const select = await screen.findByLabelText(
+    'Подтвердить существующее заведение владельца',
+  );
+  fireEvent.change(select, { target: { value: '100' } });
+  const submit = screen.getByRole('button', {
+    name: 'Подтвердить владение заведением',
+  }) as HTMLButtonElement;
+  expect(submit.disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText(/Пользователь №51/), {
+    target: { value: 'true' },
+  });
+  expect(submit.disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText(/Пользователь №52/), {
+    target: { value: 'false' },
+  });
+  fireEvent.click(submit);
+  await waitFor(() => {
+    const posts = fetch.mock.calls.filter(
+      ([path, request]) =>
+        String(path).endsWith('/clients/20/members/50/business-clubs/100') &&
+        request?.method === 'POST',
+    );
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(String(posts[0][1]?.body))).toEqual({
+      expectedVersion: '3',
+      reviewedGrants: [
+        { ...reviewed[0], keep: true },
+        { ...reviewed[1], keep: false },
+      ],
+    });
+  });
+});
+
+it('shows platform confirmation only for a member the server allows to become the owner', async () => {
+  history.replaceState(
+    {},
+    '',
+    '/app?mode=platform-owner&screen=client&resource=20',
+  );
+  const members = ['31', '32'].map((userId, index) => ({
+    active: true,
+    userId,
+    telegramUserId: userId,
+    version: '4',
+    businessOwner: false,
+    canConfirmBusinessOwner: index === 1,
+    permissions: [],
+    restorablePermissions: [],
+    clubGrants: [],
+  }));
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation((_url, request) =>
+      reply(request?.method === 'POST' ? members[1] : { ...detail, members }),
+    );
+  render(<PlatformOnboarding credential="synthetic-platform" />);
+  const action = await screen.findByRole('button', {
+    name: 'Подтвердить владельца бизнеса',
+  });
+  fireEvent.click(action);
+  await waitFor(() => {
+    const posts = fetch.mock.calls.filter(
+      ([, request]) => request?.method === 'POST',
+    );
+    expect(posts).toHaveLength(1);
+    expect(String(posts[0][0])).toContain(
+      '/clients/20/members/32/business-owner',
+    );
+    expect(JSON.parse(String(posts[0][1]?.body))).toEqual({
+      expectedVersion: '4',
+    });
   });
 });

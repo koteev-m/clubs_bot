@@ -1,6 +1,9 @@
 package com.example.bot.data.client.onboarding
 
+import com.example.bot.data.client.COMPATIBLE_CLUB_SOURCES_SQL
 import com.example.bot.data.client.assignments.PlatformMembershipSourceRevocation
+import com.example.bot.data.client.ownerAndLegacyClubSourcesSql
+import com.example.bot.data.client.visibleClubSourcesSql
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -117,12 +120,40 @@ internal class ClientAccessOperations(
                 session.userId,
                 MANAGE,
             )
+        val subject = checkNotNull(session.userId)
+        val registeredOwner =
+            if (sql.businessOwnershipSchemaPresent()) {
+                sql.row("SELECT user_id FROM client_business_owners WHERE client_id=?", clientId)?.long("user_id")
+            } else {
+                null
+            }
+        val hasBusiness = registeredOwner != null
+        val businessRequired = sql.businessOwnershipSchemaPresent()
+        val owner = registeredOwner == subject && session.isBusinessOwner(clientId, subject)
+        val target =
+            hasBusiness &&
+                sql.row(
+                    "SELECT 1 FROM client_club_access_state WHERE client_id=? AND user_id=? AND mode='TARGET' LIMIT 1",
+                    clientId,
+                    subject,
+                ) != null
+        // A membership restore may restore a separate read grant. The previous ownership proof
+        // still requires fresh identity, but only an active proof or exact read can expose a club.
+        val needsFreshIdentity = registeredOwner == subject || target
+        if (needsFreshIdentity) session.requireBusinessIdentity()
+        val canCreate = if (businessRequired) owner else permission != null
+        val showLimit = owner || (!businessRequired && !target)
+        val visible = clubs(clientId, subject, needsFreshIdentity)
         return buildJsonObject {
             put("id", clientId.toString())
             put("name", session.client(clientId).getValue("display_name"))
             put("permissions", JsonArray(if (permission == null) emptyList() else listOf(JsonPrimitive(MANAGE))))
-            put("clubs", JsonArray(clubs(clientId, session.userId)))
-            ClientLimitOperations(session).view(clientId).forEach { (key, value) -> put(key, value) }
+            put("clubs", JsonArray(visible))
+            put("businessOwnerRequired", businessRequired)
+            put("businessOwner", owner)
+            put("canCreate", canCreate)
+            put("showClubLimit", showLimit)
+            if (showLimit) ClientLimitOperations(session).view(clientId).forEach { (key, value) -> put(key, value) }
         }
     }
 
@@ -149,6 +180,8 @@ internal class ClientAccessOperations(
                 member.long("version"),
                 restore,
             )
+        // Even unclaimed links issued before membership revocation must stay fenced after restore.
+        if (!restore && sql.managerSchemaPresent) sql.fenceManagerInvitations(clientId, userId)
         if (restore) restoreScopes(clientId, userId, body, revocation) else disableScopes(clientId, userId, revocation)
         if (sql.update(
                 "UPDATE client_memberships SET is_active=?,version=version+1,updated_at=? " +
@@ -201,6 +234,7 @@ internal class ClientAccessOperations(
             )
         return buildJsonObject {
             put("userId", userId.toString())
+            BusinessOwnership(session).fields(clientId, userId, member).forEach { (key, value) -> put(key, value) }
             put("telegramUserId", member.getValue("telegram_user_id"))
             put("displayName", jsonNullable(member["display_name"]))
             put("username", jsonNullable(member["username"]))
@@ -342,6 +376,7 @@ internal class ClientAccessOperations(
     private fun clubs(
         clientId: Long,
         userId: Long?,
+        targetIdentity: Boolean = false,
     ): List<JsonObject> {
         val rows =
             if (userId == null) {
@@ -349,6 +384,28 @@ internal class ClientAccessOperations(
                     "SELECT c.id,c.name FROM client_clubs mapping JOIN clubs c ON c.id=mapping.club_id " +
                         "WHERE mapping.client_id=? ORDER BY c.id",
                     clientId,
+                )
+            } else if (sql.businessOwnershipSchemaPresent()) {
+                val sources =
+                    when {
+                        !targetIdentity -> COMPATIBLE_CLUB_SOURCES_SQL
+                        sql.managerSchemaPresent -> visibleClubSourcesSql
+                        else -> ownerAndLegacyClubSourcesSql
+                    }
+                val sourceInputs =
+                    if (targetIdentity &&
+                        sql.managerSchemaPresent
+                    ) {
+                        listOf(READ_CLUB, session.now)
+                    } else {
+                        listOf(READ_CLUB)
+                    }
+                sql.rowsWithArguments(
+                    "SELECT c.id,c.name FROM ($sources) g JOIN client_clubs mapping " +
+                        "ON g.client_id=mapping.client_id AND g.club_id=mapping.club_id " +
+                        "JOIN clubs c ON c.id=mapping.club_id " +
+                        "WHERE g.client_id=? AND g.user_id=? ORDER BY c.id",
+                    sourceInputs + listOf(clientId, userId),
                 )
             } else {
                 sql.rows(

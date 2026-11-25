@@ -21,7 +21,6 @@ const initial: BookingRulesView = {
   canWrite: true,
   rules: {
     cutoffMinutes: 120,
-    arrivalMinutes: null,
     holdMinutes: null,
     retentionMinutes: 30,
   },
@@ -49,8 +48,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it('never applies the HOLD recommendation on read or unrelated save and clears it only by owner action', async () => {
-  let saved = { ...initial, rules: { ...initial.rules, holdMinutes: 17 } };
+it('never applies the HOLD recommendation on read or unrelated save and clears it only on an explicit edit', async () => {
+  let saved = { ...initial, rules: { ...initial.rules, arrivalMinutes: 5, holdMinutes: 17 } };
   const writes: Record<string, unknown>[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (_, request) => {
     if (request?.method !== 'PATCH') return reply(saved);
@@ -76,81 +75,45 @@ it('never applies the HOLD recommendation on read or unrelated save and clears i
   await screen.findByText('Сохранено');
   expect(writes[0]).toMatchObject({
     holdMinutes: 17,
-    arrivalMinutes: null,
     cutoffMinutes: 90,
   });
   fireEvent.change(hold, { target: { value: '' } });
   fireEvent.click(screen.getByRole('button', { name: 'Сохранить правила' }));
   await waitFor(() => expect(writes).toHaveLength(2));
-  expect(writes[1]).toMatchObject({ holdMinutes: null, arrivalMinutes: null });
+  expect(writes[1]).toMatchObject({ holdMinutes: null });
+  expect(writes.every((body) => !('arrivalMinutes' in body))).toBe(true);
 });
 
-it('warns about a contradictory draft before saving while preserving the saved values', async () => {
-  const saved: BookingRulesView = {
-    ...initial,
-    timezone: 'Europe/Moscow',
-    nights: [
-      {
-        businessDate: '2026-11-06',
-        opensAt: '2026-11-07T00:00+03:00',
-        closesAt: '2026-11-07T12:00+03:00',
-        cutoffAt: '2026-11-07T10:00+03:00',
-        arrivalBy: null,
-        cutoffAtOrBeforeOpen: false,
-        arrivalAtOrAfterClose: false,
-        cutoffAfterArrival: false,
-      },
-    ],
-  };
-  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply(saved));
-  mount();
-  const arrival = await screen.findByRole<HTMLInputElement>('textbox', {
-    name: /Самый поздний приезд/,
-  });
-  fireEvent.change(arrival, { target: { value: '180' } });
-  expect(
-    screen.getByText(/Проверьте черновик для ночей 06.11.2026/),
-  ).toBeTruthy();
-  expect(saved.rules.arrivalMinutes).toBeNull();
-  expect(
-    fetch.mock.calls.every(([, request]) => request?.method !== 'PATCH'),
-  ).toBe(true);
-});
-
-it('explains all four draft deadlines on the club clock through the repeated hour', async () => {
+it('explains three draft deadlines on the club clock through the repeated hour', async () => {
   const night = {
     businessDate: '2026-10-24',
     opensAt: '2026-10-25T01:50+02:00',
     closesAt: '2026-10-25T03:10+01:00',
     cutoffAt: '2026-10-25T01:10+02:00',
-    arrivalBy: null,
+    // Stale server responses and cached clients can still carry deprecated fields.
+    arrivalBy: '2026-10-25T02:00+02:00',
     cutoffAtOrBeforeOpen: true,
-    arrivalAtOrAfterClose: false,
-    cutoffAfterArrival: false,
+    arrivalAtOrAfterClose: true,
+    cutoffAfterArrival: true,
   };
   const fetch = vi
     .spyOn(globalThis, 'fetch')
     .mockResolvedValue(reply({ ...initial, nights: [night] }));
   mount();
   await screen.findByText(/Примеры для вечеринки 24.10.2026/);
-  expect(screen.queryByText(/Последнее время приезда —/)).toBeNull();
+  expect(screen.queryByText(/поздн.*приезд|Последнее время приезда/i)).toBeNull();
   expect(screen.queryByText(/Если выбрать стол/)).toBeNull();
   const edit = (label: RegExp, value: string) =>
     fireEvent.change(screen.getByRole('textbox', { name: label }), {
       target: { value },
     });
   edit(/Приём онлайн-броней/, '20');
-  edit(/Самый поздний приезд/, '60');
+  expect(screen.queryByRole('textbox', { name: /Самый поздний приезд/ })).toBeNull();
   edit(/Время на оформление/, '10');
   edit(/Ожидание при опоздании/, '90');
   expect(
     screen.getByText(
       /Закрытие — .*03:10 UTC\+1.*Приём броней закончится .*02:50 UTC\+1/,
-    ),
-  ).toBeTruthy();
-  expect(
-    screen.getByText(
-      /Открытие — .*01:50 UTC\+2.*Последнее время приезда — .*02:50 UTC\+2/,
     ),
   ).toBeTruthy();
   expect(
@@ -163,8 +126,7 @@ it('explains all four draft deadlines on the club clock through the repeated hou
       /Если гость указал приезд к открытию .*01:50 UTC\+2.*стол ждёт его до .*02:20 UTC\+1/,
     ),
   ).toBeTruthy();
-  edit(/Самый поздний приезд/, '');
-  expect(screen.queryByText(/Последнее время приезда —/)).toBeNull();
+  expect(screen.queryByText(/поздн.*приезд|Последнее время приезда/i)).toBeNull();
   expect(
     fetch.mock.calls.every(([, request]) => request?.method !== 'PATCH'),
   ).toBe(true);
@@ -269,4 +231,36 @@ it('removes the settings and server preview after read access is revoked', async
     expect(screen.queryByText('Предпросмотр сохранённых правил')).toBeNull(),
   );
   expect(screen.queryByText('Клуб · Europe/Berlin')).toBeNull();
+});
+
+it('forgets the last booking rules and the draft across denied reads, failed retry, and a later new grant', async () => {
+  let status = 200;
+  let saved = { ...initial, rules: { ...initial.rules, holdMinutes: 17 } };
+  const original = saved;
+  let finishWrite!: (response: Response) => void;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_, options) => {
+    if (options?.method === 'PATCH') return new Promise<Response>((resolve) => { finishWrite = resolve; });
+    return status === 200 ? reply(saved) : reply({ code: status === 404 ? 'not_found' : 'internal_error' }, status);
+  });
+  mount();
+  fireEvent.change(await screen.findByDisplayValue('17'), { target: { value: '77' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить правила' }));
+  await waitFor(() => expect(finishWrite).toBeDefined());
+  status = 404;
+  fireEvent.focus(window);
+  await screen.findByText(/Доступ утрачен/);
+  expect(screen.queryAllByRole('textbox')).toHaveLength(0);
+  status = 503;
+  fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+  await screen.findByRole('alert');
+  expect(screen.queryAllByRole('textbox')).toHaveLength(0);
+  status = 200;
+  saved = { ...initial, name: 'Новая версия клуба', rules: { ...initial.rules, holdMinutes: 29 } };
+  fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+  await screen.findByDisplayValue('29');
+  await act(async () => finishWrite(reply({ ...original, version: '9' })));
+  expect(screen.getByDisplayValue('29')).toBeTruthy();
+  expect(screen.queryByDisplayValue('17')).toBeNull();
+  expect(screen.queryByDisplayValue('77')).toBeNull();
+  expect(screen.queryByText('Сохранено')).toBeNull();
 });

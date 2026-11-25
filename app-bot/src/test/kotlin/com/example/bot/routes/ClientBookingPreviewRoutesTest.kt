@@ -32,7 +32,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-open class ClientBookingPreviewRoutesTest : ClientOnboardingRoutesTestBase() {
+open class ClientBookingPreviewRoutesTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `owner sees stored hall and the verified DST night while even identical table IDs stay blocked`() =
         database { source ->
@@ -72,7 +72,7 @@ open class ClientBookingPreviewRoutesTest : ClientOnboardingRoutesTestBase() {
                 assertEquals("2026-10-24", initial.firstNight().string("businessDate"))
                 assertEquals("2026-10-25T02:00+02:00", initial.firstNight().string("opensAt"))
                 assertEquals("2026-10-25T08:00+01:00", initial.firstNight().string("closesAt"))
-                assertEquals("2026-10-25T02:30+01:00", initial.firstNight().string("arrivalBy"))
+                assertEquals(JsonNull, initial.firstNight()["arrivalBy"])
                 val table =
                     initial
                         .firstHall()
@@ -522,7 +522,10 @@ open class ClientBookingPreviewRoutesTest : ClientOnboardingRoutesTestBase() {
 
 @Tag("it")
 class ClientBookingPreviewPostgresIT : ClientBookingPreviewRoutesTest() {
-    override fun database(block: (DataSource) -> Unit) {
+    override fun databaseAt(
+        target: String?,
+        block: (DataSource) -> Unit,
+    ) {
         PostgreSQLContainer<Nothing>("postgres:16-alpine").use { postgres ->
             postgres.start()
             val source =
@@ -535,6 +538,7 @@ class ClientBookingPreviewPostgresIT : ClientBookingPreviewRoutesTest() {
                 .configure()
                 .dataSource(source)
                 .locations("classpath:db/migration/common", "classpath:db/migration/postgresql")
+                .apply { target?.let { target(it) } }
                 .load()
                 .migrate()
             block(source)

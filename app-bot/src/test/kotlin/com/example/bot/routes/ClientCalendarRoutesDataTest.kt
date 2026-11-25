@@ -22,7 +22,7 @@ import javax.sql.DataSource
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-open class ClientCalendarRoutesDataTest : ClientOnboardingRoutesTestBase() {
+open class ClientCalendarRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `dated hours inherit the Friday overnight start and accept an explicit complete override`() =
         database { source ->
@@ -270,6 +270,8 @@ open class ClientCalendarRoutesDataTest : ClientOnboardingRoutesTestBase() {
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "76"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "77"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "78"))
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "79"))
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "80"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect))
             withApp(source, CLOCK) {
                 val path = "$C/clubs/8801/calendar"

@@ -144,29 +144,36 @@ private fun conflict(
         mapOf("businessDate" to checkNotNull(night["business_date"]), "reason" to reason),
     )
 
+// A second event on the business date or overlapping the window prevents attribution.
+internal const val NIGHT_EVENT_CANDIDATES =
+    "SELECT id,start_at,end_at FROM events WHERE club_id=? AND " +
+        "((start_at>=? AND start_at<?) OR (start_at<? AND (end_at>? OR start_at>=?))) ORDER BY id LIMIT 2"
+
+internal fun DbRow.eventCandidateArgs(): List<Any> {
+    val date = LocalDate.parse(getValue("business_date"))
+    val zone = ZoneId.of(getValue("timezone"))
+    val start = instant("start_at")
+    return listOf(
+        long("club_id"),
+        date.atStartOfDay(zone).toInstant(),
+        date.plusDays(1).atStartOfDay(zone).toInstant(),
+        instant("end_at"),
+        start,
+        start,
+    )
+}
+
+internal const val OTHER_MATCHING_NIGHT =
+    "SELECT 1 FROM club_operational_nights WHERE club_id=? AND id<>? AND status='SCHEDULED' " +
+        "AND start_at=? AND end_at=? LIMIT 1"
+
+internal fun DbRow.otherMatchingNightArgs(): List<Any> =
+    listOf(long("club_id"), long("id"), instant("start_at"), instant("end_at"))
+
 internal fun OnboardingSql.classifyNightEvent(night: DbRow): Candidate {
-    val date = LocalDate.parse(night["business_date"])
-    val zone = ZoneId.of(night["timezone"])
-    val dayStart = date.atStartOfDay(zone).toInstant()
-    val dayEnd = date.plusDays(1).atStartOfDay(zone).toInstant()
-    val start = night.instant("start_at")
-    val end = night.instant("end_at")
-    val clubId = night.long("club_id")
-    // Events have no business date or reliable role marker. A possible event in either window
-    // makes an automatic choice unsafe; this does not restrict creation of other events.
-    val events =
-        rows(
-            "SELECT id,start_at,end_at FROM events WHERE club_id=? AND " +
-                "((start_at>=? AND start_at<?) OR (start_at<? AND (end_at>? OR start_at>=?))) ORDER BY id LIMIT 2",
-            clubId,
-            dayStart,
-            dayEnd,
-            end,
-            start,
-            start,
-        )
+    val events = rowsWithArguments(NIGHT_EVENT_CANDIDATES, night.eventCandidateArgs())
     val event = events.firstOrNull() ?: return Candidate(CandidateStatus.NO_EVENT)
-    val exact = event.instant("start_at") == start && event.instant("end_at") == end
+    val exact = event.hasWindow(night.instant("start_at"), night.instant("end_at"))
     return when {
         events.size > 1 || (exact && anotherNightMatches(night)) -> Candidate(CandidateStatus.AMBIGUOUS)
         exact -> Candidate(CandidateStatus.EXACT_MATCH, event["id"])
@@ -175,14 +182,7 @@ internal fun OnboardingSql.classifyNightEvent(night: DbRow): Candidate {
 }
 
 private fun OnboardingSql.anotherNightMatches(night: DbRow): Boolean =
-    row(
-        "SELECT 1 FROM club_operational_nights WHERE club_id=? AND id<>? AND status='SCHEDULED' " +
-            "AND start_at=? AND end_at=? LIMIT 1",
-        night.long("club_id"),
-        night.long("id"),
-        night.instant("start_at"),
-        night.instant("end_at"),
-    ) != null
+    rowsWithArguments(OTHER_MATCHING_NIGHT, night.otherMatchingNightArgs()).isNotEmpty()
 
 internal data class Candidate(
     val status: CandidateStatus,

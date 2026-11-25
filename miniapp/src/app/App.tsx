@@ -66,7 +66,8 @@ export default function App() {
     return (
       <ClientAccess
         initialToken={clientEntry.token}
-        onTokenConsumed={() => setClientEntry({ client: true, token: null })}
+        invitationKind={clientEntry.invitationKind}
+        onTokenConsumed={() => setClientEntry({ client: true, invitationKind: null, token: null })}
       />
     );
   if (new URLSearchParams(window.location.search).get('mode') === 'cabinet')

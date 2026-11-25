@@ -259,9 +259,10 @@ class ClientOnboardingAuthTest {
         withApp { repository ->
             coEvery { repository.mutate(any(), OnboardingMutation.INVITATION_ISSUE, null, any(), any()) } returns
                 JsonObject(mapOf("id" to JsonPrimitive("1"), "token" to JsonPrimitive(TOKEN)))
+            val authenticatedAt = Instant.ofEpochSecond(Instant.now().epochSecond)
             val response =
                 client.post("$P/invitations") {
-                    header(HEADER, signed())
+                    header(HEADER, signed(date = authenticatedAt.epochSecond))
                     header(KEY, "synthetic-issue-key")
                     setBody("""{"clientName":"Synthetic client","recipientLabel":"Recipient"}""")
                 }
@@ -270,7 +271,7 @@ class ClientOnboardingAuthTest {
             assertTrue(response.bodyAsText().contains("https://t.me/synthetic_bot?startapp=ci_$TOKEN"))
             coVerify {
                 repository.mutate(
-                    OnboardingActor(OWNER, "platform"),
+                    OnboardingActor(OWNER, "platform", managerAuthenticatedAt = authenticatedAt),
                     OnboardingMutation.INVITATION_ISSUE,
                     null,
                     any(),

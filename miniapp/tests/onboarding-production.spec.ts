@@ -221,6 +221,7 @@ test('mobile profile preserves timezone, refreshes the club name on Back and kee
 test('direct creation keeps its pending intent through Back Forward, opens saved private profile and respects capacity on reentry', async ({
   page,
 }) => {
+  const ownedClub = { ...clubProfile, businessRole: 'BUSINESS_OWNER', permissions: ['client.club.read'], availableActions: [] };
   let created = false;
   const creates: { key: string; body: string | null }[] = [];
   await page.route('**/api/**', async (route) => {
@@ -233,9 +234,9 @@ test('direct creation keeps its pending intent through Back Forward, opens saved
       });
       created = true;
       if (creates.length === 1) return route.abort();
-      return route.fulfill({ json: clubProfile });
+      return route.fulfill({ json: ownedClub });
     }
-    if (path.endsWith('/profile')) return route.fulfill({ json: clubProfile });
+    if (path.endsWith('/profile')) return route.fulfill({ json: ownedClub });
     if (path.endsWith('/context'))
       return route.fulfill({
         json: {
@@ -243,7 +244,7 @@ test('direct creation keeps its pending intent through Back Forward, opens saved
             {
               id: '20',
               name: 'Synthetic Client',
-              clubs: created ? [clubProfile] : [],
+              clubs: created ? [ownedClub] : [],
             },
           ],
         },
@@ -254,7 +255,8 @@ test('direct creation keeps its pending intent through Back Forward, opens saved
           id: '20',
           name: 'Synthetic Client',
           permissions: ['client.application.manage'],
-          clubs: created ? [clubProfile] : [],
+          canCreate: true,
+          clubs: created ? [ownedClub] : [],
           allowedClubs: 1,
           createdClubs: created ? 1 : 0,
           availableClubs: created ? 0 : 1,
@@ -302,10 +304,7 @@ test('direct creation keeps its pending intent through Back Forward, opens saved
   );
   await page.evaluate(() => window.dispatchEvent(new Event('pageshow')));
   await page.getByRole('button', { name: 'Повторить ту же операцию' }).click();
-  await expect(page.getByText('Не опубликован', { exact: true })).toBeVisible();
-  await expect(
-    page.getByText('Отдельный бот клуба', { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText('Владелец бизнеса', { exact: true })).toBeVisible();
   expect(creates).toHaveLength(2);
   expect(creates[0]).toEqual(creates[1]);
   expect(JSON.parse(creates[0].body!)).toEqual({
@@ -322,9 +321,9 @@ test('direct creation keeps its pending intent through Back Forward, opens saved
   ).toBeDisabled();
   await page.getByRole('button', { name: /Synthetic Venue/ }).click();
   await expect(page).toHaveURL(/screen=club&resource=100/);
-  await expect(
-    page.getByText('Synthetic Street 1', { exact: true }),
-  ).toBeVisible();
+  await page.getByRole('button', { name: 'Сохранённые настройки' }).click();
+  await page.getByRole('button', { name: /^Профиль Название/ }).click();
+  await expect(page.getByText('Synthetic Street 1', { exact: true })).toBeVisible();
   await page.screenshot({
     path: test.info().outputPath('simplified-private-club.png'),
     fullPage: true,
@@ -501,6 +500,7 @@ test('browser Back Forward retains creation fields without saving a draft', asyn
           id: '20',
           name: 'Synthetic Client',
           permissions: ['client.application.manage'],
+          canCreate: true,
           clubs: [],
           allowedClubs: 1,
           createdClubs: 0,
@@ -687,6 +687,7 @@ test('Main Mini App resolves owner and client cabinets using server authority wi
           name: 'Synthetic Client',
           clubs: [],
           permissions: ['client.application.manage'],
+          canCreate: true,
           allowedClubs: 1,
           createdClubs: 0,
           availableClubs: 1,

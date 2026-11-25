@@ -151,7 +151,12 @@ private class ClientLayoutHttp(
 
 private fun ApplicationCall.layoutActor(): OnboardingActor {
     val identity = verifiedClientIdentity()
-    return OnboardingActor(identity.telegramUserId, identity.connectionKey, username = identity.username)
+    return OnboardingActor(
+        identity.telegramUserId,
+        identity.connectionKey,
+        username = identity.username,
+        managerAuthenticatedAt = identity.managerAuthenticatedAt,
+    )
 }
 
 private fun ApplicationCall.layoutId(name: String): Long =

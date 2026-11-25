@@ -2,6 +2,7 @@ package com.example.bot.routes
 
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.testing.ApplicationTestBuilder
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test
 import java.net.URI
 import java.time.Duration
 import java.time.Instant
+import javax.sql.DataSource
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -87,7 +89,7 @@ open class ClientOnboardingRoutesDataTest : ClientOnboardingRoutesTestBase() {
 
     @Test
     fun `one action accepts invitation and direct creation enforces owner managed client limit`() =
-        database { source ->
+        databaseAt("79") { source ->
             lateinit var clientId: String
             lateinit var clubId: String
             withApp(source) {
@@ -178,7 +180,7 @@ open class ClientOnboardingRoutesDataTest : ClientOnboardingRoutesTestBase() {
 
     @Test
     fun `location selection resolves timezone and refuses injected or mismatched locations`() =
-        database { source ->
+        databaseAt("79") { source ->
             withApp(source) {
                 val countries = ok(C + "/locations", RECIPIENT)["countries"]!!.jsonArray
                 assertTrue(countries.any { it.jsonObject["name"] == JsonPrimitive("Россия") })
@@ -227,35 +229,68 @@ open class ClientOnboardingRoutesDataTest : ClientOnboardingRoutesTestBase() {
         }
 
     @Test
-    fun `historical confirmation and approved application remain readable and consume the configured limit`() =
+    fun `historical invitation exposes no workspace before confirmation on the current schema`() =
         database { source ->
+            withApp(source) {
+                val invitation = historicalInvitation(source)
+                val id = invitation.string("id")
+                assertEquals(JsonArray(emptyList()), ok("$C/context", RECIPIENT)["clients"])
+                val claim =
+                    ok(
+                        "$C/invitations/$id/claim",
+                        RECIPIENT,
+                        JsonObject(
+                            version(invitation) + obj("token" to invitation.string("token")),
+                        ),
+                    )
+                assertEquals(JsonArray(emptyList()), ok("$C/context", RECIPIENT)["clients"])
+                ok("$P/invitations/$id/confirm", OWNER, version(claim))
+                val workspace =
+                    ok("$C/context", RECIPIENT)
+                        .getValue("clients")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                assertEquals(invitation.string("clientId"), workspace.string("id"))
+                assertEquals(JsonArray(emptyList()), workspace["clubs"])
+            }
+        }
+
+    private suspend fun ApplicationTestBuilder.historicalInvitation(source: DataSource): JsonObject {
+        val invitation =
+            ok(
+                "$P/invitations",
+                OWNER,
+                obj(
+                    "clientName" to "Synthetic workspace",
+                    "recipientLabel" to "Synthetic recipient",
+                ),
+            )
+        source.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    "UPDATE client_invitations SET acceptance_policy='owner_confirmation' WHERE id=?",
+                ).use {
+                    it.setLong(1, invitation.string("id").toLong())
+                    assertEquals(1, it.executeUpdate())
+                }
+        }
+        return invitation
+    }
+
+    @Test
+    fun `historical confirmation and approved application remain readable and consume the configured limit`() =
+        databaseAt("79") { source ->
             val initialRoles = source.scalar("SELECT COUNT(*) FROM user_roles")
             val initialClubs = source.scalar("SELECT COUNT(*) FROM clubs")
             lateinit var applicationId: String
             lateinit var clubId: String
             withApp(source) {
-                val invitation =
-                    ok(
-                        P + "/invitations",
-                        OWNER,
-                        obj(
-                            "clientName" to "Synthetic workspace",
-                            "recipientLabel" to "Synthetic recipient",
-                        ),
-                    )
+                val invitation = historicalInvitation(source)
                 val invitationId = invitation.string("id")
                 val token = invitation.string("token")
                 val clientId = invitation.string("clientId")
-                // Explicit historical fixture: new invitations no longer use owner confirmation.
-                source.connection.use { connection ->
-                    connection.createStatement().use {
-                        it.executeUpdate(
-                            "UPDATE client_invitations SET acceptance_policy='owner_confirmation' WHERE id=$invitationId",
-                        )
-                    }
-                }
                 assertEquals("0", source.scalar("SELECT COUNT(*) FROM users WHERE telegram_user_id=$RECIPIENT"))
-                assertEquals(JsonArray(emptyList()), ok(C + "/context", RECIPIENT)["clients"])
                 ok(C + "/invitations/resolve", RECIPIENT, obj("token" to token))
                 assertEquals("0", source.scalar("SELECT COUNT(*) FROM users WHERE telegram_user_id=$RECIPIENT"))
                 val claimed =
@@ -287,9 +322,7 @@ open class ClientOnboardingRoutesDataTest : ClientOnboardingRoutesTestBase() {
                 assertEquals(accepted, repeated)
                 assertEquals(auditCount, source.scalar("SELECT COUNT(*) FROM audit_log"))
                 assertEquals("accepted", accepted.string("status"))
-                val context = ok(C + "/context", RECIPIENT)["clients"]!!.jsonArray
-                assertEquals(1, context.size)
-                assertEquals(JsonArray(emptyList()), context.single().jsonObject["clubs"])
+                assertEquals(JsonArray(emptyList()), ok("$C/clients/$clientId/onboarding", RECIPIENT)["clubs"])
                 assertEquals(initialRoles, source.scalar("SELECT COUNT(*) FROM user_roles"))
                 var draft = ok(C + "/clients/$clientId/applications", RECIPIENT, venue())
                 applicationId = draft.string("id")
@@ -375,6 +408,7 @@ open class ClientOnboardingRoutesDataTest : ClientOnboardingRoutesTestBase() {
                 assertEquals("1", source.scalar("SELECT COUNT(*) FROM clubs WHERE id=$clubId AND is_active=FALSE"))
                 assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_club_onboarding"))
                 assertEquals("Synthetic Street 1", profile.string("address"))
+                upgradeClubFixture(source)
                 requestAs(C + "/clubs/$clubId/profile", FOREIGN).assertClientError(HttpStatusCode.NotFound, "not_found")
                 requestAs(
                     C + "/clubs/9223372036854775807/profile",

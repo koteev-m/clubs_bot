@@ -23,7 +23,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** Signed HTTP through Ktor and the real reconciler; inherited unchanged by the PostgreSQL adapter. */
-open class ClientCalendarReconciliationRoutesDataTest : ClientOnboardingRoutesTestBase() {
+open class ClientCalendarReconciliationRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `removed dated exception outside horizon reconciles fallback and preserves persistent identity`() =
         database { source ->

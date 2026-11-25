@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ClientAccess from './ClientAccess';
 vi.mock('../../app/providers/TelegramProvider', () => ({
@@ -89,4 +89,53 @@ it('shows a bound candidates code while waiting without claiming that permission
   expect(screen.getByText('123456')).toBeTruthy();
   expect(screen.getByText(/Клубные разрешения пока не выданы/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Открыть кабинет' })).toBeNull();
+});
+
+it('renews an expired manager code only after the bound recipient confirms again', async () => {
+  const invitation = {
+    id: '10',
+    clientId: '20',
+    clubId: '100',
+    clubName: 'Club A1',
+    clientName: 'Client A',
+    role: 'CLUB_MANAGER',
+    acceptanceMode: 'manager',
+    version: '2',
+    status: 'claimed',
+    expiresAt: '2026-11-30T00:00:00Z',
+    candidate: { userId: '9', telegramUserId: '880062004' },
+    verificationCode: null,
+    availableActions: ['claim'],
+  };
+  history.replaceState(
+    null,
+    '',
+    '/app?mode=client&screen=manager-invitation&resource=10',
+  );
+  const calls: RequestInit[] = [];
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
+    if (String(url).endsWith('/10/claim')) {
+      calls.push(options!);
+      return Response.json({
+        ...invitation,
+        version: '3',
+        verificationCode: '621078',
+        availableActions: [],
+      });
+    }
+    return Response.json(invitation);
+  });
+  render(<ClientAccess initialToken={null} />);
+  const renew = await screen.findByRole('button', {
+    name: 'Обновить подтверждение',
+  });
+  expect(calls).toHaveLength(0);
+  expect(screen.queryByRole('button', { name: 'Открыть кабинет' })).toBeNull();
+  fireEvent.click(renew);
+  expect(await screen.findByText('621078')).toBeTruthy();
+  expect(calls).toHaveLength(1);
+  expect(JSON.parse(calls[0].body as string)).toEqual({ expectedVersion: '2' });
+  expect(
+    screen.queryByRole('button', { name: 'Обновить подтверждение' }),
+  ).toBeNull();
 });

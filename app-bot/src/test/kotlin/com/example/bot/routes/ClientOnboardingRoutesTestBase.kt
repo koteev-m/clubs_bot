@@ -31,8 +31,25 @@ import javax.sql.DataSource
 import kotlin.test.assertEquals
 
 /** Shared Ktor data contract transport; database fixtures remain disposable. */
-open class ClientOnboardingRoutesTestBase {
-    protected open fun database(block: (DataSource) -> Unit) = databaseAt(null, block)
+open class ClientOnboardingRoutesTestBase(
+    private val legacyClients: Boolean = false,
+) {
+    /** Use the pre-ownership schema only for tests exercising historical club creation. */
+    protected open fun database(block: (DataSource) -> Unit) = databaseAt(if (legacyClients) "79" else null, block)
+
+    protected fun upgradeClubFixture(source: DataSource) {
+        val dialect =
+            source.connection.use {
+                if (it.metaData.databaseProductName ==
+                    "PostgreSQL"
+                ) {
+                    "postgresql"
+                } else {
+                    "h2"
+                }
+            }
+        migrateBookingRulesFixture(source, dialect)
+    }
 
     protected open fun databaseAt(
         target: String?,
@@ -108,17 +125,20 @@ open class ClientOnboardingRoutesTestBase {
     ): JsonObject {
         val response = requestAs(path, user, body, method, key)
         val text = response.bodyAsText()
-        assertEquals(HttpStatusCode.OK, response.status, text)
+        assertEquals(HttpStatusCode.OK, response.status, "${method.value} $path · $text")
         assertEquals("no-store", response.headers["Cache-Control"])
         return Json.parseToJsonElement(text).jsonObject
     }
 
-    protected fun signed(user: Long): String =
+    protected fun signed(
+        user: Long,
+        authenticatedAt: Instant = Instant.now(),
+    ): String =
         WebAppInitDataTestHelper.createInitData(
             TEST_BOT_TOKEN,
             mapOf(
                 "user" to WebAppInitDataTestHelper.encodeUser(user),
-                "auth_date" to Instant.now().epochSecond.toString(),
+                "auth_date" to authenticatedAt.epochSecond.toString(),
                 "start_param" to "ci_" + "s".repeat(43),
             ),
         )

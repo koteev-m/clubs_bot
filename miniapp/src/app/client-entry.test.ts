@@ -33,9 +33,32 @@ describe('packaged entry script', () => {
     ).toBeUndefined();
     expect(launch('', '').destination).toBeUndefined();
   });
-  it('preserves direct invitation priority and fragment transport', () => {
-    const hash =
-      '#tgWebAppStartParam=ci_' + 'a'.repeat(43) + '&tgWebAppData=signed';
-    expect(launch('', hash).destination).toBe('/app?mode=client' + hash);
-  });
+  it.each(['ci', 'cm'])(
+    'preserves %s invitation priority and fragment transport',
+    (prefix) => {
+      const hash =
+        '#tgWebAppStartParam=' +
+        prefix +
+        '_' +
+        'a'.repeat(43) +
+        '&tgWebAppData=signed';
+      expect(launch('', hash).destination).toBe('/app?mode=client' + hash);
+    },
+  );
+  it.each(['ci_', 'cm_'])(
+    'moves a query-only %s invitation into the fragment with its exact outer prefix',
+    (prefix) => {
+      const token = 'cm_' + 'F'.repeat(40);
+      const start = prefix + token;
+      const result = launch('?startapp=' + start, '#tgWebAppData=signed');
+      const redirect = new URL(result.destination!, 'https://example.test');
+      expect(redirect.search).toBe('?mode=client');
+      expect(
+        new URLSearchParams(redirect.hash.slice(1)).get('tgWebAppStartParam'),
+      ).toBe(start);
+      expect(
+        new URLSearchParams(redirect.hash.slice(1)).get('tgWebAppData'),
+      ).toBe('signed');
+    },
+  );
 });

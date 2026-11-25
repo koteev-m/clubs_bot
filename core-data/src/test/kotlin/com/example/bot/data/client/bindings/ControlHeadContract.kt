@@ -25,10 +25,16 @@ internal abstract class ControlHeadContract {
             )
             val tables = BindingTestFixture.TABLES + listOf("users", "client_memberships", "client_club_grants")
             val before = tables.associateWith { db.rows("SELECT * FROM $it ORDER BY 1") }
-            assertEquals(1, db.migrate())
+            assertEquals(1, db.migrate("79"))
             assertEquals(before, tables.associateWith { db.rows("SELECT * FROM $it ORDER BY 1") })
             assertEquals("0", db.scalar("SELECT COUNT(*) FROM target_maintenance_control_heads"))
             assertEquals("0", db.scalar("SELECT COUNT(*) FROM target_maintenance_publications"))
+            assertEquals(1, db.migrate("80"))
+            assertEquals(1, db.migrate("81"))
+            assertEquals("0", db.scalar("SELECT COUNT(*) FROM client_business_owners"))
+            assertEquals("0", db.scalar("SELECT COUNT(*) FROM client_manager_invitations"))
+            assertEquals("0", db.scalar("SELECT COUNT(*) FROM client_manager_invitation_fences"))
+            assertEquals(before, tables.associateWith { db.rows("SELECT * FROM $it ORDER BY 1") })
             assertEquals(0, db.migrate())
         }
     }

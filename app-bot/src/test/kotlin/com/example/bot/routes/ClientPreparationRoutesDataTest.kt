@@ -16,7 +16,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** Real signed HTTP identity -> Ktor -> transactional JDBC -> persisted task on application reopen. */
-open class ClientPreparationRoutesDataTest : ClientOnboardingRoutesTestBase() {
+open class ClientPreparationRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `preparation http preserves private ownership invitations saved configuration and review after reopen`() =
         database { source ->
@@ -24,11 +24,13 @@ open class ClientPreparationRoutesDataTest : ClientOnboardingRoutesTestBase() {
             withApp(source) {
                 club = club()
                 val path = "$C/clubs/${club.string("id")}/preparation"
+                val teamPath = "$C/clubs/${club.string("id")}/team"
                 assertEquals(HttpStatusCode.Unauthorized, client.get(path).status)
                 assertEquals(HttpStatusCode.NotFound, requestAs(path, FOREIGN).status)
                 val initial = ok(path, RECIPIENT)
                 assertEquals("unassigned", initial.string("status"))
                 assertEquals("false", initial["published"].toString())
+                assertLegacyTeamCannotInviteManagers(teamPath)
                 val issued =
                     ok(
                         path,
@@ -38,7 +40,7 @@ open class ClientPreparationRoutesDataTest : ClientOnboardingRoutesTestBase() {
                             put("expectedVersion", initial.getValue("version"))
                             put(
                                 "expectedTeamVersion",
-                                ok("$C/clubs/${club.string("id")}/team", RECIPIENT).getValue("version"),
+                                ok(teamPath, RECIPIENT).getValue("version"),
                             )
                             put("recipientLabel", "Synthetic responsible")
                         },
@@ -52,19 +54,29 @@ open class ClientPreparationRoutesDataTest : ClientOnboardingRoutesTestBase() {
                         obj("token" to issued.string("token"), "expectedVersion" to "1"),
                     )
                 assertEquals(HttpStatusCode.NotFound, requestAs(path, FOREIGN).status)
-                ok(
-                    "$C/clubs/${club.string("id")}/team",
-                    RECIPIENT,
-                    buildJsonObject {
-                        put("action", "confirm")
-                        put("expectedVersion", ok("$C/clubs/${club.string("id")}/team", RECIPIENT).getValue("version"))
-                        put("invitationId", pending.getValue("id"))
-                        put("expectedInvitationVersion", pending.getValue("version"))
-                        put("verificationCode", pending.getValue("verificationCode"))
-                        put("confirmed", true)
-                    },
-                )
-                assertEquals("in_progress", ok(path, FOREIGN).string("status"))
+                val confirmedTeam =
+                    ok(
+                        teamPath,
+                        RECIPIENT,
+                        buildJsonObject {
+                            put("action", "confirm")
+                            put("expectedVersion", ok(teamPath, RECIPIENT).getValue("version"))
+                            put("invitationId", pending.getValue("id"))
+                            put("expectedInvitationVersion", pending.getValue("version"))
+                            put("verificationCode", pending.getValue("verificationCode"))
+                            put("confirmed", true)
+                        },
+                    )
+                val preparation = ok(path, FOREIGN)
+                val userId = preparation.getValue("assignee").jsonObject.string("userId")
+                val members = confirmedTeam.getValue("members").jsonArray
+                val member = members.single { it.jsonObject.string("userId") == userId }
+                assertEquals("CLUB_ADMIN", member.jsonObject.string("role"))
+                assertEquals("in_progress", preparation.string("status"))
+                assertEquals("false", preparation.getValue("canManage").toString())
+                assertEquals(HttpStatusCode.NotFound, requestAs(teamPath, FOREIGN).status)
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM client_club_access_state"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM client_role_assignments"))
                 assertEquals(HttpStatusCode.NotFound, preparationRequest(club, "accept", FOREIGN).status)
                 val profilePath = "$C/clubs/${club.string("id")}/profile"
                 val profile = ok(profilePath, FOREIGN)
@@ -161,6 +173,23 @@ open class ClientPreparationRoutesDataTest : ClientOnboardingRoutesTestBase() {
                 assertEquals(HttpStatusCode.NotFound, preparationRequest(club, "submit", RECIPIENT).status)
             }
         }
+
+    private suspend fun ApplicationTestBuilder.assertLegacyTeamCannotInviteManagers(path: String) {
+        val team = ok(path, RECIPIENT)
+        val available = team.getValue("roles").jsonArray.map { it.jsonObject.string("code") }
+        for (role in listOf("NETWORK_MANAGER", "CLUB_MANAGER")) {
+            assertFalse(role in available)
+            val invite =
+                obj(
+                    "action" to "invite",
+                    "expectedVersion" to team.string("version"),
+                    "role" to role,
+                    "recipientLabel" to "Synthetic colleague",
+                )
+            assertEquals(HttpStatusCode.BadRequest, requestAs(path, RECIPIENT, invite).status)
+        }
+        assertEquals(team, ok(path, RECIPIENT))
+    }
 
     private suspend fun ApplicationTestBuilder.preparationRequest(
         club: JsonObject,

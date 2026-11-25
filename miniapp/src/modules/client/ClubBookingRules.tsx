@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { dateLabel, localLabel } from './calendar';
 import { authorityLost, OnboardingError } from './onboarding.api';
 import { useCommand, useRemote } from './onboarding.hooks';
@@ -17,13 +17,6 @@ const fields = [
     hint: 'За сколько минут до закрытия клуба перестать принимать новые брони онлайн.',
     min: 0,
     required: true,
-  },
-  {
-    id: 'arrivalMinutes',
-    label: 'Самый поздний приезд, мин после открытия',
-    hint: 'Сколько минут от открытия до последнего времени приезда, которое гость может выбрать в брони. Пустое поле — срок не задан.',
-    min: 0,
-    required: false,
   },
   {
     id: 'holdMinutes',
@@ -50,10 +43,7 @@ type Night = {
   opensAt: string;
   closesAt: string;
   cutoffAt: string;
-  arrivalBy: string | null;
   cutoffAtOrBeforeOpen: boolean;
-  arrivalAtOrAfterClose: boolean;
-  cutoffAfterArrival: boolean;
 };
 export type BookingRulesView = {
   clubId: string;
@@ -106,10 +96,6 @@ function nightExamples(night: Night, rules: RuleValues, timezone: string) {
     };
     return {
       cutoffMinutes: `Закрытие — ${at(night.closesAt)}. Приём броней закончится ${at(night.closesAt, -rules.cutoffMinutes)}.`,
-      arrivalMinutes:
-        rules.arrivalMinutes === null
-          ? undefined
-          : `Открытие — ${at(night.opensAt)}. Последнее время приезда — ${at(night.opensAt, rules.arrivalMinutes)}.`,
       holdMinutes:
         rules.holdMinutes === null
           ? undefined
@@ -136,8 +122,10 @@ function BookingPreview({ view }: { view: BookingRulesView }) {
           : `${view.rules.holdMinutes} мин с начала оформления`}
       </p>
       <p>
-        При опоздании стол ждёт гостя {view.rules.retentionMinutes} мин после
-        выбранного времени приезда.
+        Гость указывает ориентировочное время приезда в пределах клубной ночи.
+        Подтверждённая бронь закрепляет стол на всю ночь. При опоздании стол
+        ждёт гостя {view.rules.retentionMinutes} мин после выбранного времени
+        приезда.
       </p>
       {view.nights.length === 0 && (
         <p>
@@ -166,27 +154,8 @@ function BookingPreview({ view }: { view: BookingRulesView }) {
             Приём онлайн-броней до{' '}
             <time dateTime={night.cutoffAt}>{localLabel(night.cutoffAt)}</time>
           </p>
-          <p>
-            Самый поздний планируемый приезд{' '}
-            {night.arrivalBy ? (
-              <time dateTime={night.arrivalBy}>
-                {localLabel(night.arrivalBy)}
-              </time>
-            ) : (
-              '— время не задано'
-            )}
-          </p>
           {night.cutoffAtOrBeforeOpen && (
             <p>Бронирование прекращается к открытию или раньше.</p>
-          )}
-          {night.arrivalAtOrAfterClose && (
-            <p>Самый поздний приезд приходится на закрытие или позже.</p>
-          )}
-          {night.cutoffAfterArrival && (
-            <p className="po-notice" role="status">
-              Приём онлайн-броней заканчивается позже самого позднего времени
-              приезда. Проверьте оба срока.
-            </p>
           )}
         </details>
       ))}
@@ -195,7 +164,8 @@ function BookingPreview({ view }: { view: BookingRulesView }) {
 }
 
 function parseRules(edits: Edits, saved: RuleValues): RuleValues | undefined {
-  const values = { ...saved };
+  const { cutoffMinutes, holdMinutes, retentionMinutes } = saved;
+  const values = { cutoffMinutes, holdMinutes, retentionMinutes };
   for (const field of fields) {
     const text = edits[field.id];
     if (text === undefined) continue;
@@ -211,23 +181,108 @@ function parseRules(edits: Edits, saved: RuleValues): RuleValues | undefined {
   return values;
 }
 
-export default function ClubBookingRules({
-  credential,
-  id,
-  back,
-  reportDirty,
-  reportPending,
-}: {
+type BookingRulesProps = {
   credential: string;
   id: string;
   back: () => void;
   reportDirty: (dirty: boolean) => void;
   reportPending: (pending: boolean) => void;
+};
+
+export default function ClubBookingRules(props: BookingRulesProps) {
+  return (
+    <BookingRulesResource key={props.credential + ':' + props.id} {...props} />
+  );
+}
+
+function BookingRulesResource(props: BookingRulesProps) {
+  const path = '/api/client/clubs/' + props.id + '/booking-rules';
+  const [view, setView] = useState<BookingRulesView>();
+  const latest = useRef<BookingRulesView>();
+  const epoch = useRef(0);
+  const clear = () => {
+    epoch.current++;
+    latest.current = undefined;
+    setView(undefined);
+  };
+  const receive = (next: BookingRulesView) => {
+    if (
+      next.clubId !== props.id ||
+      !/^[1-9]\d*$/.test(next.version) ||
+      typeof next.canWrite !== 'boolean'
+    )
+      throw new OnboardingError(404, 'not_found');
+    const previous = latest.current;
+    if (previous?.canWrite && !next.canWrite) epoch.current++;
+    // A settings revision does not version grants; the latest read decides canWrite.
+    latest.current =
+      previous && BigInt(next.version) < BigInt(previous.version)
+        ? { ...previous, canWrite: next.canWrite }
+        : next;
+    setView(latest.current);
+  };
+  const remote = useRemote<BookingRulesView>(
+    props.credential,
+    path,
+    undefined,
+    {
+      onSuccess: receive,
+      onError: (error) => {
+        if (authorityLost(error)) clear();
+      },
+    },
+  );
+  if (!view)
+    return (
+      <Shell title="Правила бронирования" back={props.back} backLabel="Назад">
+        <RemoteState {...remote} />
+      </Shell>
+    );
+  const authorized = epoch.current;
+  return (
+    <RulesEditor
+      key={authorized}
+      {...props}
+      view={view}
+      path={path}
+      remote={remote}
+      onRefusal={() => {
+        if (epoch.current === authorized) {
+          clear();
+          remote.refresh();
+        }
+      }}
+      onSaved={(result) => {
+        if (epoch.current !== authorized) return false;
+        receive(result);
+        return true;
+      }}
+    />
+  );
+}
+
+function RulesEditor({
+  credential,
+  back,
+  reportDirty,
+  reportPending,
+  view,
+  path,
+  remote,
+  onRefusal,
+  onSaved,
+}: BookingRulesProps & {
+  view: BookingRulesView;
+  path: string;
+  remote: ReturnType<typeof useRemote<BookingRulesView>>;
+  onRefusal: () => void;
+  onSaved: (result: BookingRulesView) => boolean;
 }) {
-  const path = '/api/client/clubs/' + id + '/booking-rules';
-  const remote = useRemote<BookingRulesView>(credential, path);
-  const command = useCommand<BookingRulesView>(credential);
-  const [latest, setLatest] = useState<BookingRulesView>();
+  const command = useCommand<BookingRulesView>(credential, {
+    onError: (error) => {
+      if (authorityLost(error)) onRefusal();
+    },
+  });
   const [draft, setDraft] = useState<Draft>();
   const [invalid, setInvalid] = useState(false);
   const refresh = remote.refresh;
@@ -238,183 +293,144 @@ export default function ClubBookingRules({
   const conflict =
     command.error instanceof OnboardingError &&
     command.error.code === 'version_conflict';
-  const denied = authorityLost(command.error);
 
-  useEffect(() => {
-    const received = remote.data;
-    if (received) {
-      setLatest((current) =>
-        !current || BigInt(received.version) >= BigInt(current.version)
-          ? received
-          : current,
-      );
-    }
-  }, [remote.data]);
   useEffect(() => {
     reportPending(command.blocked);
     return () => reportPending(false);
   }, [command.blocked, reportPending]);
   useEffect(() => {
-    if (conflict || denied) refresh();
-  }, [conflict, denied, refresh]);
+    if (conflict) refresh();
+  }, [conflict, refresh]);
 
-  const view = authorityLost(remote.error) ? undefined : latest;
   const checking = remote.loading || Boolean(remote.error);
-  const stale = Boolean(draft && view && draft.version !== view.version);
+  const stale = Boolean(draft && draft.version !== view.version);
   const needsReview = draft && (conflict || stale);
   const blocked =
-    !view?.canWrite ||
-    checking ||
-    command.blocked ||
-    Boolean(needsReview) ||
-    denied;
-  const draftRules =
-    view && draft ? parseRules(draft.edits, view.rules) : undefined;
-  const exampleRules = draft && view?.canWrite ? draftRules : view?.rules;
+    !view.canWrite || checking || command.blocked || Boolean(needsReview);
+  const draftRules = draft ? parseRules(draft.edits, view.rules) : undefined;
+  const exampleRules = draft && view.canWrite ? draftRules : view.rules;
   const examples =
-    view?.nights[0] && exampleRules
+    view.nights[0] && exampleRules
       ? nightExamples(view.nights[0], exampleRules, view.timezone)
       : undefined;
-  const contradictoryDates =
-    draftRules?.arrivalMinutes != null && view
-      ? view.nights
-          .filter(
-            (night) =>
-              Date.parse(night.closesAt) - draftRules.cutoffMinutes! * 60000 >
-              Date.parse(night.opensAt) + draftRules.arrivalMinutes! * 60000,
-          )
-          .map((night) => night.businessDate)
-      : [];
 
   return (
     <Shell
       title="Правила бронирования"
-      subtitle={view ? view.name + ' · ' + view.timezone : undefined}
+      subtitle={view.name + ' · ' + view.timezone}
       back={() => {
         if (!command.blocked && leave()) back();
       }}
       backLabel="Назад"
     >
       <RemoteState {...remote} />
-      {view && (
-        <>
-          <p className="po-muted">
-            Настройки клуба. Предпросмотр рассчитан по календарю. Гостевое
-            бронирование использует свои действующие правила.
-          </p>
-          {!view.canWrite && (
-            <p className="po-notice">Правила доступны для просмотра.</p>
-          )}
-          <form
-            noValidate
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!draft || blocked) return;
-              const rules = parseRules(draft.edits, view.rules);
-              setInvalid(!rules);
-              if (rules)
-                command.run(
-                  path,
-                  { ...rules, expectedVersion: draft.version },
-                  (saved) => {
-                    setLatest(saved);
-                    setDraft(undefined);
-                    refresh();
-                  },
-                  'PATCH',
-                );
-            }}
-          >
-            {examples && (
-              <p className="po-muted">
-                Примеры для вечеринки {dateLabel(view.nights[0].businessDate)}{' '}
-                по времени клуба.
-              </p>
-            )}
-            <fieldset className="ob-fields" disabled={blocked}>
-              {fields.map((field) => (
-                <Field label={field.label} key={field.id}>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    required={field.required}
-                    aria-label={field.label}
-                    aria-describedby={field.id + '-hint'}
-                    value={
-                      (view.canWrite ? draft?.edits[field.id] : undefined) ??
-                      view.rules[field.id] ??
-                      ''
-                    }
-                    onChange={(event) => {
-                      const text = event.target.value;
-                      setInvalid(false);
-                      setDraft((current) => ({
-                        version: current?.version ?? view.version,
-                        edits: { ...current?.edits, [field.id]: text },
-                      }));
-                    }}
-                  />
-                  <small id={field.id + '-hint'}>
-                    {field.hint} {examples?.[field.id]}
-                  </small>
-                </Field>
-              ))}
-            </fieldset>
-            {invalid && (
-              <p className="po-notice" role="alert">
-                Введите целое число минут от 0 до {maxMinutes}. Для оформления
-                брони укажите минимум 1 минуту или оставьте поле пустым.
-              </p>
-            )}
-            {contradictoryDates.length > 0 && (
-              <p className="po-notice" role="status">
-                Проверьте черновик для ночей{' '}
-                {contradictoryDates.map(dateLabel).join(', ')}: приём
-                онлайн-броней закончится позже самого позднего времени приезда.
-                Измените один из сроков, если это не задумано.
-              </p>
-            )}
-            {needsReview && view.canWrite && !command.blocked && (
-              <section className="po-card ob-card" role="alert">
-                <p>
-                  Правила изменились. Сравните черновик с последними
-                  сохранёнными значениями.
-                </p>
-                <ul>
-                  {fields.map((field) => (
-                    <li key={field.id}>
-                      {field.label} · {view.rules[field.id] ?? 'не задано'}
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  className="ob-button"
-                  type="button"
-                  disabled={checking || denied || !stale}
-                  onClick={() => {
-                    setDraft({ ...draft, version: view.version });
-                    command.reset();
-                  }}
-                >
-                  Перенести мои правки
-                </button>
-              </section>
-            )}
-            {view.canWrite && (
-              <button
-                className="po-primary"
-                type="submit"
-                disabled={blocked || !draft}
-              >
-                Сохранить правила
-              </button>
-            )}
-          </form>
-          {!conflict && <CommandState command={command} refresh={refresh} />}
-          <BookingPreview view={view} />
-        </>
+      <p className="po-muted">
+        Настройки клуба. Предпросмотр рассчитан по календарю. Гостевое
+        бронирование использует свои действующие правила.
+      </p>
+      {!view.canWrite && (
+        <p className="po-notice">Правила доступны для просмотра.</p>
       )}
+      <form
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!draft || blocked) return;
+          const rules = parseRules(draft.edits, view.rules);
+          setInvalid(!rules);
+          if (rules)
+            command.run(
+              path,
+              { ...rules, expectedVersion: draft.version },
+              (saved) => {
+                if (!onSaved(saved)) return false;
+                setDraft(undefined);
+                refresh();
+              },
+              'PATCH',
+            );
+        }}
+      >
+        {examples && (
+          <p className="po-muted">
+            Примеры для вечеринки {dateLabel(view.nights[0].businessDate)} по
+            времени клуба.
+          </p>
+        )}
+        <fieldset className="ob-fields" disabled={blocked}>
+          {fields.map((field) => (
+            <Field label={field.label} key={field.id}>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                required={field.required}
+                aria-label={field.label}
+                aria-describedby={field.id + '-hint'}
+                value={
+                  (view.canWrite ? draft?.edits[field.id] : undefined) ??
+                  view.rules[field.id] ??
+                  ''
+                }
+                onChange={(event) => {
+                  const text = event.target.value;
+                  setInvalid(false);
+                  setDraft((current) => ({
+                    version: current?.version ?? view.version,
+                    edits: { ...current?.edits, [field.id]: text },
+                  }));
+                }}
+              />
+              <small id={field.id + '-hint'}>
+                {field.hint} {examples?.[field.id]}
+              </small>
+            </Field>
+          ))}
+        </fieldset>
+        {invalid && (
+          <p className="po-notice" role="alert">
+            Введите целое число минут от 0 до {maxMinutes}. Для оформления брони
+            укажите минимум 1 минуту или оставьте поле пустым.
+          </p>
+        )}
+        {needsReview && view.canWrite && !command.blocked && (
+          <section className="po-card ob-card" role="alert">
+            <p>
+              Правила изменились. Сравните черновик с последними сохранёнными
+              значениями.
+            </p>
+            <ul>
+              {fields.map((field) => (
+                <li key={field.id}>
+                  {field.label} · {view.rules[field.id] ?? 'не задано'}
+                </li>
+              ))}
+            </ul>
+            <button
+              className="ob-button"
+              type="button"
+              disabled={checking || !stale}
+              onClick={() => {
+                setDraft({ ...draft, version: view.version });
+                command.reset();
+              }}
+            >
+              Перенести мои правки
+            </button>
+          </section>
+        )}
+        {view.canWrite && (
+          <button
+            className="po-primary"
+            type="submit"
+            disabled={blocked || !draft}
+          >
+            Сохранить правила
+          </button>
+        )}
+      </form>
+      {!conflict && <CommandState command={command} refresh={refresh} />}
+      <BookingPreview view={view} />
     </Shell>
   );
 }

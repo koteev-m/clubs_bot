@@ -172,6 +172,7 @@ internal abstract class ClientLifecycleContract : OnboardingFoundationContract()
                     "restore-while-archived",
                 )
             }
+            fixture.migrate()
             val restored = lifecycle(archived, OnboardingMutation.CLIENT_RESTORE)
             assertEquals(JsonPrimitive(0L), restored["activeMembers"])
             assertTrue(fixture.rows("SELECT * FROM client_memberships").none { it.active() })

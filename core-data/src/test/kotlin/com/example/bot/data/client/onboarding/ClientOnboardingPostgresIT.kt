@@ -90,6 +90,7 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
     fun `profile read waiting on client lock cannot authorize from a revoked snapshot`() =
         runBlocking<Unit> {
             val club = create(approved())
+            fixture.migrate()
             fixture.source.connection.use { blocker ->
                 blocker.autoCommit = false
                 val sql = OnboardingSql(blocker)
@@ -178,6 +179,7 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
     fun `layout mutation waiting on client lock rechecks exact grant revocation before persistence`() =
         runBlocking<Unit> {
             val club = create(approved())
+            fixture.migrate()
             val hall =
                 fixture.repository
                     .mutate(
@@ -231,6 +233,7 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
     fun `preparation submit waiting on client lock rechecks committed configuration permission revocation`() =
         runBlocking<Unit> {
             val club = create(approved())
+            fixture.migrate()
             val started =
                 fixture.repository.mutate(
                     fixture.alice,
@@ -294,6 +297,7 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
     fun `layout and image reads waiting on client lock see committed read grant revocation`() =
         runBlocking<Unit> {
             val club = create(approved())
+            fixture.migrate()
             val hall =
                 fixture.repository
                     .mutate(
@@ -361,6 +365,7 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
         runBlocking<Unit> {
             val approved = fixture.approved(fixture.accept().id("clientId"))
             val club = fixture.mutate(fixture.alice, OnboardingMutation.APPLICATION_CREATE_CLUB, approved)
+            fixture.migrate()
             val saved =
                 fixture.mutate(
                     fixture.alice,

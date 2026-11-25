@@ -344,16 +344,14 @@ it('clears the previous club on switch and rejects substituted client IDs', asyn
   view.rerender(<ClubCabinet {...props} id="99" />);
   await screen.findByRole('heading', { name: 'Другой клуб', level: 1 });
   await act(async () => pending.resolve(reply(initial)));
-  expect(
-    screen.queryByRole('heading', { name: 'Север', level: 1 }),
-  ).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Север', level: 1 })).toBeNull();
   expect(
     screen.queryByRole('button', {
       name: 'Назначить ответственного за подготовку',
     }),
   ).toBeNull();
 });
-it('keeps owner controls separate from readonly configuration and honest missing reports', async () => {
+it('shows available settings with no owner controls or disconnected reports', async () => {
   api(() => ({
     ...initial,
     canManage: false,
@@ -361,7 +359,10 @@ it('keeps owner controls separate from readonly configuration and honest missing
     canWrite: false,
   }));
   render(<ClubCabinet {...props} />);
-  await screen.findByText('Данных пока нет.');
+  await screen.findByRole('heading', { name: 'Готовность клуба' });
+  expect(
+    screen.queryByRole('heading', { name: 'Показатели и отчёты' }),
+  ).toBeNull();
   expect(
     screen.queryByRole('button', { name: 'Принять подготовку' }),
   ).toBeNull();

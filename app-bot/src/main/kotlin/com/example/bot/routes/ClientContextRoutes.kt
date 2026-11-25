@@ -58,7 +58,12 @@ internal fun Application.clientContextRoutes(
             get("/context") {
                 call.respondClientRead {
                     val principal = call.verifiedClientIdentity()
-                    val clients = repository.context(principal.telegramUserId, principal.audience)
+                    val clients =
+                        repository.context(
+                            principal.telegramUserId,
+                            principal.audience,
+                            principal.managerAuthenticatedAt,
+                        )
                     call.respond(
                         ClientContextResponse(
                             clients.map { client ->
@@ -76,7 +81,13 @@ internal fun Application.clientContextRoutes(
                 }
                 call.respondClientRead {
                     val principal = call.verifiedClientIdentity()
-                    val club = repository.club(principal.telegramUserId, principal.audience, clubId)
+                    val club =
+                        repository.club(
+                            principal.telegramUserId,
+                            principal.audience,
+                            clubId,
+                            principal.managerAuthenticatedAt,
+                        )
                     if (club == null) {
                         call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                     } else {

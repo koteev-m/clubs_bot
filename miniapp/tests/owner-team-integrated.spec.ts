@@ -125,35 +125,12 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   baseURL,
 }) => {
   test.setTimeout(120000);
-  const platform = await identity(request, 'owner');
   const ownerCredential = await identity(request, 'recipient');
-  const name = 'Staff network ' + Date.now();
-  const issued = await api(
-    request,
-    platform,
-    '/api/platform/onboarding/invitations',
-    { clientName: name, recipientLabel: 'Synthetic owner', allowedClubs: 2 },
+  const history = await request.get(
+    '/fixture/historical-clubs/team-' + browser.browserType().name(),
   );
-  await api(
-    request,
-    ownerCredential,
-    `/api/client/invitations/${issued.id}/claim`,
-    { token: issued.token, expectedVersion: issued.version },
-  );
-  const create = (venueName: string) =>
-    api(
-      request,
-      ownerCredential,
-      `/api/client/clients/${issued.clientId}/clubs`,
-      {
-        venueName,
-        countryCode: 'RU',
-        cityId: '524901',
-        address: 'Synthetic ' + venueName,
-      },
-    );
-  const club = await create('Team A1 ' + Date.now());
-  const second = await create('Team A2 ' + Date.now());
+  expect(history.ok()).toBe(true);
+  const { clientId, clientName: name, clubs: [club, second] } = await history.json();
   const owner = await browser.newPage({
     baseURL,
     viewport: { width: 390, height: 844 },
@@ -401,6 +378,29 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   await expect(
     owner.getByRole('heading', { name: club.name, exact: true, level: 1 }),
   ).toBeVisible();
+  // Adopt this existing club after the historical role has been confirmed.
+  const platform = await identity(request, 'owner');
+  const clientPath = '/api/platform/onboarding/clients/' + clientId;
+  const details = await api(request, platform, clientPath);
+  const recipientId = String(JSON.parse(new URLSearchParams(ownerCredential).get('user')!).id);
+  const ownerMember = details.members.find((member: { telegramUserId: string }) => member.telegramUserId === recipientId);
+  await api(request, platform, clientPath + '/members/' + ownerMember.userId + '/business-owner',
+    { expectedVersion: ownerMember.version });
+  // The platform command ran in a separate session. Revalidate the visible
+  // cabinet just as Telegram does when the user returns to it.
+  await owner.evaluate(() => window.dispatchEvent(new Event('pageshow')));
+  await owner.getByRole('button', {name:'Управляющие', exact:true}).click();
+  const roster = await api(request, ownerCredential, '/api/client/clubs/' + club.id + '/managers');
+  const source = roster.legacyAssignments.find((entry: { userId: string }) => entry.userId === staff.userId);
+  expect(source.canRevoke).toBe(true);
+  const sourceRow = owner.getByRole('article').filter({ hasText: source.displayName });
+  await sourceRow.getByRole('button', {name:'Отозвать прежнее назначение'}).click();
+  await owner.getByLabel('Причина отзыва').fill('Историческое назначение завершено');
+  await owner.getByRole('button', {name:'Подтвердить отзыв'}).click();
+  await expect(sourceRow).toHaveCount(0);
+  expect((await request.get('/api/client/clubs/' + club.id + '/profile', {
+    headers: {'X-Telegram-Init-Data': employeeCredential},
+  })).status()).toBe(404);
   await owner.close();
   await employee.close();
 });

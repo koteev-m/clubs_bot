@@ -40,11 +40,13 @@ interface ClientContextRepository {
     suspend fun context(
         telegramUserId: Long,
         audience: ClientAudience,
+        managerAuthenticatedAt: java.time.Instant? = null,
     ): List<ClientContext>
 
     suspend fun club(
         telegramUserId: Long,
         audience: ClientAudience,
         clubId: Long,
+        managerAuthenticatedAt: java.time.Instant? = null,
     ): ClientClubDetail?
 }

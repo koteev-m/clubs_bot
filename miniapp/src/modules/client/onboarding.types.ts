@@ -1,8 +1,16 @@
+export const businessRoleNames = {
+  BUSINESS_OWNER: 'Владелец бизнеса',
+  NETWORK_MANAGER: 'Управляющий сети',
+  CLUB_MANAGER: 'Управляющий клуба',
+} as const;
+export type BusinessRole = keyof typeof businessRoleNames;
+export type ManagerRole = Exclude<BusinessRole, 'BUSINESS_OWNER'>;
+
 export interface Invitation {
-  acceptanceMode?: 'direct' | 'legacy' | 'staff';
+  acceptanceMode?: 'direct' | 'legacy' | 'staff' | 'manager';
   clubId?: string;
   clubName?: string;
-  role?: 'ENTRY_MANAGER' | 'MANAGER' | 'CLUB_ADMIN';
+  role?: 'ENTRY_MANAGER' | 'MANAGER' | 'CLUB_ADMIN' | ManagerRole;
   permissions?: string[];
   id: string;
   clientId: string;
@@ -28,6 +36,7 @@ export interface Club {
   permissions?: string[];
 }
 export interface ClubProfile {
+  businessRole?: BusinessRole | null;
   region?: string;
   id: string;
   clientId: string;
@@ -40,12 +49,13 @@ export interface ClubProfile {
   address: string;
   unit: string;
   version: string;
-  savedAt: string;
+  savedAt: string | null;
   canPreviewBooking?: boolean;
   permissions: string[];
   availableActions: string[];
 }
 export interface ClientSummary {
+  businessOwner?: boolean;
   archived?: boolean;
   archivedAt?: string | null;
   version?: string;
@@ -71,6 +81,14 @@ export interface PlatformClub {
   clientArchived: boolean;
 }
 export interface Membership {
+  canConfirmBusinessOwner?: boolean;
+  businessOwner?: boolean;
+  businessClubIds?: string[];
+  businessClubsForReview?: {
+    clubId: string;
+    clubName: string;
+    grants: { permission: string; userId: string; updatedAt: string }[];
+  }[];
   userId: string;
   telegramUserId: string;
   displayName: string | null;
@@ -92,6 +110,9 @@ export interface ClientDetail extends ClientSummary {
   invitations: Invitation[];
 }
 export interface OnboardingContext extends ClientSummary {
+  showClubLimit?: boolean;
+  canCreate?: boolean;
+  businessOwnerRequired?: boolean;
   permissions: string[];
   clubs: Club[];
 }

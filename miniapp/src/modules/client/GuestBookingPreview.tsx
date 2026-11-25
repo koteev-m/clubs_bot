@@ -23,7 +23,6 @@ export interface PreviewNight {
   opensAt: string;
   closesAt: string;
   cutoffAt: string;
-  arrivalBy: string | null;
   eventStatus: keyof typeof eventStatus;
 }
 
@@ -465,16 +464,14 @@ function PreviewHall({
               {(table.x === null || table.y === null) && (
                 <p>Стол пока не размещён на схеме.</p>
               )}
-              <p>
-                Прибытие по правилам клуба{' '}
-                {night?.arrivalBy ? (
-                  <time dateTime={night.arrivalBy}>
-                    {localLabel(night.arrivalBy)}
-                  </time>
-                ) : (
-                  'пока не задано для выбранной ночи.'
-                )}
-              </p>
+              {night && (
+                <p>
+                  Гость может указать приезд с{' '}
+                  <time dateTime={night.opensAt}>{localLabel(night.opensAt)}</time>{' '}
+                  до{' '}
+                  <time dateTime={night.closesAt}>{localLabel(night.closesAt)}</time>.
+                </p>
+              )}
               <label className="flex flex-col gap-1 text-sm text-gray-800">
                 <span>Количество гостей</span>
                 <input

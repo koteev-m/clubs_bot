@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
 /** Existing mounted onboarding endpoints; only metadata epochs are new, never response fields or permissions. */
-open class ClientMappingEpochRoutesDataTest : ClientOnboardingRoutesTestBase() {
+open class ClientMappingEpochRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test fun `direct clubs bump epoch once while replay and limits keep it stable`() =
         database { source ->
             withApp(source) {

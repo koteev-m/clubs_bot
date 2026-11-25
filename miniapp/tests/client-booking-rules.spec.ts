@@ -42,7 +42,6 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     canWrite: true,
     rules: {
       cutoffMinutes: 120,
-      arrivalMinutes: null,
       holdMinutes: null,
       retentionMinutes: 30,
     },
@@ -72,10 +71,7 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
             opensAt: '2026-10-24T22:00+02:00',
             closesAt: '2026-10-25T04:00+01:00',
             cutoffAt: '2026-10-25T02:30+01:00',
-            arrivalBy: '2026-10-25T02:00+01:00',
             cutoffAtOrBeforeOpen: false,
-            arrivalAtOrAfterClose: false,
-            cutoffAfterArrival: true,
           },
         ],
       };
@@ -100,11 +96,10 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     name: /Ожидание при опоздании/,
   });
   await expect(cutoff).toHaveValue('120');
-  await expect(arrival).toHaveValue('');
+  await expect(arrival).toHaveCount(0);
   await expect(hold).toHaveValue('');
   await expect(retention).toHaveValue('30');
   await cutoff.fill('90');
-  await arrival.fill('300');
   await hold.fill('12');
   await retention.fill('45');
   expect(
@@ -125,7 +120,6 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
   expect(patches[0].body).toEqual({
     expectedVersion: '1',
     cutoffMinutes: 90,
-    arrivalMinutes: 300,
     holdMinutes: 12,
     retentionMinutes: 45,
   });
@@ -144,9 +138,32 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
   await expect(
     page.locator('time[datetime="2026-10-25T02:30+01:00"]'),
   ).toBeVisible();
-  await expect(
-    page.getByText(
-      /Приём онлайн-броней заканчивается позже самого позднего времени/,
-    ),
-  ).toBeVisible();
+  await expect(page.getByText(/Гость указывает ориентировочное время/)).toBeVisible();
+});
+
+test('clears saved booking rules and edits through a denied read and a failed reload on mobile', async ({page}) => {
+  let status = 200;
+  let hold = 17;
+  await page.route('**/api/client/clubs/*/booking-rules', (route) =>
+    route.fulfill({status, json: status === 200 ? {
+      clubId: club, name:'Клуб', timezone:'UTC', canWrite:true, version:'2',
+      rules:{cutoffMinutes:60, holdMinutes:hold, retentionMinutes:30}, nights:[], invalidDates:[],
+    } : {code:status === 404 ? 'not_found' : 'internal_error'}}),
+  );
+  await page.goto(entry.replace('screen=settings', 'screen=booking-rules'));
+  const input = page.getByRole('textbox', {name:/Время на оформление/});
+  await expect(input).toHaveValue('17');
+  await input.fill('77');
+  status = 404;
+  await page.evaluate(() => window.dispatchEvent(new Event('pageshow')));
+  await expect(page.getByText(/Доступ утрачен/)).toBeVisible();
+  await expect(input).toHaveCount(0);
+  status = 503;
+  await page.getByRole('button', {name:'Повторить загрузку'}).click();
+  await expect(page.getByText(/Не удалось загрузить данные/)).toBeVisible();
+  await expect(input).toHaveCount(0);
+  hold = 29;
+  status = 200;
+  await page.getByRole('button', {name:'Повторить загрузку'}).click();
+  await expect(input).toHaveValue('29');
 });

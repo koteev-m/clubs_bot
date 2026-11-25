@@ -460,16 +460,24 @@ internal class ApplicationOperations(
                 "draft" -> listOf("update", "submit", "cancel")
                 "submitted", "reviewing" -> listOf("cancel")
                 "approved" ->
-                    if (consumption(application) == null) {
-                        listOf("createClub")
-                    } else if (ClubOnboardingOperations(session).accessibleClub(application.long("id")) != null) {
-                        listOf("openClub")
-                    } else {
-                        emptyList()
-                    }
+                    approvedClientActions(application)
                 else -> emptyList()
             }
         }
+
+    private fun approvedClientActions(application: DbRow): List<String> {
+        if (ClubOnboardingOperations(session).accessibleClub(application.long("id")) != null) return listOf("openClub")
+        val consumed =
+            consumption(application) != null ||
+                sql.row(
+                    "SELECT club_id FROM client_direct_club_profiles WHERE application_id=?",
+                    application.long("id"),
+                ) !=
+                null
+        val owner = session.isBusinessOwner(application.long("client_id"), application.long("author_user_id"))
+        if (owner) session.requireBusinessIdentity()
+        return if (!consumed && (!sql.businessOwnershipSchemaPresent() || owner)) listOf("createClub") else emptyList()
+    }
 
     private fun consumption(application: DbRow): DbRow? =
         sql.row("SELECT club_id FROM client_club_onboarding WHERE application_id=?", application.long("id"))

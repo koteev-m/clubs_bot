@@ -80,9 +80,19 @@ async function createClub(
     .click();
   const club = await (await result).json();
   await expect(
-    page.getByRole('heading', { name: 'Кто будет настраивать клуб?' }),
+    page.getByRole('heading', {
+      name,
+      exact: true,
+    }),
   ).toBeVisible();
   return club as { id: string; clientId: string; name: string };
+}
+async function expectCreationDenied(request: APIRequestContext, credential: string, clientId: string) {
+  const denied = await request.post('/api/client/clients/' + clientId + '/clubs', {
+    headers: { 'X-Telegram-Init-Data': credential, 'Idempotency-Key': randomUUID() },
+    data: { venueName: 'Без подтверждения', countryCode: 'RU', cityId: '524901', address: 'Тестовая улица, 5' },
+  });
+  expect(denied.status()).toBe(404);
 }
 async function shot(page: Page, name: string) {
   expect(
@@ -100,28 +110,18 @@ async function shot(page: Page, name: string) {
     fullPage: true,
   });
 }
-test('private creation self setup and delegated preparation survive reopen review return acceptance and revoke', async ({
+test('upgraded clubs keep independent setup and preparation access, while creating another club requires owner confirmation', async ({
   browser,
   request,
   baseURL,
 }) => {
   test.setTimeout(180000);
-  const platform = await identity(request, 'owner');
   const creator = await identity(request, 'recipient');
-  const issued = await api(
-    request,
-    platform,
-    '/api/platform/onboarding/invitations',
-    {
-      clientName: 'Клубы Севера · ' + randomUUID().slice(0, 6),
-      recipientLabel: 'Владелец',
-      allowedClubs: 3,
-    },
+  const history = await request.get(
+    '/fixture/historical-clubs/preparation-' + browser.browserType().name(),
   );
-  await api(request, creator, `/api/client/invitations/${issued.id}/claim`, {
-    token: issued.token,
-    expectedVersion: issued.version,
-  });
+  expect(history.ok()).toBe(true);
+  const { clientId, clubs: [personal, club] } = await history.json();
   const owner = await browser.newPage({
     baseURL,
     viewport: { width: 320, height: 740 },
@@ -134,7 +134,12 @@ test('private creation self setup and delegated preparation survive reopen revie
     isMobile: true,
     hasTouch: true,
   });
-  const personal = await createClub(owner, creator, issued.clientId, 'Север');
+  await open(owner, creator, '/app?mode=client&screen=client-space&resource=' + clientId);
+  await expect(owner.getByText(/Для создания нового заведения/)).toBeVisible();
+  await expect(owner.getByRole('button', { name: 'Создать заведение' })).toHaveCount(0);
+  await expect(owner.getByRole('button', { name: new RegExp(personal.name) })).toBeVisible();
+  await expectCreationDenied(request, creator, clientId);
+  await open(owner, creator, '/app?mode=client&screen=preparation-choice&resource=' + personal.id);
   await telegramTheme(owner, 'light');
   await shot(owner, 'creation-choice-light-320.png');
   await owner
@@ -181,12 +186,7 @@ test('private creation self setup and delegated preparation survive reopen revie
     ).published,
   ).toBe(false);
 
-  const club = await createClub(
-    owner,
-    creator,
-    issued.clientId,
-    'Полярная ночь',
-  );
+  await open(owner, creator, '/app?mode=client&screen=preparation-choice&resource=' + club.id);
   await owner
     .getByRole('button', {
       name: 'Назначить ответственного за подготовку',
@@ -414,6 +414,12 @@ test('private creation self setup and delegated preparation survive reopen revie
   ).toBeVisible();
   await expect(
     owner.getByRole('heading', { name: 'Показатели и отчёты', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    owner.getByRole('button', {
+      name: 'Открыть проверку готовности',
+      exact: true,
+    }),
   ).toBeVisible();
   expect(
     await contrast(owner.locator('.cm-status').first()),
@@ -421,13 +427,14 @@ test('private creation self setup and delegated preparation survive reopen revie
   await owner.setViewportSize({ width: 390, height: 844 });
   await telegramTheme(owner, 'dark');
   await shot(owner, 'owner-accepted-dark-390.png');
-  await owner.getByRole('heading', { name: 'Показатели и отчёты', exact: true }).scrollIntoViewIfNeeded();
-  await owner.screenshot({ path: test.info().outputPath('owner-results-dark-390.png'), fullPage: true });
-  const team = await api(
-    request,
-    creator,
-    `/api/client/clubs/${club.id}/team`,
-  );
+  await owner
+    .getByRole('heading', { name: 'Готовность клуба', exact: true })
+    .scrollIntoViewIfNeeded();
+  await owner.screenshot({
+    path: test.info().outputPath('owner-readiness-dark-390.png'),
+    fullPage: true,
+  });
+  const team = await api(request, creator, `/api/client/clubs/${club.id}/team`);
   const member = team.members.find(
     (item: { owner: boolean; role: string }) =>
       !item.owner && item.role === 'CLUB_ADMIN',
@@ -474,30 +481,12 @@ test('packaged no-op unknown resolves a durable receipt without mutation or a ca
   page,
   request,
 }) => {
-  const platform = await identity(request, 'owner');
   const creator = await identity(request, 'recipient');
-  const invitation = await api(
-    request,
-    platform,
-    '/api/platform/onboarding/invitations',
-    {
-      clientName: 'Receipt recovery ' + randomUUID().slice(0, 6),
-      recipientLabel: 'Владелец',
-      allowedClubs: 1,
-    },
+  const history = await request.get(
+    '/fixture/historical-clubs/receipt-' + page.context().browser()!.browserType().name(),
   );
-  await api(
-    request,
-    creator,
-    `/api/client/invitations/${invitation.id}/claim`,
-    { token: invitation.token, expectedVersion: invitation.version },
-  );
-  const club = await createClub(
-    page,
-    creator,
-    invitation.clientId,
-    'Проверка результата',
-  );
+  expect(history.ok()).toBe(true);
+  const { clubs: [club] } = await history.json();
   const path = `/api/client/clubs/${club.id}/calendar`;
   const before = await api(request, creator, path);
   const writes: { body: string | null; key: string | undefined }[] = [];
@@ -561,4 +550,192 @@ test('packaged no-op unknown resolves a durable receipt without mutation or a ca
   await expect(
     page.getByRole('heading', { name: 'Календарь клуба', exact: true }),
   ).toHaveCount(0);
+});
+
+test('verified business owner assigns a network manager who assigns and revokes a club manager', async ({
+  browser,
+  request,
+  baseURL,
+}) => {
+  test.setTimeout(120_000);
+  const platform = await identity(request, 'owner');
+  const owner = await identity(request, 'recipient');
+  const issued = await api(
+    request,
+    platform,
+    '/api/platform/onboarding/invitations',
+    {
+      clientName: 'Бизнес ' + randomUUID().slice(0, 6),
+      recipientLabel: 'Владелец бизнеса',
+      allowedClubs: 2,
+    },
+  );
+  await api(request, owner, '/api/client/invitations/' + issued.id + '/claim', {
+    token: issued.token,
+    expectedVersion: issued.version,
+  });
+  await expectCreationDenied(request, owner, issued.clientId);
+  const device = {
+    baseURL,
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  };
+  const issuer = await browser.newPage(device);
+  const network = await browser.newPage(device);
+  const manager = await browser.newPage(device);
+  issuer.on('dialog', (dialog) => dialog.accept());
+  await open(
+    issuer,
+    platform,
+    '/app?mode=platform-owner&screen=client&resource=' + issued.clientId,
+  );
+  await issuer
+    .getByRole('button', { name: 'Подтвердить владельца бизнеса' })
+    .click();
+  await expect(
+    issuer.getByText('Владелец бизнеса', { exact: true }).first(),
+  ).toBeVisible();
+  const club = await createClub(
+    issuer,
+    owner,
+    issued.clientId,
+    'Первая площадка',
+  );
+  const other = await createClub(
+    issuer,
+    owner,
+    issued.clientId,
+    'Вторая площадка',
+  );
+  const clubUrl = '/app?mode=client&screen=club&resource=' + club.id;
+  const profileUrl = '/api/client/clubs/' + club.id + '/profile';
+  await open(issuer, owner, clubUrl);
+  await expect(
+    issuer.getByText('Владелец бизнеса', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    issuer.getByRole('button', {
+      name: 'Назначить ответственного за подготовку',
+    }),
+  ).toHaveCount(0);
+  await issuer.getByRole('button', { name: 'Сохранённые настройки' }).click();
+  await issuer.getByRole('button', { name: /Профиль Название/ }).click();
+  await expect(
+    issuer.getByRole('button', { name: 'Сохранить профиль' }),
+  ).toHaveCount(0);
+  await expect(issuer.getByLabel('Описание клуба')).toBeDisabled();
+  const participate = async (
+    sender: Page,
+    participant: Page,
+    persona: string,
+    role: string,
+  ) => {
+    await sender
+      .getByRole('button', { name: 'Управляющие', exact: true })
+      .click();
+    await sender.getByLabel('Имя получателя').fill(persona);
+    await sender.getByLabel('Роль управляющего').selectOption(role);
+    await sender.getByRole('button', { name: 'Создать приглашение' }).click();
+    const link = await sender
+      .getByLabel('Ссылка для управляющего')
+      .inputValue();
+    const start = new URL(link).searchParams.get('startapp')!;
+    expect(start).toMatch(/^cm_[A-Za-z0-9_-]{43}$/);
+    const credential = await identity(request, persona, start);
+    await open(participant, credential, '/app');
+    await participant
+      .getByRole('button', { name: 'Подтвердить Telegram-аккаунт' })
+      .click();
+    await expect(
+      participant.getByRole('heading', {
+        name: 'Ожидаем подтверждения назначения',
+      }),
+    ).toBeVisible();
+    const code = await participant.locator('.ob-code').innerText();
+    expect(
+      (
+        await request.get(profileUrl, {
+          headers: { 'X-Telegram-Init-Data': credential },
+        })
+      ).status(),
+    ).toBe(404);
+    await sender.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await sender
+      .getByRole('article')
+      .filter({ hasText: persona })
+      .getByRole('button', { name: 'Подтвердить назначение' })
+      .click();
+    await sender.getByLabel('Код из Telegram получателя').fill(code);
+    await sender
+      .getByRole('button', { name: 'Назначить управляющего', exact: true })
+      .click();
+    await expect(sender.getByText('Сохранено', { exact: true })).toBeVisible();
+    await participant.getByRole('button', { name: 'Обновить статус' }).click();
+    await expect(
+      participant.getByRole('button', { name: 'Открыть кабинет' }),
+    ).toBeVisible();
+    const fresh = await identity(request, persona);
+    await participant.getByRole('button', { name: 'Открыть кабинет' }).click();
+    await open(participant, fresh, clubUrl);
+    return fresh;
+  };
+  await open(issuer, owner, clubUrl);
+  const networkId = await participate(
+    issuer,
+    network,
+    'staff',
+    'NETWORK_MANAGER',
+  );
+  await expect(
+    network.getByText('Управляющий сети', { exact: true }),
+  ).toBeVisible();
+  const managerId = await participate(
+    network,
+    manager,
+    'foreign',
+    'CLUB_MANAGER',
+  );
+  await expect(
+    manager.getByText('Управляющий клуба', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    manager.getByRole('button', { name: 'Управляющие', exact: true }),
+  ).toHaveCount(0);
+  for (const credential of [networkId, managerId]) {
+    expect(
+      (
+        await request.get('/api/client/clubs/' + other.id + '/profile', {
+          headers: { 'X-Telegram-Init-Data': credential },
+        })
+      ).status(),
+    ).toBe(404);
+  }
+  await manager.getByRole('button', { name: /Профиль Название/ }).click();
+  await manager
+    .getByLabel('Описание клуба')
+    .fill('Сохранено управляющим клуба');
+  await manager.getByRole('button', { name: 'Сохранить профиль' }).click();
+  await expect(manager.getByText('Сохранено', { exact: true })).toBeVisible();
+  expect((await api(request, owner, profileUrl)).description).toBe(
+    'Сохранено управляющим клуба',
+  );
+  await network.getByRole('button', { name: 'Отозвать назначение' }).click();
+  await network.getByLabel('Причина отзыва').fill('Передача смены');
+  await network.getByRole('button', { name: 'Подтвердить отзыв' }).click();
+  await expect(
+    network.getByText('Управляющие пока не назначены.'),
+  ).toBeVisible();
+  await manager.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(
+    manager.getByRole('button', { name: 'Сохранить профиль' }),
+  ).toHaveCount(0);
+  expect(
+    (
+      await request.get(profileUrl, {
+        headers: { 'X-Telegram-Init-Data': managerId },
+      })
+    ).status(),
+  ).toBe(404);
+  await Promise.all([issuer.close(), network.close(), manager.close()]);
 });
