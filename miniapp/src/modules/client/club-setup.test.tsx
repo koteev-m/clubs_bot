@@ -523,11 +523,10 @@ it('final review regression: timezone update must invalidate prior verified even
       timezone: profile.timezone,
     },
   };
-  let saved = false;
+  let changed = false;
   const fetch = vi
     .spyOn(globalThis, 'fetch')
-    .mockImplementation(async (path, options) => {
-      if (options?.method === 'PATCH') saved = true;
+    .mockImplementation(async (path) => {
       const key = String(path).split('/').at(-1) as keyof typeof before;
       const nextProfile = {
         ...profile,
@@ -535,9 +534,9 @@ it('final review regression: timezone update must invalidate prior verified even
         version: '2',
       };
       const data =
-        saved && key === 'profile'
+        changed && key === 'profile'
           ? nextProfile
-          : saved && key === 'booking-preview'
+          : changed && key === 'booking-preview'
             ? {
                 ...previewWith([
                   { ...verified(night), eventStatus: 'INVALID_LINK' },
@@ -552,12 +551,12 @@ it('final review regression: timezone update must invalidate prior verified even
   fireEvent.click(
     screen.getByRole('button', { name: 'Редактировать профиль' }),
   );
-  await screen.findByLabelText('Часовой пояс IANA');
-  fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
-    target: { value: 'Asia/Tokyo' },
-  });
-  fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
-  await screen.findByText('Сохранено');
+  await screen.findByText(/UTC\+03:00/);
+  changed = true;
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Загрузить актуальный профиль' }),
+  );
+  await screen.findByText(/UTC\+09:00/);
   window.history.replaceState(
     {},
     '',
@@ -600,9 +599,8 @@ it('invalidates shifted night intervals until all timezone reads recover and ver
     opensAt: '2026-11-08T00:00+09:00',
     closesAt: '2026-11-08T12:00+09:00',
   };
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (path) => {
     const key = String(path).split('/').at(-1)!;
-    if (options?.method === 'PATCH') changed = true;
     if (key === 'profile')
       return Response.json(
         changed
@@ -648,12 +646,12 @@ it('invalidates shifted night intervals until all timezone reads recover and ver
   fireEvent.click(
     screen.getByRole('button', { name: 'Редактировать профиль' }),
   );
-  await screen.findByLabelText('Часовой пояс IANA');
-  fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
-    target: { value: 'Asia/Tokyo' },
-  });
-  fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
-  await screen.findByText('Сохранено');
+  await screen.findByText(/UTC\+03:00/);
+  changed = true;
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Загрузить актуальный профиль' }),
+  );
+  await screen.findByText(/UTC\+09:00/);
   window.history.replaceState(
     {},
     '',

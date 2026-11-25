@@ -54,8 +54,7 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path.endsWith('/profile')) return route.fulfill({ json: profile });
-    if (!path.endsWith('/booking-rules'))
-      return route.fulfill({ status: 404 });
+    if (!path.endsWith('/booking-rules')) return route.fulfill({ status: 404 });
     if (request.method() === 'GET') return route.fulfill({ json: view });
     const { expectedVersion, ...rules } = request.postDataJSON();
     patches.push({
@@ -89,16 +88,16 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     page.getByRole('button', { name: /Правила бронирования/ }).click();
   await open();
   const cutoff = page.getByRole('textbox', {
-    name: /Прекращение онлайн-бронирования/,
+    name: /Приём онлайн-броней/,
   });
   const arrival = page.getByRole('textbox', {
-    name: /Предельное время прибытия/,
+    name: /Самый поздний приезд/,
   });
   const hold = page.getByRole('textbox', {
     name: /Время на оформление/,
   });
   const retention = page.getByRole('textbox', {
-    name: /Ожидание гостя после/,
+    name: /Ожидание при опоздании/,
   });
   await expect(cutoff).toHaveValue('120');
   await expect(arrival).toHaveValue('');
@@ -118,9 +117,7 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
   await expect(page.getByText('Сохранено', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Назад', exact: true }).click();
   await expect(hold).toHaveValue('12');
-  await page
-    .getByRole('button', { name: 'Повторить ту же операцию' })
-    .click();
+  await page.getByRole('button', { name: 'Повторить ту же операцию' }).click();
   await expect(page.getByText('Сохранено', { exact: true })).toBeVisible();
   expect(patches).toHaveLength(2);
   expect(patches[0].key).toBeTruthy();
@@ -136,13 +133,20 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
   await open();
   await expect(hold).toHaveValue('12');
   await expect(retention).toHaveValue('45');
-  await page.getByText('Ночь 2026-10-24').click();
+  await expect(
+    page.getByText(/Примеры для вечеринки 24.10.2026/),
+  ).toBeVisible();
+  await expect(page.getByText(/Если выбрать стол/)).toContainText('21:12');
+  await expect(
+    page.getByText(/Если гость указал приезд к открытию/),
+  ).toContainText('22:45');
+  await page.getByText('Вечеринка 24.10.2026').click();
   await expect(
     page.locator('time[datetime="2026-10-25T02:30+01:00"]'),
   ).toBeVisible();
   await expect(
     page.getByText(
-      /Проверьте правила: онлайн-бронирование остаётся открытым/,
+      /Приём онлайн-броней заканчивается позже самого позднего времени/,
     ),
   ).toBeVisible();
 });

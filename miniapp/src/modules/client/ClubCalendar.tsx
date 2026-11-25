@@ -61,6 +61,43 @@ function NightInterval({ night }: { night: CalendarNight }) {
   );
 }
 
+function ConflictInterval({
+  conflict,
+}: {
+  conflict: ReturnType<typeof calendarPlan>['nightConflicts'][number];
+}) {
+  const [fromDay, fromTime] = conflict.from.split('T');
+  const [untilDay, untilTime] = conflict.until.split('T');
+  // On a clock-change night keep both offsets, even within one wall date.
+  const offset = (time: string) => time.match(/Z$|[+-].*$/)?.[0];
+  const sameDay =
+    fromDay === untilDay && offset(fromTime) === offset(untilTime);
+  const clockTime = (time: string) =>
+    time.split(/[Z+-]/)[0].replace(/^(\d\d:\d\d):00$/, '$1');
+  return (
+    <p>
+      {nightTitle(conflict.firstDate)} ({dateLabel(conflict.firstDate)}) и{' '}
+      {nightTitle(conflict.secondDate).toLocaleLowerCase('ru')} (
+      {dateLabel(conflict.secondDate)}).
+      <br />
+      {sameDay ? (
+        <>
+          {dateLabel(fromDay)} с{' '}
+          <time dateTime={conflict.from}>{clockTime(fromTime)}</time> до{' '}
+          <time dateTime={conflict.until}>{clockTime(untilTime)}</time> по
+          времени клуба.
+        </>
+      ) : (
+        <>
+          <time dateTime={conflict.from}>{localLabel(conflict.from)}</time>
+          {' — '}
+          <time dateTime={conflict.until}>{localLabel(conflict.until)}</time>.
+        </>
+      )}
+    </p>
+  );
+}
+
 function CalendarPreview({
   view,
   heading,
@@ -314,6 +351,14 @@ function ClubCalendarSession({
     view &&
     JSON.stringify([confirmation, calendarSnapshotKey(view), plan.identity]);
   const overlapConfirmed = Boolean(planKey && overlapConsent === planKey);
+  const canConfirm =
+    plan &&
+    !blocked &&
+    !writeDenied &&
+    !plan.gaps.length &&
+    !plan.invalidDates.length &&
+    !plan.nightConflicts.length &&
+    (!plan.overlaps.length || overlapConfirmed);
   // Also runs synchronously in the dispatch handler: a GET callback can update
   // confirmed.current before React commits the next render/effect.
   const dispatchPlanKey = (
@@ -337,7 +382,8 @@ function ClubCalendarSession({
       if (
         !checked.complete ||
         checked.gaps.length ||
-        checked.invalidDates.length
+        checked.invalidDates.length ||
+        checked.nightConflicts.length
       )
         return undefined;
       return JSON.stringify([
@@ -699,6 +745,29 @@ function ClubCalendarSession({
                   ? 'Проверьте новое расписание'
                   : 'Проверьте формирование ночей'}
               </h2>
+              {plan && plan.nightConflicts.length > 0 && (
+                <div className="po-notice cc-rules" role="alert">
+                  <strong>Вечеринки пересекаются</strong>
+                  <p>
+                    Измените день или время открытия либо закрытия одной из
+                    вечеринок.
+                  </p>
+                  <ConflictInterval conflict={plan.nightConflicts[0]} />
+                  {plan.nightConflicts.length > 1 && (
+                    <details>
+                      <summary>
+                        Другие пересечения ({plan.nightConflicts.length - 1})
+                      </summary>
+                      {plan.nightConflicts.slice(1).map((conflict) => (
+                        <ConflictInterval
+                          key={conflict.firstDate + '/' + conflict.secondDate}
+                          conflict={conflict}
+                        />
+                      ))}
+                    </details>
+                  )}
+                </div>
+              )}
               <p>
                 {confirmation === 'save'
                   ? `Изменятся правила: дни недели — ${changes.weekly.length}, особые даты — ${changes.exceptions.length + changes.holidays.length}. Затронутые ночи будут согласованы с ними.`
@@ -820,26 +889,9 @@ function ClubCalendarSession({
                 <button
                   type="button"
                   className="po-primary"
-                  disabled={
-                    blocked ||
-                    writeDenied ||
-                    !plan ||
-                    Boolean(
-                      plan.gaps.length ||
-                        plan.invalidDates.length ||
-                        (plan.overlaps.length && !overlapConfirmed),
-                    )
-                  }
+                  disabled={!canConfirm}
                   onClick={() => {
-                    if (
-                      blocked ||
-                      writeDenied ||
-                      !plan ||
-                      plan.gaps.length ||
-                      plan.invalidDates.length ||
-                      (plan.overlaps.length && !overlapConfirmed)
-                    )
-                      return;
+                    if (!canConfirm) return;
                     const source = confirmed.current;
                     const currentKey =
                       source && dispatchPlanKey(source, draft, confirmation);

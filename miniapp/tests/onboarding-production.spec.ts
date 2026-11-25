@@ -78,6 +78,12 @@ test('mobile profile preserves timezone, refreshes the club name on Back and kee
       }
       return route.fulfill({ json: stored });
     }
+    // The profile remains accessible while adjacent sections are unavailable.
+    // A 404 on any of these club reads would revoke the whole cabinet context.
+    if (
+      route.request().method() === 'GET' &&
+      /^\/api\/client\/clubs\/100\/(preparation|calendar|layout|booking-rules)$/.test(path)
+    ) return route.fulfill({ status: 503, json: { code: 'service_unavailable' } });
     if (path.endsWith('/context'))
       return route.fulfill({
         json: {
@@ -120,12 +126,7 @@ test('mobile profile preserves timezone, refreshes the club name on Back and kee
     page.getByText('Организация · клиентское пространство'),
   ).toBeVisible();
   await page.getByRole('button', { name: /Бедолаги/ }).click();
-  await expect(page.getByText('Организация: Микс')).toBeVisible();
-  await expect(page.getByText('Moscow', { exact: true })).toHaveCount(1);
-  await expect(page.locator('dt', { hasText: 'Регион' })).toHaveCount(0);
-  await expect(page.locator('dt', { hasText: 'Помещение' })).toHaveCount(0);
-  await expect(page.getByText(/UTC\+03:00/)).toBeVisible();
-  await expect(page.getByLabel('Часовой пояс IANA')).toBeHidden();
+  await page.getByRole('button', { name: 'Открыть проверку готовности' }).click();
   await expect(
     page.getByText('Отдельный бот клуба', { exact: true }),
   ).toBeVisible();
@@ -133,6 +134,19 @@ test('mobile profile preserves timezone, refreshes the club name on Back and kee
     page.getByText(/Night Concierge открывает доступ к платформе/),
   ).toBeVisible();
   await expect(page.getByRole('button', { name: /Подключ/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Назад к клубу' }).click();
+  const openProfile = async () => {
+    await page.getByRole('button', { name: 'Перейти к настройкам' }).click();
+    await page.getByRole('button', { name: /^Профиль Название/ }).click();
+  };
+  await openProfile();
+  await expect(page.getByText('Организация: Микс')).toBeVisible();
+  await expect(page.getByText('Moscow', { exact: true })).toHaveCount(1);
+  await expect(page.locator('dt', { hasText: 'Регион' })).toHaveCount(0);
+  await expect(page.locator('dt', { hasText: 'Помещение' })).toHaveCount(0);
+  await expect(page.getByText(/UTC\+03:00/)).toBeVisible();
+  await expect(page.getByLabel('Часовой пояс IANA')).toHaveCount(0);
+  await expect(page.getByText('Исправить часовой пояс')).toHaveCount(0);
   await page.getByLabel('Отображаемое название заведения').fill('Микс клуб');
   await page.getByRole('button', { name: 'Сохранить профиль' }).click();
   await expect(page.getByText('Сохранено', { exact: true })).toBeVisible();
@@ -156,6 +170,8 @@ test('mobile profile preserves timezone, refreshes the club name on Back and kee
       ),
     ).toBe(true);
   }
+  await page.getByRole('button', { name: 'Настройки клуба', exact: true }).click();
+  await page.getByRole('button', { name: 'Назад к клубу' }).click();
   await page.getByRole('button', { name: 'Организация и другие заведения', exact: true }).click();
   await expect(page).toHaveURL(/screen=client-space&resource=20/);
   await expect(page.getByRole('button', { name: /Микс клуб/ })).toBeVisible();
@@ -170,6 +186,7 @@ test('mobile profile preserves timezone, refreshes the club name on Back and kee
     false,
   );
   await page.getByRole('button', { name: /Микс клуб/ }).click();
+  await openProfile();
   await expect(page.getByLabel('Отображаемое название заведения')).toHaveValue(
     'Микс клуб',
   );
@@ -188,6 +205,9 @@ test('mobile profile preserves timezone, refreshes the club name on Back and kee
   );
   await page.getByLabel('Описание клуба').fill('');
   await nativeBack();
+  await expect(page.getByRole('heading', { name: 'Настройки клуба', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Назад к клубу' }).click();
+  await page.getByRole('button', { name: 'Организация и другие заведения' }).click();
   await expect(page.getByRole('button', { name: /Микс клуб/ })).toBeVisible();
   await page.getByRole('button', { name: /Микс клуб/ }).click();
   await page.goBack();
@@ -339,21 +359,19 @@ test('private profile validation, version conflict, access loss and foreground c
         : clubProfile,
     });
   });
-  await page.goto('/app?mode=client&screen=club&resource=100' + ordinaryHash);
-  await page.getByText('Исправить часовой пояс', { exact: true }).click();
-  await page.getByLabel('Часовой пояс IANA').fill('Unknown/Synthetic');
+  await page.goto('/app?mode=client&screen=profile&resource=100' + ordinaryHash);
+  const name = page.getByLabel('Отображаемое название заведения');
+  await name.fill(' ');
   await page.getByRole('button', { name: 'Сохранить профиль' }).click();
-  await expect(page.getByText(/Укажите часовой пояс IANA/)).toBeVisible();
+  await expect(page.getByText(/Укажите название клуба/)).toBeVisible();
   expect(patches).toBe(0);
-  await page.getByLabel('Часовой пояс IANA').fill('Europe/Paris');
+  await name.fill('Unsaved name');
   await page.getByRole('button', { name: 'Сохранить профиль' }).click();
   await expect(page.getByText(/Запись уже изменена/)).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Concurrent profile', exact: true }),
   ).toBeVisible();
-  await expect(page.getByLabel('Часовой пояс IANA')).toHaveValue(
-    'Europe/Paris',
-  );
+  await expect(name).toHaveValue('Unsaved name');
   await expect(
     page.getByRole('button', { name: 'Сохранить профиль' }),
   ).toBeDisabled();
@@ -361,9 +379,7 @@ test('private profile validation, version conflict, access loss and foreground c
   await page
     .getByRole('button', { name: 'Загрузить актуальный профиль' })
     .click();
-  await expect(page.getByLabel('Часовой пояс IANA')).toHaveValue(
-    'Europe/Moscow',
-  );
+  await expect(name).toHaveValue('Concurrent profile');
   revoked = true;
   await page.evaluate(() => window.dispatchEvent(new Event('pageshow')));
   await expect(page.getByText(/Доступ утрачен/)).toBeVisible();

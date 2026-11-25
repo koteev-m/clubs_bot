@@ -7,6 +7,7 @@ import {
   Hours,
   nextWeekday,
   shiftDate,
+  weekday,
   Rule,
   Rules,
 } from './calendar';
@@ -20,6 +21,16 @@ const weekdays = [
   'Суббота',
   'Воскресенье',
 ];
+
+const shortDate = new Intl.DateTimeFormat('ru-RU', {
+  weekday: 'short',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+const dayOption = (date: string) =>
+  shortDate.format(new Date(date + 'T00:00:00Z'));
 
 function NightHours({
   hours,
@@ -36,42 +47,41 @@ function NightHours({
     hours.open && hours.close && hours.startNextDay !== null
       ? describeNight(businessDate, hours)
       : null;
+  const followingDate = shiftDate(businessDate, 1);
+  const openingDate = hours.startNextDay ? followingDate : businessDate;
   return (
     <>
-      <Field label="День открытия">
-        <select
-          aria-label="День открытия"
-          value={
-            hours.startNextDay === null
-              ? 'schedule'
-              : hours.startNextDay
-                ? 'next'
-                : 'same'
-          }
-          onChange={(event) =>
-            update({
-              ...hours,
-              startNextDay:
-                event.target.value === 'schedule'
-                  ? null
-                  : event.target.value === 'next',
-            })
-          }
-        >
-          {(inherited || hours.startNextDay === null) && (
-            <option value="schedule">По расписанию</option>
-          )}
-          <option value="same">
-            День вечеринки · {weekdayName(businessDate)},{' '}
-            {dateLabel(businessDate)}
-          </option>
-          <option value="next">
-            Следующий день · {weekdayName(shiftDate(businessDate, 1))},{' '}
-            {dateLabel(shiftDate(businessDate, 1))}
-          </option>
-        </select>
-      </Field>
+      <p>
+        Дата вечеринки — {weekday(businessDate)}, {dateLabel(businessDate)}.
+      </p>
       <div className="cc-times">
+        <Field label="День открытия">
+          <select
+            aria-label="День открытия"
+            value={
+              hours.startNextDay === null
+                ? 'schedule'
+                : hours.startNextDay
+                  ? 'next'
+                  : 'same'
+            }
+            onChange={(event) =>
+              update({
+                ...hours,
+                startNextDay:
+                  event.target.value === 'schedule'
+                    ? null
+                    : event.target.value === 'next',
+              })
+            }
+          >
+            {(inherited || hours.startNextDay === null) && (
+              <option value="schedule">По расписанию</option>
+            )}
+            <option value="same">{dayOption(businessDate)}</option>
+            <option value="next">{dayOption(followingDate)}</option>
+          </select>
+        </Field>
         <Field label="Время открытия">
           <input
             type="time"
@@ -79,6 +89,28 @@ function NightHours({
             value={hours.open ?? ''}
             onChange={(event) => update({ ...hours, open: event.target.value })}
           />
+        </Field>
+      </div>
+      <div className="cc-times">
+        <Field label="День закрытия">
+          <select
+            aria-label="День закрытия"
+            value={hours.nextDay ? 'next' : 'same'}
+            onChange={(event) =>
+              update({ ...hours, nextDay: event.target.value === 'next' })
+            }
+          >
+            <option value="same">
+              {hours.startNextDay === null
+                ? 'В день открытия'
+                : dayOption(openingDate)}
+            </option>
+            <option value="next">
+              {hours.startNextDay === null
+                ? 'На следующий день'
+                : dayOption(shiftDate(openingDate, 1))}
+            </option>
+          </select>
         </Field>
         <Field label="Время закрытия">
           <input
@@ -91,32 +123,9 @@ function NightHours({
           />
         </Field>
       </div>
-      <Field label="День закрытия">
-        <select
-          aria-label="День закрытия"
-          value={hours.nextDay ? 'next' : 'same'}
-          onChange={(event) =>
-            update({ ...hours, nextDay: event.target.value === 'next' })
-          }
-        >
-          <option value="same">
-            {weekdayName(shiftDate(businessDate, hours.startNextDay ? 1 : 0))},{' '}
-            {dateLabel(shiftDate(businessDate, hours.startNextDay ? 1 : 0))} · в
-            день открытия
-          </option>
-          <option value="next">
-            {weekdayName(shiftDate(businessDate, hours.startNextDay ? 2 : 1))},{' '}
-            {dateLabel(shiftDate(businessDate, hours.startNextDay ? 2 : 1))} ·
-            после дня открытия
-          </option>
-        </select>
-      </Field>
       <div aria-live="polite" className="po-notice">
         {description ? (
-          <>
-            <p>{description.text}</p>
-            <p>{description.dates}</p>
-          </>
+          <p>{description.text}</p>
         ) : (
           <p>
             {hours.open && hours.close && hours.startNextDay === null
@@ -138,10 +147,6 @@ const closed: Rule = {
   nextDay: false,
 };
 const open: Rule = { mode: 'open', ...defaultHours };
-const weekdayName = (date: string) =>
-  new Intl.DateTimeFormat('ru-RU', { weekday: 'long', timeZone: 'UTC' }).format(
-    new Date(date + 'T00:00:00Z'),
-  );
 type DatedRule = Rules['holidays'][number];
 
 function replaceDate(
@@ -312,11 +317,11 @@ export function CalendarRulesEditor({
         <section className="po-card ob-card cc-rules">
           <h2>Постоянное расписание</h2>
           <p className="po-muted">
-            Выберите день, к которому относится вечеринка. Например, вечеринка
-            пятницы может открыться в субботу в 00:00 и закончиться в субботу в
-            12:00. Даты ниже — ближайший пример каждого недельного правила.
-            Исключения, праздники и перевод часов учитываются в расчёте после
-            сохранения.
+            День недели — это вечер, к которому относится вечеринка. Если
+            пятничная вечеринка начинается в полночь после пятницы, выберите
+            субботу для открытия. Если клуб закрывается в полдень той же
+            субботы, выберите субботу и для закрытия. Даты показаны на примере
+            ближайшей недели.
           </p>
           {weekdays.map((name, index) => {
             const day = index + 1;

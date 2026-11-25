@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { telegramTheme } from './telegram-theme';
 import { clubToday, type CalendarView } from '../src/modules/client/calendar';
 
@@ -15,42 +15,45 @@ const entry =
   encodeURIComponent(synthetic) +
   '&tgWebAppVersion=7.10&tgWebAppPlatform=ios';
 
+const profile = {
+  id: club,
+  clientId: '21',
+  clientName: 'Организация',
+  name: 'Клуб',
+  description: '',
+  timezone: 'Europe/London',
+  countryCode: 'GB',
+  city: 'Лондон',
+  address: 'Test address',
+  unit: '',
+  version: '1',
+  savedAt: '2026-11-03T12:00:00Z',
+  permissions: ['client.club.read', 'client.club.calendar.write'],
+  availableActions: [],
+};
+
+const emptyCalendar = (date: string): CalendarView => ({
+  clubId: club,
+  name: profile.name,
+  timezone: profile.timezone,
+  version: '1',
+  canWrite: true,
+  weekly: [],
+  holidays: [],
+  exceptions: [],
+  nights: [],
+  invalidDates: [],
+  reconciliation: {
+    businessDate: date,
+    storedDates: [],
+  },
+});
+
 test('private calendar configures nights on mobile and resolves a lost response without another mutation', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 620 });
-  const profile = {
-    id: club,
-    clientId: '21',
-    clientName: 'Организация',
-    name: 'Клуб',
-    description: '',
-    timezone: 'Europe/London',
-    countryCode: 'GB',
-    city: 'Лондон',
-    address: 'Test address',
-    unit: '',
-    version: '1',
-    savedAt: '2026-11-03T12:00:00Z',
-    permissions: ['client.club.read', 'client.club.calendar.write'],
-    availableActions: [],
-  };
-  let view: CalendarView = {
-    clubId: club,
-    name: profile.name,
-    timezone: profile.timezone,
-    version: '1',
-    canWrite: true,
-    weekly: [],
-    holidays: [],
-    exceptions: [],
-    nights: [],
-    invalidDates: [],
-    reconciliation: {
-      businessDate: clubToday(profile.timezone),
-      storedDates: [],
-    },
-  };
+  let view = emptyCalendar(clubToday(profile.timezone));
   const mutations: { key: string | undefined; body: object }[] = [];
   const resolutions: { key: string | undefined; body: object }[] = [];
   await page.route('**/api/**', async (route) => {
@@ -243,5 +246,175 @@ test('private calendar configures nights on mobile and resolves a lost response 
     weekly: [],
     exceptions: [],
     holidays: [],
+  });
+});
+
+async function expectReadableNightControls(group: Locator) {
+  const controls = group.locator('select, input[type="time"]');
+  await expect(controls).toHaveCount(4);
+  const issues = await controls.evaluateAll((elements) => {
+    const problems: string[] = [];
+    const labels = elements.map((el) => el.closest('label')!);
+    const container = labels[0].closest('.cc-rule')!.getBoundingClientRect();
+    const rects = labels.map((label) => label.getBoundingClientRect());
+    const canvas = document.createElement('canvas').getContext('2d')!;
+    elements.forEach((el, index) => {
+      const box = el.getBoundingClientRect();
+      const label = labels[index];
+      const title = label.querySelector('span')!.textContent!;
+      const field = rects[index];
+      if (
+        box.left < container.left ||
+        box.right > container.right ||
+        box.left < 0 ||
+        box.right > innerWidth ||
+        box.height < 44
+      )
+        problems.push(title + ' выходит за границы поля');
+      if (
+        rects
+          .slice(0, index)
+          .some(
+            (other) =>
+              other.left < field.right &&
+              field.left < other.right &&
+              other.top < field.bottom &&
+              field.top < other.bottom,
+          )
+      )
+        problems.push(title + ' перекрывает другое поле');
+      if (el instanceof HTMLSelectElement) {
+        const style = getComputedStyle(el);
+        canvas.font = style.fontSize + ' ' + style.fontFamily;
+        const available =
+          el.clientWidth -
+          parseFloat(style.paddingLeft) -
+          parseFloat(style.paddingRight);
+        for (const option of el.options)
+          if (canvas.measureText(option.text).width > available + 1)
+            problems.push(title + ' обрезает «' + option.text + '»');
+      }
+    });
+    return problems;
+  });
+  expect.soft(issues).toEqual([]);
+}
+
+test('shows the November 27–28 intersection and accepts both parties after midnight', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-11-25T12:00Z'));
+  let view = emptyCalendar('2026-11-25');
+  const writes: object[] = [];
+  await page.route('**/api/**', (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith('/profile')) return route.fulfill({ json: profile });
+    if (!path.endsWith('/calendar')) return route.fulfill({ status: 404 });
+    if (request.method() === 'PATCH') {
+      const body = request.postDataJSON();
+      writes.push(body);
+      view = { ...view, version: '2', weekly: body.weekly };
+    }
+    return route.fulfill({ json: view });
+  });
+  await page.goto(entry);
+  await page.getByRole('tab', { name: 'Постоянное расписание' }).click();
+  const friday = page.getByRole('group', { name: 'Пятница', exact: true });
+  const saturday = page.getByRole('group', { name: 'Суббота', exact: true });
+  for (const night of [friday, saturday]) {
+    await night.getByLabel('Проводим вечеринку').check();
+    await night.getByLabel('День открытия').selectOption('same');
+    await night.getByLabel('Время открытия').fill('00:00');
+    await night.getByLabel('День закрытия').selectOption('next');
+    await night.getByLabel('Время закрытия').fill('12:00');
+  }
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectReadableNightControls(friday);
+    await expectReadableNightControls(saturday);
+  }
+
+  const save = page.getByRole('button', { name: 'Сохранить расписание' });
+  const confirm = page.getByRole('button', { name: 'Подтвердить расписание' });
+  const conflict = page
+    .getByRole('alert')
+    .filter({ hasText: 'Вечеринки пересекаются' });
+  const preview = page.locator('.cc-result li');
+  const expectInterval = async (
+    party: string,
+    opens: string,
+    closes: string,
+  ) => {
+    const times = preview
+      .filter({ has: page.getByText(party, { exact: true }) })
+      .locator('time');
+    await expect(times).toHaveCount(2);
+    expect(
+      await times.evaluateAll((items) =>
+        items.map((el) => Date.parse(el.getAttribute('datetime')!)),
+      ),
+    ).toEqual([Date.parse(opens), Date.parse(closes)]);
+  };
+
+  await save.click();
+  await expectInterval(
+    'Ночь пятницы · 27.11.2026',
+    '2026-11-27T00:00Z',
+    '2026-11-28T12:00Z',
+  );
+  await expectInterval(
+    'Ночь субботы · 28.11.2026',
+    '2026-11-28T00:00Z',
+    '2026-11-29T12:00Z',
+  );
+  await expect.soft(confirm).toBeDisabled();
+  await expect(conflict).toBeVisible();
+  await expect(conflict).toContainText('27.11.2026');
+  await expect(conflict).toContainText(
+    '28.11.2026 с 00:00 до 12:00 по времени клуба',
+  );
+  await conflict.screenshot({
+    path: test.info().outputPath('calendar-overlap-390.png'),
+  });
+  expect(writes).toEqual([]);
+
+  await page
+    .getByRole('button', { name: 'Вернуться к редактированию' })
+    .click();
+  for (const night of [friday, saturday]) {
+    await night.getByLabel('День открытия').selectOption('next');
+    await night.getByLabel('День закрытия').selectOption('same');
+  }
+  await save.click();
+  await expect(conflict).toHaveCount(0);
+  await expectInterval(
+    'Ночь пятницы · 27.11.2026',
+    '2026-11-28T00:00Z',
+    '2026-11-28T12:00Z',
+  );
+  await expectInterval(
+    'Ночь субботы · 28.11.2026',
+    '2026-11-29T00:00Z',
+    '2026-11-29T12:00Z',
+  );
+  await expect(confirm).toBeEnabled();
+  expect(writes).toEqual([]);
+  await confirm.click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toEqual({
+    expectedVersion: '1',
+    timezone: profile.timezone,
+    reconciliationDate: '2026-11-25',
+    weekly: [5, 6].map((day) => ({
+      day,
+      mode: 'open',
+      open: expect.stringMatching(/^00:00(:00)?$/),
+      close: expect.stringMatching(/^12:00(:00)?$/),
+      startNextDay: true,
+      nextDay: false,
+    })),
+    holidays: [],
+    exceptions: [],
   });
 });
