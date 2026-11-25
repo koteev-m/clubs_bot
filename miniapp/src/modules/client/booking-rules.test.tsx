@@ -65,9 +65,11 @@ it('never applies the HOLD recommendation on read or unrelated save and clears i
   });
   expect(hold.value).toBe('17');
   expect(writes).toHaveLength(0);
+  expect(screen.queryByText(/Примеры для вечеринки/)).toBeNull();
+  expect(screen.getByText(/Добавьте ближайшую рабочую ночь/)).toBeTruthy();
   expect(screen.getByText(/Рекомендуем 10 минут/)).toBeTruthy();
   fireEvent.change(
-    screen.getByRole('textbox', { name: /Прекращение онлайн/ }),
+    screen.getByRole('textbox', { name: /Приём онлайн-броней/ }),
     { target: { value: '90' } },
   );
   fireEvent.click(screen.getByRole('button', { name: 'Сохранить правила' }));
@@ -86,6 +88,7 @@ it('never applies the HOLD recommendation on read or unrelated save and clears i
 it('warns about a contradictory draft before saving while preserving the saved values', async () => {
   const saved: BookingRulesView = {
     ...initial,
+    timezone: 'Europe/Moscow',
     nights: [
       {
         businessDate: '2026-11-06',
@@ -102,17 +105,99 @@ it('warns about a contradictory draft before saving while preserving the saved v
   const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply(saved));
   mount();
   const arrival = await screen.findByRole<HTMLInputElement>('textbox', {
-    name: /Предельное время прибытия/,
+    name: /Самый поздний приезд/,
   });
   fireEvent.change(arrival, { target: { value: '180' } });
   expect(
-    screen.getByText(/Проверьте черновик для ночей 2026-11-06/),
+    screen.getByText(/Проверьте черновик для ночей 06.11.2026/),
   ).toBeTruthy();
   expect(saved.rules.arrivalMinutes).toBeNull();
   expect(
     fetch.mock.calls.every(([, request]) => request?.method !== 'PATCH'),
   ).toBe(true);
 });
+
+it('explains all four draft deadlines on the club clock through the repeated hour', async () => {
+  const night = {
+    businessDate: '2026-10-24',
+    opensAt: '2026-10-25T01:50+02:00',
+    closesAt: '2026-10-25T03:10+01:00',
+    cutoffAt: '2026-10-25T01:10+02:00',
+    arrivalBy: null,
+    cutoffAtOrBeforeOpen: true,
+    arrivalAtOrAfterClose: false,
+    cutoffAfterArrival: false,
+  };
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(reply({ ...initial, nights: [night] }));
+  mount();
+  await screen.findByText(/Примеры для вечеринки 24.10.2026/);
+  expect(screen.queryByText(/Последнее время приезда —/)).toBeNull();
+  expect(screen.queryByText(/Если выбрать стол/)).toBeNull();
+  const edit = (label: RegExp, value: string) =>
+    fireEvent.change(screen.getByRole('textbox', { name: label }), {
+      target: { value },
+    });
+  edit(/Приём онлайн-броней/, '20');
+  edit(/Самый поздний приезд/, '60');
+  edit(/Время на оформление/, '10');
+  edit(/Ожидание при опоздании/, '90');
+  expect(
+    screen.getByText(
+      /Закрытие — .*03:10 UTC\+1.*Приём броней закончится .*02:50 UTC\+1/,
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      /Открытие — .*01:50 UTC\+2.*Последнее время приезда — .*02:50 UTC\+2/,
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      /Если выбрать стол .*00:50 UTC\+2.*оформить бронь можно до .*01:00 UTC\+2/,
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      /Если гость указал приезд к открытию .*01:50 UTC\+2.*стол ждёт его до .*02:20 UTC\+1/,
+    ),
+  ).toBeTruthy();
+  edit(/Самый поздний приезд/, '');
+  expect(screen.queryByText(/Последнее время приезда —/)).toBeNull();
+  expect(
+    fetch.mock.calls.every(([, request]) => request?.method !== 'PATCH'),
+  ).toBe(true);
+});
+
+it.each(['45', '45.123456'])(
+  'preserves seconds %s in the closing time and its booking deadline',
+  async (seconds) => {
+    const night = {
+      businessDate: '2026-11-27',
+      opensAt: '2026-11-27T22:00Z',
+      closesAt: `2026-11-28T06:00:${seconds}Z`,
+      cutoffAt: `2026-11-28T05:30:${seconds}Z`,
+      arrivalBy: null,
+      cutoffAtOrBeforeOpen: false,
+      arrivalAtOrAfterClose: false,
+      cutoffAfterArrival: false,
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      reply({
+        ...initial,
+        timezone: 'Europe/London',
+        nights: [night],
+        rules: { ...initial.rules, cutoffMinutes: 30 },
+      }),
+    );
+    mount();
+    const example = await screen.findByText(/Приём броней закончится/);
+    const localSeconds = seconds.replace('.', ',');
+    expect(example.textContent).toContain('06:00:' + localSeconds);
+    expect(example.textContent).toContain('05:30:' + localSeconds);
+  },
+);
 
 it('retains an edit after a conflict and preserves a concurrent change to a different field', async () => {
   let stored = initial;

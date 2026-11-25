@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { dateLabel, localLabel } from './calendar';
 import { authorityLost, OnboardingError } from './onboarding.api';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
@@ -12,29 +13,29 @@ import {
 const fields = [
   {
     id: 'cutoffMinutes',
-    label: 'Прекращение онлайн-бронирования · минут до закрытия',
-    hint: 'За сколько минут до закрытия перестать принимать онлайн-брони. Например, закрытие в 12:00, значение 120 — приём до 10:00.',
+    label: 'Приём онлайн-броней, мин до закрытия',
+    hint: 'За сколько минут до закрытия клуба перестать принимать новые брони онлайн.',
     min: 0,
     required: true,
   },
   {
     id: 'arrivalMinutes',
-    label: 'Предельное время прибытия · минут после открытия',
-    hint: 'До какого времени гость должен заявить прибытие. Например, открытие в 00:00, значение 180 — прибыть до 03:00. Пустое поле — время не задано.',
+    label: 'Самый поздний приезд, мин после открытия',
+    hint: 'Сколько минут от открытия до последнего времени приезда, которое гость может выбрать в брони. Пустое поле — срок не задан.',
     min: 0,
     required: false,
   },
   {
     id: 'holdMinutes',
-    label: 'Время на оформление брони (HOLD) · минут',
-    hint: 'Выбранный стол временно удерживается, пока гость оформляет бронь. Рекомендуем 10 минут: начало в 21:00 — до 21:10. Пустое поле — срок не задан. Рекомендация не меняет сохранённое значение.',
+    label: 'Время на оформление брони, мин',
+    hint: 'Столько времени есть у гостя с момента выбора стола, чтобы подтвердить бронь. Рекомендуем 10 минут. Пустое поле — срок не задан.',
     min: 1,
     required: false,
   },
   {
     id: 'retentionMinutes',
-    label: 'Ожидание гостя после заявленного прибытия · минут',
-    hint: 'Сколько ждать опаздывающего гостя с подтверждённой бронью. Например, прибытие в 01:00, значение 30 — ждать до 01:30. Это отдельный срок от HOLD при оформлении.',
+    label: 'Ожидание при опоздании, мин',
+    hint: 'Сколько держать стол после времени приезда, которое гость указал в подтверждённой брони.',
     min: 0,
     required: true,
   },
@@ -65,8 +66,60 @@ export type BookingRulesView = {
   invalidDates: string[];
 };
 
-function timeText(iso: string) {
-  return iso.replace('T', ' ').replace(/Z$/, ' +00:00');
+function nightExamples(night: Night, rules: RuleValues, timezone: string) {
+  const opens = Date.parse(night.opensAt);
+  const closes = Date.parse(night.closesAt);
+  const minute = 60_000;
+  if (rules.cutoffMinutes === null || rules.retentionMinutes === null) return;
+  const cutoff = closes - rules.cutoffMinutes * minute;
+  // In this example the guest picks a table before both opening and the booking cutoff.
+  const selectBeforeOpening = opens <= cutoff;
+  const selectionBase = selectBeforeOpening ? night.opensAt : night.closesAt;
+  const selectionMinutes =
+    -60 - (selectBeforeOpening ? 0 : rules.cutoffMinutes);
+  try {
+    const formatter = new Intl.DateTimeFormat('ru-RU', {
+      timeZone: timezone,
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: [night.opensAt, night.closesAt].some((iso) =>
+        /T\d{2}:\d{2}:\d{2}/.test(iso),
+      )
+        ? '2-digit'
+        : undefined,
+      timeZoneName: 'shortOffset',
+    });
+    const at = (origin: string, minutes = 0) => {
+      const instant = Date.parse(origin) + minutes * minute;
+      // All rules add whole minutes, so the original fractional second survives
+      // intact even when its precision exceeds JavaScript Date's milliseconds.
+      const fraction = origin.match(/\.(\d+)/)?.[1];
+      return formatter
+        .formatToParts(instant)
+        .map(({ type, value }) =>
+          type === 'second' && fraction ? value + ',' + fraction : value,
+        )
+        .join('')
+        .replace('GMT', 'UTC');
+    };
+    return {
+      cutoffMinutes: `Закрытие — ${at(night.closesAt)}. Приём броней закончится ${at(night.closesAt, -rules.cutoffMinutes)}.`,
+      arrivalMinutes:
+        rules.arrivalMinutes === null
+          ? undefined
+          : `Открытие — ${at(night.opensAt)}. Последнее время приезда — ${at(night.opensAt, rules.arrivalMinutes)}.`,
+      holdMinutes:
+        rules.holdMinutes === null
+          ? undefined
+          : `Если выбрать стол ${at(selectionBase, selectionMinutes)}, оформить бронь можно до ${at(selectionBase, selectionMinutes + rules.holdMinutes)}.`,
+      retentionMinutes: `Если гость указал приезд к открытию (${at(night.opensAt)}), стол ждёт его до ${at(night.opensAt, rules.retentionMinutes)}.`,
+    };
+  } catch {
+    // An older WebView may not know the club zone. The saved server preview still has its offsets.
+    return;
+  }
 }
 
 function BookingPreview({ view }: { view: BookingRulesView }) {
@@ -77,14 +130,14 @@ function BookingPreview({ view }: { view: BookingRulesView }) {
     >
       <h2 id="booking-rules-preview">Предпросмотр сохранённых правил</h2>
       <p>
-        Время на оформление (HOLD):{' '}
+        Время на оформление брони:{' '}
         {view.rules.holdMinutes === null
           ? 'срок не задан'
           : `${view.rules.holdMinutes} мин с начала оформления`}
       </p>
       <p>
-        Ожидание гостя: {view.rules.retentionMinutes} мин после заявленного
-        гостем времени.
+        При опоздании стол ждёт гостя {view.rules.retentionMinutes} мин после
+        выбранного времени приезда.
       </p>
       {view.nights.length === 0 && (
         <p>
@@ -95,29 +148,29 @@ function BookingPreview({ view }: { view: BookingRulesView }) {
       {view.invalidDates.length > 0 && (
         <p>
           Календарь не смог рассчитать ночи на даты{' '}
-          {view.invalidDates.join(', ')}.
+          {view.invalidDates.map(dateLabel).join(', ')}.
         </p>
       )}
       {view.nights.map((night) => (
         <details className="po-card ob-card" key={night.businessDate}>
-          <summary>Ночь {night.businessDate}</summary>
+          <summary>Вечеринка {dateLabel(night.businessDate)}</summary>
           <p>
             Открытие{' '}
-            <time dateTime={night.opensAt}>{timeText(night.opensAt)}</time>
+            <time dateTime={night.opensAt}>{localLabel(night.opensAt)}</time>
           </p>
           <p>
             Закрытие{' '}
-            <time dateTime={night.closesAt}>{timeText(night.closesAt)}</time>
+            <time dateTime={night.closesAt}>{localLabel(night.closesAt)}</time>
           </p>
           <p>
-            Прекращение онлайн-бронирования{' '}
-            <time dateTime={night.cutoffAt}>{timeText(night.cutoffAt)}</time>
+            Приём онлайн-броней до{' '}
+            <time dateTime={night.cutoffAt}>{localLabel(night.cutoffAt)}</time>
           </p>
           <p>
-            Прибытие до{' '}
+            Самый поздний планируемый приезд{' '}
             {night.arrivalBy ? (
               <time dateTime={night.arrivalBy}>
-                {timeText(night.arrivalBy)}
+                {localLabel(night.arrivalBy)}
               </time>
             ) : (
               '— время не задано'
@@ -127,13 +180,12 @@ function BookingPreview({ view }: { view: BookingRulesView }) {
             <p>Бронирование прекращается к открытию или раньше.</p>
           )}
           {night.arrivalAtOrAfterClose && (
-            <p>Время прибытия приходится на закрытие или позже.</p>
+            <p>Самый поздний приезд приходится на закрытие или позже.</p>
           )}
           {night.cutoffAfterArrival && (
             <p className="po-notice" role="status">
-              Проверьте правила: онлайн-бронирование остаётся открытым после
-              предельного времени прибытия. Гость сможет начать оформление,
-              когда прибыть вовремя уже нельзя.
+              Приём онлайн-броней заканчивается позже самого позднего времени
+              приезда. Проверьте оба срока.
             </p>
           )}
         </details>
@@ -218,6 +270,11 @@ export default function ClubBookingRules({
     denied;
   const draftRules =
     view && draft ? parseRules(draft.edits, view.rules) : undefined;
+  const exampleRules = draft && view?.canWrite ? draftRules : view?.rules;
+  const examples =
+    view?.nights[0] && exampleRules
+      ? nightExamples(view.nights[0], exampleRules, view.timezone)
+      : undefined;
   const contradictoryDates =
     draftRules?.arrivalMinutes != null && view
       ? view.nights
@@ -268,6 +325,12 @@ export default function ClubBookingRules({
                 );
             }}
           >
+            {examples && (
+              <p className="po-muted">
+                Примеры для вечеринки {dateLabel(view.nights[0].businessDate)}{' '}
+                по времени клуба.
+              </p>
+            )}
             <fieldset className="ob-fields" disabled={blocked}>
               {fields.map((field) => (
                 <Field label={field.label} key={field.id}>
@@ -276,6 +339,7 @@ export default function ClubBookingRules({
                     inputMode="numeric"
                     pattern="[0-9]*"
                     required={field.required}
+                    aria-label={field.label}
                     aria-describedby={field.id + '-hint'}
                     value={
                       (view.canWrite ? draft?.edits[field.id] : undefined) ??
@@ -291,21 +355,24 @@ export default function ClubBookingRules({
                       }));
                     }}
                   />
-                  <small id={field.id + '-hint'}>{field.hint}</small>
+                  <small id={field.id + '-hint'}>
+                    {field.hint} {examples?.[field.id]}
+                  </small>
                 </Field>
               ))}
             </fieldset>
             {invalid && (
               <p className="po-notice" role="alert">
-                Введите целое число минут от 0 до {maxMinutes}. Для HOLD укажите
-                минимум 1 минуту или оставьте поле пустым.
+                Введите целое число минут от 0 до {maxMinutes}. Для оформления
+                брони укажите минимум 1 минуту или оставьте поле пустым.
               </p>
             )}
             {contradictoryDates.length > 0 && (
               <p className="po-notice" role="status">
-                Проверьте черновик для ночей {contradictoryDates.join(', ')}:
-                онлайн-бронирование закончится позже предельного времени
-                прибытия. Измените один из сроков, если это не задумано.
+                Проверьте черновик для ночей{' '}
+                {contradictoryDates.map(dateLabel).join(', ')}: приём
+                онлайн-броней закончится позже самого позднего времени приезда.
+                Измените один из сроков, если это не задумано.
               </p>
             )}
             {needsReview && view.canWrite && !command.blocked && (

@@ -12,12 +12,11 @@ import {
 import { ClubProfile as Profile } from './onboarding.types';
 import { locationPresentation, timezoneLabel } from './profilePresentation';
 
-type Fields = Pick<Profile, 'name' | 'description' | 'timezone'>;
-const editableFields = ['name', 'description', 'timezone'] as const;
+type Fields = Pick<Profile, 'name' | 'description'>;
+const editableFields = ['name', 'description'] as const;
 const fieldsOf = (profile: Profile): Fields => ({
   name: profile.name,
   description: profile.description,
-  timezone: profile.timezone,
 });
 const capabilitiesOf = (profile: Profile) => [
   ...profile.permissions,
@@ -33,21 +32,11 @@ function countryName(code: string): string {
   }
 }
 
-function validation(fields: Fields, savedTimezone: string): string | null {
+function validation(fields: Fields): string | null {
   if (!fields.name.trim() || fields.name.trim().length > 255)
     return 'Укажите название клуба от 1 до 255 символов.';
   if (fields.description.length > 2000)
     return 'Описание должно содержать не более 2000 символов.';
-  // A browser's older IANA catalog must not block saving an unchanged server zone.
-  if (fields.timezone === savedTimezone) return null;
-  // The server validates an explicit correction as the final authority.
-  try {
-    if (!fields.timezone.trim() || fields.timezone.trim().length > 64)
-      throw new Error('Invalid timezone');
-    new Intl.DateTimeFormat('ru-RU', { timeZone: fields.timezone.trim() });
-  } catch {
-    return 'Укажите часовой пояс IANA, например Europe/Moscow.';
-  }
   return null;
 }
 
@@ -304,9 +293,9 @@ function ClubProfileEditor({
               ))}
             </dl>
             <p className="po-muted">
-              Часовой пояс сохранён в профиле заведения. Если страна, город
-              или адрес указаны неверно, обратитесь к владельцу платформы для
-              уточнения местоположения.
+              При создании заведения часовой пояс определяется по выбранному
+              городу. Если местоположение или часовой пояс указаны неверно,
+              обратитесь к владельцу платформы.
             </p>
           </section>
           <h2 tabIndex={-1} ref={profileFields}>
@@ -325,13 +314,17 @@ function ClubProfileEditor({
                 !draft
               )
                 return;
-              const problem = validation(fields, draft.base.timezone);
+              const problem = validation(fields);
               setValidationError(problem);
               if (problem) return;
               const epoch = authority.current.epoch;
               command.run(
                 path,
-                { ...fields, expectedVersion: draft.base.version },
+                {
+                  ...fields,
+                  timezone: draft.base.timezone,
+                  expectedVersion: draft.base.version,
+                },
                 (result) => accept(result, epoch),
                 'PATCH',
               );
@@ -371,27 +364,6 @@ function ClubProfileEditor({
                   }
                 />
               </Field>
-              {canWrite && (
-                <details className="ob-timezone-correction">
-                  <summary>Исправить часовой пояс</summary>
-                  <p className="po-muted">
-                    Только если сохранённый пояс неверен. Уточните IANA-код у
-                    владельца платформы. Это исправление не меняет город или
-                    адрес и применяется после сохранения профиля.
-                  </p>
-                  <Field label="Часовой пояс IANA">
-                    <input
-                      value={fields.timezone}
-                      maxLength={64}
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      onChange={(event) =>
-                        edit(profile, { timezone: event.target.value })
-                      }
-                    />
-                  </Field>
-                </details>
-              )}
             </fieldset>
             {!canWrite && (
               <p className="po-muted">

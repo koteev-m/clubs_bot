@@ -301,19 +301,22 @@ function wallTimeAnalysis(date: string, time: string, timezone: string) {
     offsets.add(offset(parts(wall + hours * 3600000).zone));
   const expected = time.length === 5 ? time + ':00' : time;
   const candidates = [...offsets].map((seconds) => wall - seconds * 1000);
+  const instantLabel = (instant: number) => {
+    const local = parts(instant);
+    return `${local.date}T${local.time}${local.zone === 'GMT' ? '+00:00' : local.zone.slice(3)}`;
+  };
   const options = candidates
-    .map((instant) => ({ instant }))
-    .filter(({ instant }) => {
+    .filter((instant) => {
       const local = parts(instant);
       return local.date === date && local.time === expected;
     })
-    .sort((a, b) => a.instant - b.instant)
-    .map(({ instant }) => {
-      const local = parts(instant);
-      return `${local.date}T${local.time}${local.zone === 'GMT' ? '+00:00' : local.zone.slice(3)}`;
-    });
+    .sort((a, b) => a - b)
+    .map(instantLabel);
   return {
     options,
+    // java.time.atZone chooses the first overlap instant and interprets a gap
+    // with the offset before the forward jump. Draft gaps still require edits.
+    canonical: options[0] ?? instantLabel(Math.max(...candidates)),
     earliest: Math.min(...candidates),
     latest: Math.max(...candidates),
   };
@@ -391,6 +394,49 @@ export function calendarAffectedDates(
   ].sort();
 }
 
+type NightConflict = {
+  firstDate: string;
+  secondDate: string;
+  from: string;
+  until: string;
+};
+
+function nightConflicts(
+  proposed: CalendarNight[],
+  saved: CalendarNight[],
+  now: number,
+) {
+  // A rule edit cannot materialize a night that already started. For an
+  // in-progress night only its persisted interval can conflict with a new one.
+  const started = saved.filter(
+    (night) => night.nightId && Date.parse(night.opensAt) <= now,
+  );
+  const frozenDates = new Set(started.map((night) => night.businessDate));
+  const intervals = [
+    ...started.filter((night) => Date.parse(night.closesAt) > now),
+    ...proposed.filter(
+      (night) =>
+        !frozenDates.has(night.businessDate) && Date.parse(night.opensAt) > now,
+    ),
+  ].sort((a, b) => Date.parse(a.opensAt) - Date.parse(b.opensAt));
+  const conflicts: NightConflict[] = [];
+  for (const [index, first] of intervals.entries()) {
+    const end = Date.parse(first.closesAt);
+    for (let i = index + 1; i < intervals.length; i++) {
+      const second = intervals[i];
+      if (Date.parse(second.opensAt) >= end) break;
+      conflicts.push({
+        firstDate: first.businessDate,
+        secondDate: second.businessDate,
+        from: second.opensAt,
+        until:
+          end <= Date.parse(second.closesAt) ? first.closesAt : second.closesAt,
+      });
+    }
+  }
+  return conflicts;
+}
+
 /** Local DST decisions; stored dependencies/frozen intervals remain server-owned. */
 export function calendarPlan(
   rules: Rules,
@@ -416,12 +462,50 @@ export function calendarPlan(
   const touched = new Set(
     changes && [...changes.holidays, ...changes.exceptions].map(({ id }) => id),
   );
+  const now = Date.now();
+  // Stored rows retain their original zone. +18:00 is java.time's maximum
+  // offset, so a later business date cannot have started in any stored zone.
+  const completedDates = new Set(
+    previous?.reconciliation?.storedDates.filter(
+      (date) => Date.parse(date + 'T00:00:00+18:00') <= now,
+    ),
+  );
+  // A night opens on D or D+1 and closes by the end of D+2. For a date D
+  // that could have started, only D-4 through D+3 could still be open and
+  // precede it in the eight-row preview (one night per date, offsets ±18h).
+  // Thus any live row for D is visible. Cancellations are listed separately
+  // in date order from the three-day lookback, which also covers these dates.
+  for (const night of [
+    ...(previous?.nights ?? []),
+    ...(previous?.cancelledNights ?? []),
+  ]) {
+    if (Date.parse(night.closesAt) > now)
+      completedDates.delete(night.businessDate);
+  }
+  const affectedDates = new Set(dates);
+  const comparisonDates = new Set(dates);
+  // Both startNextDay and nextDay can add a day. Only business dates within
+  // two days of a special date can overlap it, even outside reconciliation.
+  for (const date of new Set([
+    ...rules.holidays.map((row) => row.date),
+    ...rules.exceptions.map((row) => row.date),
+    ...touched,
+  ])) {
+    if (date < first) continue;
+    for (const offset of [-2, -1, 1, 2])
+      comparisonDates.add(shiftDate(date, offset));
+  }
+  const neighborNights: CalendarNight[] = [];
+  const holidays = new Map(rules.holidays.map((row) => [row.date, row]));
+  const exceptions = new Map(rules.exceptions.map((row) => [row.date, row]));
   const dayStartBound = wallTimeAnalysis(today, '00:00', timezone).earliest;
   const nights: CalendarNight[] = [];
   const gaps: string[] = [];
   const overlaps: string[] = [];
   const invalidDates: string[] = [];
-  for (const date of dates) {
+  for (const date of comparisonDates) {
+    if (completedDates.has(date) && !touched.has(date)) continue;
+    const affected = affectedDates.has(date);
     const day = new Date(date + 'T00:00:00Z').getUTCDay() || 7;
     const weekly = rules.weekly.find((rule) => rule.day === day);
     const window = weekly?.mode === 'open' ? weekly : undefined;
@@ -448,10 +532,10 @@ export function calendarPlan(
         startNextDay: row.startNextDay ?? fallback?.startNextDay ?? false,
       };
     };
-    const holiday = rules.holidays.find((rule) => rule.date === date);
+    const holiday = holidays.get(date);
     if (holiday) source = 'HOLIDAY';
     let effective = override(holiday, window);
-    const exception = rules.exceptions.find((rule) => rule.date === date);
+    const exception = exceptions.get(date);
     if (exception) {
       source = 'EXCEPTION';
       effective = override(exception, effective ?? window);
@@ -464,24 +548,32 @@ export function calendarPlan(
     // Invalid wall times are never silently shifted or used as an allowed interval.
     if (date < today && !touched.has(date) && closing.latest < dayStartBound)
       continue;
-    const starts = wallTimeOptions(openingDate, effective.open, timezone);
+    const opening = wallTimeAnalysis(openingDate, effective.open, timezone);
+    const starts = opening.options;
     const ends = closing.options;
-    if (!starts.length)
-      gaps.push(`${dateLabel(openingDate)} ${effective.open}`);
-    if (!ends.length) gaps.push(`${dateLabel(closingDate)} ${effective.close}`);
-    if (starts.length > 1)
-      overlaps.push(`${dateLabel(openingDate)} ${effective.open}`);
-    if (ends.length > 1)
-      overlaps.push(`${dateLabel(closingDate)} ${effective.close}`);
-    if (!starts.length || !ends.length) continue;
-    if (Date.parse(starts[0]) >= Date.parse(ends[0])) {
-      invalidDates.push(date);
+    if (affected) {
+      if (!starts.length)
+        gaps.push(`${dateLabel(openingDate)} ${effective.open}`);
+      if (!ends.length)
+        gaps.push(`${dateLabel(closingDate)} ${effective.close}`);
+      if (starts.length > 1)
+        overlaps.push(`${dateLabel(openingDate)} ${effective.open}`);
+      if (ends.length > 1)
+        overlaps.push(`${dateLabel(closingDate)} ${effective.close}`);
+    }
+    // Supplemental neighbors are comparison-only. Check the interval the
+    // server will resolve, without consenting to a gap in the submitted plan.
+    if (affected && (!starts.length || !ends.length)) continue;
+    const opensAt = opening.canonical;
+    const closesAt = closing.canonical;
+    if (Date.parse(opensAt) >= Date.parse(closesAt)) {
+      if (affected) invalidDates.push(date);
       continue;
     }
-    nights.push({
+    (affected ? nights : neighborNights).push({
       businessDate: date,
-      opensAt: starts[0],
-      closesAt: ends[0],
+      opensAt,
+      closesAt,
       source,
     });
   }
@@ -498,6 +590,14 @@ export function calendarPlan(
       overlaps,
       invalidDates,
     ]),
+    nightConflicts: nightConflicts(
+      [...nights, ...neighborNights],
+      previous?.nights ?? [],
+      now,
+    ).filter(
+      ({ firstDate, secondDate }) =>
+        affectedDates.has(firstDate) || affectedDates.has(secondDate),
+    ),
     complete: Boolean(previous?.reconciliation),
     affectedDates: dates,
     nights,

@@ -152,12 +152,9 @@ describe('private club onboarding B', () => {
     fireEvent.change(screen.getByLabelText('Описание клуба'), {
       target: { value: 'Synthetic description' },
     });
-    fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
-      target: { value: 'Europe/Paris' },
-    });
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Сохранить профиль' }),
-    );
+    expect(screen.queryByText('Исправить часовой пояс')).toBeNull();
+    expect(screen.queryByLabelText('Часовой пояс IANA')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
     await screen.findByText('Сохранено');
     const saved = fetch.mock.calls.find(
       ([, options]) => options?.method === 'PATCH',
@@ -165,7 +162,7 @@ describe('private club onboarding B', () => {
     expect(JSON.parse(String(saved[1]?.body))).toEqual({
       name: 'Saved synthetic club',
       description: 'Synthetic description',
-      timezone: 'Europe/Paris',
+      timezone: profile.timezone,
       expectedVersion: '1',
     });
     expect(
@@ -198,7 +195,7 @@ describe('private club onboarding B', () => {
     );
     await screen.findByLabelText('Отображаемое название заведения');
     expect(value('Описание клуба')).toBe('Synthetic description');
-    expect(value('Часовой пояс IANA')).toBe('Europe/Paris');
+    expect(screen.getByText(/UTC\+03:00/, { selector: 'dd' })).toBeTruthy();
     expect(
       fetch.mock.calls.some(([path]) =>
         String(path).endsWith('/clients/21/onboarding'),
@@ -258,9 +255,7 @@ describe('private club onboarding B', () => {
         await screen.findByLabelText('Отображаемое название заведения'),
         { target: { value: 'Новое название' } },
       );
-      expect(
-        screen.getByLabelText('Часовой пояс IANA').closest('details')?.open,
-      ).toBe(false);
+      expect(screen.queryByLabelText('Часовой пояс IANA')).toBeNull();
       fireEvent.click(
         screen.getByRole('button', { name: 'Сохранить профиль' }),
       );
@@ -274,11 +269,16 @@ describe('private club onboarding B', () => {
         timezone,
         expectedVersion: '1',
       });
-      expect(value('Часовой пояс IANA')).toBe(timezone);
+      expect(
+        screen.getByText('Часовой пояс (сейчас)').nextElementSibling
+          ?.textContent,
+      ).toMatch(
+        timezone === 'Future/Server_Zone' ? /^Future\/Server_Zone$/ : /UTC[+-]/,
+      );
     },
   );
 
-  it('validates the name and timezone and leaves readonly location out of mutation payload', async () => {
+  it('rejects a blank name before sending a profile mutation', async () => {
     go('profile', '100');
     const fetch = vi
       .spyOn(globalThis, 'fetch')
@@ -294,19 +294,6 @@ describe('private club onboarding B', () => {
       screen.getByRole('button', { name: 'Сохранить профиль' }),
     );
     await screen.findByText(/Укажите название клуба/);
-    fireEvent.change(
-      screen.getByLabelText('Отображаемое название заведения'),
-      {
-        target: { value: 'Valid synthetic name' },
-      },
-    );
-    fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
-      target: { value: 'Unknown/Synthetic' },
-    });
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Сохранить профиль' }),
-    );
-    await screen.findByText(/Укажите часовой пояс IANA/);
     expect(
       fetch.mock.calls.filter(([, options]) => options?.method === 'PATCH'),
     ).toHaveLength(0);
@@ -441,7 +428,12 @@ describe('private club onboarding B', () => {
     const foreground = new Promise<Response>((resolve) => {
       resolveForeground = resolve;
     });
-    const changed = { ...profile, name: 'Concurrent name', version: '2' };
+    const changed = {
+      ...profile,
+      name: 'Concurrent name',
+      timezone: 'Asia/Kathmandu',
+      version: '2',
+    };
     let waitForForeground = false;
     const fetch = vi
       .spyOn(globalThis, 'fetch')
@@ -481,6 +473,7 @@ describe('private club onboarding B', () => {
     expect(JSON.parse(String(patch?.[1]?.body))).toMatchObject({
       expectedVersion: '2',
       name: changed.name,
+      timezone: changed.timezone,
       description: 'My description',
     });
   });

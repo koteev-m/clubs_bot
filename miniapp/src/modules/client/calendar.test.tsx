@@ -362,6 +362,319 @@ it('retains a normal previous-business-date night and the Friday midnight interv
   });
 });
 
+it('compares effective dated hours including nested nights and allows touching endpoints', () => {
+  vi.setSystemTime(new Date('2026-11-25T12:00Z'));
+  const party = {
+    mode: 'open' as const,
+    open: '00:00',
+    close: '12:00',
+    nextDay: true,
+  };
+  const rules = {
+    weekly: [],
+    holidays: [
+      { ...party, date: '2026-11-27' },
+      {
+        ...party,
+        date: '2026-11-28',
+        open: '06:00',
+        close: '08:00',
+        nextDay: false,
+      },
+    ],
+    exceptions: [],
+  };
+  const plan = (exceptions: typeof rules.holidays) =>
+    calendarPlan({ ...rules, exceptions }, 'Europe/Moscow', '2026-11-25');
+  expect(plan([]).nightConflicts).toEqual([
+    {
+      firstDate: '2026-11-27',
+      secondDate: '2026-11-28',
+      from: '2026-11-28T06:00:00+03:00',
+      until: '2026-11-28T08:00:00+03:00',
+    },
+  ]);
+  expect(
+    plan([{ ...party, date: '2026-11-28', open: '12:00' }]).nightConflicts,
+  ).toEqual([]);
+});
+
+it('checks an active stored night using its actual interval and skips past hypothetical openings', () => {
+  vi.setSystemTime(new Date('2026-11-28T06:00Z'));
+  const before = {
+    ...base,
+    weekly: [],
+    reconciliation: { businessDate: '2026-11-28', storedDates: ['2026-11-27'] },
+    nights: [
+      {
+        businessDate: '2026-11-27',
+        nightId: '42',
+        source: 'WEEKEND_RULE' as const,
+        opensAt: '2026-11-27T22:00Z',
+        closesAt: '2026-11-28T09:00Z',
+      },
+    ],
+  };
+  const draft = {
+    ...before,
+    exceptions: [
+      { ...friday, date: '2026-11-27', open: '22:00', close: '13:00' },
+      {
+        ...friday,
+        date: '2026-11-28',
+        open: '08:00',
+        close: '11:00',
+        nextDay: false,
+      },
+    ],
+  };
+  const plan = (saved: CalendarView) =>
+    calendarPlan(draft, saved.timezone, '2026-11-28', saved);
+  expect(plan(before).nightConflicts).toMatchObject([
+    {
+      firstDate: '2026-11-27',
+      secondDate: '2026-11-28',
+      until: '2026-11-28T09:00Z',
+    },
+  ]);
+  expect(plan({ ...before, nights: [] }).nightConflicts).toEqual([]);
+});
+
+it('keeps a completed stored Wednesday out of a weekly retime to Thursday', () => {
+  vi.setSystemTime(new Date('2026-11-25T12:00Z'));
+  const today = '2026-11-25';
+  const wednesday = {
+    ...friday,
+    day: 3,
+    open: '00:00',
+    close: '01:00',
+    nextDay: false,
+  };
+  const thursday = {
+    ...wednesday,
+    date: '2026-11-26',
+    open: '10:00',
+    close: '12:00',
+  };
+  const before: CalendarView = {
+    ...base,
+    weekly: [wednesday],
+    exceptions: [thursday],
+    cancelledNights: [],
+    reconciliation: {
+      businessDate: today,
+      storedDates: [today, thursday.date],
+    },
+    nights: [
+      {
+        businessDate: thursday.date,
+        nightId: '11',
+        source: 'EXCEPTION',
+        opensAt: '2026-11-26T10:00Z',
+        closesAt: '2026-11-26T12:00Z',
+      },
+    ],
+  };
+  const draft = {
+    ...before,
+    weekly: [
+      { ...wednesday, open: '08:00', close: '13:00', startNextDay: true },
+    ],
+  };
+  const plan = calendarPlan(draft, base.timezone, today, before);
+  expect(plan.nightConflicts).toEqual([]);
+  expect(plan.nights.some((night) => night.businessDate === today)).toBe(false);
+  expect(
+    plan.nights.find((night) => night.businessDate === '2026-12-02')?.opensAt,
+  ).toBe('2026-12-03T08:00:00+00:00');
+  // Without a stored Wednesday the same draft would create an overlapping night.
+  expect(
+    calendarPlan(draft, base.timezone, today, {
+      ...before,
+      reconciliation: { businessDate: today, storedDates: [thursday.date] },
+    }).nightConflicts,
+  ).toHaveLength(1);
+});
+
+it('recognizes a finished stored date even when the club now uses a later business-date boundary', () => {
+  vi.setSystemTime(new Date('2026-11-25T12:00Z'));
+  // In the original Kiritimati zone the stored Thursday ended at 11:00Z
+  // on Wednesday. The club now reads its calendar in Honolulu.
+  const today = '2026-11-25';
+  const thursday = {
+    ...friday,
+    day: 4,
+    open: '00:00',
+    close: '01:00',
+    nextDay: false,
+  };
+  const fridayException = {
+    ...thursday,
+    date: '2026-11-27',
+    open: '10:00',
+    close: '12:00',
+  };
+  const before: CalendarView = {
+    ...base,
+    timezone: 'Pacific/Honolulu',
+    weekly: [thursday],
+    exceptions: [fridayException],
+    reconciliation: { businessDate: today, storedDates: ['2026-11-26'] },
+    cancelledNights: [],
+    nights: [],
+  };
+  const draft = {
+    ...before,
+    weekly: [
+      { ...thursday, open: '08:00', close: '13:00', startNextDay: true },
+    ],
+  };
+  expect(
+    calendarPlan(draft, before.timezone, today, before).nightConflicts,
+  ).toEqual([]);
+  const futureCancellation = {
+    businessDate: '2026-11-26',
+    nightId: '17',
+    source: 'WEEKEND_RULE' as const,
+    opensAt: '2026-11-26T00:00-10:00',
+    closesAt: '2026-11-26T01:00-10:00',
+  };
+  expect(
+    calendarPlan(draft, before.timezone, today, {
+      ...before,
+      cancelledNights: [futureCancellation],
+    }).nightConflicts,
+  ).toHaveLength(1);
+});
+
+it('checks a distant Monday exception against the preceding Sunday outside the horizon', () => {
+  vi.setSystemTime(new Date('2026-11-25T12:00Z'));
+  const today = '2026-11-25';
+  const before = {
+    ...base,
+    weekly: [{ ...friday, day: 7, open: '22:00', close: '12:00' }],
+    reconciliation: { businessDate: today, storedDates: [] },
+  };
+  const monday = {
+    ...friday,
+    date: '2027-02-01',
+    open: '08:00',
+    close: '11:00',
+    nextDay: false,
+  };
+  const plan = calendarPlan(
+    { ...before, exceptions: [monday] },
+    base.timezone,
+    today,
+    before,
+  );
+  expect(plan.nightConflicts).toEqual([
+    {
+      firstDate: '2027-01-31',
+      secondDate: monday.date,
+      from: '2027-02-01T08:00:00+00:00',
+      until: '2027-02-01T11:00:00+00:00',
+    },
+  ]);
+  expect(plan.affectedDates).not.toContain('2027-01-31');
+  expect(plan.nights.some((night) => night.businessDate === '2027-01-31')).toBe(
+    false,
+  );
+  const closedSunday = {
+    ...monday,
+    date: '2027-01-31',
+    mode: 'closed' as const,
+  };
+  expect(
+    calendarPlan(
+      { ...before, holidays: [closedSunday], exceptions: [monday] },
+      base.timezone,
+      today,
+      before,
+    ).nightConflicts,
+  ).toEqual([]);
+});
+
+it('uses the effective spring-gap interval of a distant neighbor only for comparison', () => {
+  vi.setSystemTime(new Date('2026-11-25T12:00Z'));
+  const today = '2026-11-25';
+  const sunday = { ...friday, day: 7, open: '01:30', close: '12:00' };
+  const before = {
+    ...base,
+    weekly: [sunday],
+    reconciliation: { businessDate: today, storedDates: [] },
+  };
+  const monday = {
+    ...friday,
+    date: '2027-03-29',
+    open: '08:00',
+    close: '11:00',
+    nextDay: false,
+  };
+  const plan = (open: string) =>
+    calendarPlan(
+      { ...before, exceptions: [{ ...monday, open, close: '13:00' }] },
+      base.timezone,
+      today,
+      before,
+    );
+  expect(plan('08:00').nightConflicts).toMatchObject([
+    {
+      firstDate: '2027-03-28',
+      secondDate: monday.date,
+      from: '2027-03-29T08:00:00+01:00',
+      until: '2027-03-29T12:00:00+01:00',
+    },
+  ]);
+  const touching = plan('12:00');
+  expect(touching.nightConflicts).toEqual([]);
+  expect(touching.gaps).toEqual([]);
+});
+
+it('checks neighbors two business dates away on either side without materializing them', () => {
+  vi.setSystemTime(new Date('2026-11-25T12:00Z'));
+  const today = '2026-11-25';
+  const saturday = {
+    ...friday,
+    day: 6,
+    startNextDay: true,
+    open: '22:00',
+    close: '12:00',
+  };
+  const monday = {
+    ...friday,
+    date: '2027-02-01',
+    open: '08:00',
+    close: '11:00',
+    nextDay: false,
+  };
+  const before = {
+    ...base,
+    weekly: [saturday],
+    reconciliation: { businessDate: today, storedDates: [] },
+  };
+  expect(
+    calendarPlan(
+      { ...before, holidays: [monday] },
+      base.timezone,
+      today,
+      before,
+    ).nightConflicts,
+  ).toMatchObject([{ firstDate: '2027-01-30', secondDate: monday.date }]);
+  const reverse = { ...before, weekly: [{ ...monday, day: 1 }] };
+  const specialSaturday = { ...saturday, date: '2027-01-30' };
+  expect(
+    calendarPlan(
+      { ...reverse, exceptions: [specialSaturday] },
+      base.timezone,
+      today,
+      reverse,
+    ).nightConflicts,
+  ).toMatchObject([
+    { firstDate: specialSaturday.date, secondDate: monday.date },
+  ]);
+});
+
 it('keeps the draft on a version conflict and resubmits only the reviewed changes', async () => {
   let saved = base;
   const mutations: { key: string; body: object }[] = [];

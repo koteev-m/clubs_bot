@@ -100,7 +100,12 @@ function inspect(source: CalendarView, body: Request, today: string) {
     );
   const rules = requestRules(source, body);
   const plan = calendarPlan(rules, source.timezone, today, source);
-  if (!plan.complete || plan.gaps.length || plan.invalidDates.length)
+  if (
+    !plan.complete ||
+    plan.gaps.length ||
+    plan.invalidDates.length ||
+    plan.nightConflicts.length
+  )
     throw new Error('Calendar intent is unsupported');
   const identity = JSON.stringify([
     calendarSnapshotKey(source),
