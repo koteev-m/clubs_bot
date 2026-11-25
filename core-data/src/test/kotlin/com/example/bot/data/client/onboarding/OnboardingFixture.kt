@@ -18,6 +18,9 @@ import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
 
+/** Last schema whose club-creation contract installed a legacy creator permission package. */
+internal const val LEGACY_CLUB_CREATION_VERSION = "79"
+
 internal class MutableOnboardingClock(
     @Volatile
     var current: Instant = Instant.parse("2026-10-28T12:00:00Z"),

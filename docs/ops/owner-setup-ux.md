@@ -1,5 +1,28 @@
 # Owner setup UX — local handoff, 2026-11-05
 
+## Кабинет подтверждённого бизнеса, 25.11.2026
+
+В кабинете платформы откройте клиента, проверьте лимит заведений и подтвердите
+владельца среди действующих участников с подтверждённым Telegram ID. Для
+прежнего клуба, который остался в списке проверки, подтвердите принадлежность
+и укажите решение по каждому показанному спорному праву. Новые клубы владельца привязываются при создании.
+Это правило действует и для ранее зарегистрированных клиентов. Прежние публичные
+клубы без клиентского пространства остаются на своих гостевых маршрутах.
+В клубе откройте «Управляющие», выберите должность и передайте приглашение
+получателю. Получатель открывает его в Telegram и сообщает код инициатору.
+После подтверждения кода управляющий клуба может сохранять настройки. Отзыв
+доступен в том же списке. Сетевому управляющему требуется назначение в каждом
+его клубе. Владелец также может отозвать подтверждённое прежнее назначение
+сотрудника в этом клубе. Другие назначения сотрудника сохраняются. Если
+история выдачи прав неполна или ими уже управляет новая модель, действие
+отзыва прежнего назначения недоступно. Старое незавершённое приглашение
+после подтверждения клуба больше нельзя принять.
+
+Кабинет показывает до 30 последних начавшихся клубных ночей и 30 закрытых
+отчётов. По каждой ночи он показывает брони и посещения, если однозначно
+установлено соответствующее событие. Иначе рядом с датой указано, что данные
+недоступны. Ноль означает, что у установленного события таких записей нет.
+
 Task: `CLB-owner-setup-ux` (user-authorized technical label; no new card).
 Repository: `koteev-m/clubs_bot`. Base and fetched `origin/main`:
 `46db7930f951ff115426d66576731089d75ffc75`.
@@ -67,13 +90,13 @@ the contents of production `hall_plans` or which bytes a real iPhone displayed.
   the existing server reconciliation; the UI does not pretend it only saves
   a template. The separate button applies the saved schedule to the next
   56 calendar days and future dated rules without requiring rule edits.
-- Booking fields distinguish online cutoff before closing, latest arrival
-  after opening, HOLD during checkout, and waiting after the stated arrival.
-  Examples: close 12:00 / cutoff 120 → 10:00; open 00:00 / arrival 180 → 03:00;
-  checkout 21:00 / HOLD 10 → 21:10; stated arrival 01:00 / wait 30 → 01:30.
-  HOLD 10 is advice only. Null, zero where allowed, and saved nondefault values
-  remain distinct. Reads, refresh and unrelated saves never apply the advice.
-  Contradictory arrival/cutoff values warn before save without rewriting them.
+- Updated 2026-11-25 for `CLB-BUSINESS-OWNER-MANAGEMENT`. Booking settings have three durations in minutes. With a 12:00 closing and
+  a 120-minute cutoff, new bookings stop at 10:00. A 10-minute HOLD started at
+  21:00 expires at 21:10. A guest expected at 01:00 with a 30-minute wait can
+  arrive until 01:30 under that reservation. The guest chooses an estimated
+  arrival during the operational night. The former opening-relative arrival
+  deadline no longer participates in previews or readiness.
+  The suggested HOLD is shown separately from its saved value.
 - Preview HOLD reads **«Оформляют бронь (HOLD)»**, with an explanation of
   temporary checkout retention. UNKNOWN reads **«Требуется настройка»**, with
   a known reason or an explicit missing-night/snapshot/table-state explanation.
@@ -182,7 +205,7 @@ do not replace the real staging club's images for this task.
 4. Set Friday, next-day opening 00:00, closing 12:00, closing-next-day unchecked.
    Read the Friday/Saturday sentence and dates before save, save/reopen, then
    use “Сформировать ближайшие ночи”. Verify the night retains Friday's date.
-5. Read all four booking examples. Confirm saved HOLD is unchanged and an
-   unset value stays blank. Try conflicting arrival/cutoff values in the test
-   club and check the warning. In guest preview select HOLD/UNKNOWN/unavailable
+5. Check the three booking examples. Confirm that an existing HOLD is unchanged
+   and an unset value stays blank. An old opening-relative arrival setting must
+   have no effect. In guest preview inspect the night and HOLD/UNKNOWN/unavailable
    fixtures, read the reason and verify that booking controls remain disabled.

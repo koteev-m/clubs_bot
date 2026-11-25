@@ -1,5 +1,11 @@
 # Signed TARGET identity и admission — технический контракт
 
+Уточнение 25.11.2026. Для кабинета на каноническом Telegram-боте действует
+[контракт подтверждения бизнеса и назначения управляющих](PRODUCT_SPEC.md#подтверждение-бизнеса-и-управление-клубами).
+Далее описана более ранняя граница foundation. В текущем срезе V080 хранит
+подтверждённого владельца и его клубы, V081 связывает приглашение с конкретным
+назначением V077. Branded/Managed Bots и остальные роли остаются за пределами среза.
+
 **ROLE_TARGET_IDENTITY_CONTRACT: PROPOSED / READY_FOR_APPROVAL.**
 
 > Local maintenance follow-up: [read-only selector](../ops/role-target-maintenance-selector.md)

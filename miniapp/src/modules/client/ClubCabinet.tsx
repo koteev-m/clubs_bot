@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { useRemote } from './onboarding.hooks';
 import { authorityLost, OnboardingError } from './onboarding.api';
-import { ClubProfile } from './onboarding.types';
+import { businessRoleNames, ClubProfile } from './onboarding.types';
 import { CalendarView, validCalendarView } from './calendar';
 import { PreparationView } from './preparation.types';
 import ClubPreparation from './ClubPreparation';
 import ClubSetup from './ClubSetup';
+import BusinessOverview from './BusinessOverview';
 import { RemoteState, Shell } from './OnboardingShared';
 import {
   ClubRequestScopeProvider,
@@ -21,6 +22,7 @@ type Section =
   | 'finance'
   | 'modules'
   | 'team'
+  | 'managers'
   | 'booking-preview'
   | 'settings'
   | 'readiness'
@@ -99,7 +101,7 @@ function NextNight({
           </p>
         </>
       ) : (
-        <p>Данных пока нет. Настройте расписание клуба.</p>
+        <p>В предварительном расписании нет предстоящих ночей.</p>
       )}
       {Boolean(remote.data?.invalidDates.length) && (
         <p className="po-notice">
@@ -131,7 +133,9 @@ function Settings({
       key: 'profile',
       title: 'Профиль',
       hint: 'Название, описание и часовой пояс',
-      write: can('profile.write'),
+      write:
+        can('profile.write') &&
+        profile.availableActions?.includes('update') === true,
     },
     {
       key: 'calendar',
@@ -292,7 +296,8 @@ function Cabinet({
       },
     },
   );
-  const owner = preparation?.canManage;
+  const businessRole = profile?.businessRole;
+  const owner = !businessRole && preparation?.canManage;
   const callbacks = {
     openProfile: () => safeOpen('profile'),
     openLayout: () => safeOpen('layout'),
@@ -313,20 +318,20 @@ function Cabinet({
             : profile?.name || 'Кабинет клуба'
       }
       subtitle={
-        mode === 'overview'
-          ? owner
-            ? 'Контроль клуба'
-            : 'Кабинет клуба'
-          : profile?.name
+        businessRole && (mode === 'overview' || mode === 'choice')
+          ? businessRoleNames[businessRole]
+          : mode === 'overview'
+            ? owner
+              ? 'Контроль клуба'
+              : 'Кабинет клуба'
+            : profile?.name
       }
       back={() => {
         if (canLeave()) back(profile?.clientId);
       }}
       backDisabled={pending}
       backLabel={
-        mode === 'overview'
-          ? 'Организация и другие заведения'
-          : 'Назад к клубу'
+        mode === 'overview' ? 'Организация и другие заведения' : 'Назад к клубу'
       }
     >
       <RemoteState {...remote} />
@@ -336,7 +341,7 @@ function Cabinet({
             <span>
               {profile.clientName} · <strong>{profile.name}</strong>
             </span>
-            {mode === 'overview' && (
+            {mode === 'overview' && !businessRole && (
               <span className="po-context-badge">
                 {preparation
                   ? preparation.published
@@ -348,7 +353,7 @@ function Cabinet({
           </div>
           {(mode === 'overview' || mode === 'choice') && (
             <>
-              {mode === 'choice' && preparation?.canManage && (
+              {mode === 'choice' && !businessRole && preparation?.canManage && (
                 <p className="po-notice">
                   {preparation.published
                     ? 'Клуб сохранён.'
@@ -357,25 +362,27 @@ function Cabinet({
                   подготовкой.
                 </p>
               )}
-              <ClubPreparation
-                credential={credential}
-                id={id}
-                clientId={profile.clientId}
-                reportDirty={trackDirty}
-                reportPending={trackPending}
-                openTeam={callbacks.openTeam}
-                openSettings={() => open('settings')}
-                openReadiness={() => safeOpen('readiness')}
-                choice={mode === 'choice'}
-                onChosen={() => open('club')}
-                onView={setPreparation}
-                externallyBlocked={
-                  remote.loading ||
-                  remote.revalidating ||
-                  Boolean(remote.error)
-                }
-              />
-              {mode === 'overview' && (
+              {!businessRole && (
+                <ClubPreparation
+                  credential={credential}
+                  id={id}
+                  clientId={profile.clientId}
+                  reportDirty={trackDirty}
+                  reportPending={trackPending}
+                  openTeam={callbacks.openTeam}
+                  openSettings={() => open('settings')}
+                  openReadiness={() => safeOpen('readiness')}
+                  choice={mode === 'choice'}
+                  onChosen={() => open('club')}
+                  onView={setPreparation}
+                  externallyBlocked={
+                    remote.loading ||
+                    remote.revalidating ||
+                    Boolean(remote.error)
+                  }
+                />
+              )}
+              {(mode === 'overview' || businessRole) && (
                 <>
                   <div className="cm-actions">
                     <button
@@ -384,13 +391,26 @@ function Cabinet({
                       disabled={pending}
                       onClick={() => safeOpen('settings')}
                     >
-                      {owner
-                        ? 'Открыть настройки клуба'
-                        : 'Перейти к настройкам'}
+                      {businessRole === 'BUSINESS_OWNER' ||
+                      businessRole === 'NETWORK_MANAGER'
+                        ? 'Сохранённые настройки'
+                        : owner
+                          ? 'Открыть настройки клуба'
+                          : 'Перейти к настройкам'}
                     </button>
-                    {profile.permissions.includes(
-                      'client.club.team.manage',
-                    ) &&
+                    {businessRole &&
+                      profile.permissions.includes(
+                        'client.staff.assign.club_manager',
+                      ) && (
+                        <button
+                          type="button"
+                          className="ob-button"
+                          onClick={() => safeOpen('managers')}
+                        >
+                          Управляющие
+                        </button>
+                      )}
+                    {profile.permissions.includes('client.club.team.manage') &&
                       owner && (
                         <button
                           type="button"
@@ -402,7 +422,8 @@ function Cabinet({
                         </button>
                       )}
                   </div>
-                  {preparation && !owner && (
+                  {(businessRole === 'CLUB_MANAGER' ||
+                    (!businessRole && preparation && !owner)) && (
                     <section aria-label="Задачи по конфигурации">
                       <h2>Настройка клуба</h2>
                       <p className="po-muted">
@@ -412,6 +433,12 @@ function Cabinet({
                       <Settings profile={profile} open={safeOpen} />
                     </section>
                   )}
+                  {profile.permissions.includes('client.club.reports.read') && (
+                    <BusinessOverview
+                      credential={credential}
+                      profile={profile}
+                    />
+                  )}
                   <NextNight
                     key={profile.id + ':' + profile.timezone}
                     credential={credential}
@@ -419,24 +446,10 @@ function Cabinet({
                     open={callbacks.openCalendar}
                   />
                   <section className="po-card ob-card">
-                    <h2>Показатели и отчёты</h2>
-                    <p>Данных пока нет.</p>
-                    <p className="po-muted">
-                      Подтверждённые отчёты о работе клуба в этом кабинете
-                      пока не подключены.
-                    </p>
-                  </section>
-                  <section className="po-card ob-card">
-                    <h2>Требует внимания</h2>
-                    <p>
-                      {!profile.description.trim()
-                        ? 'Добавьте описание клуба.'
-                        : 'Проверьте сохранённые настройки перед началом работы.'}
-                    </p>
-                    <p className="po-muted">
-                      Полный список проверок и незавершённых пунктов доступен
-                      отдельно.
-                    </p>
+                    <h2>Готовность клуба</h2>
+                    {!profile.description.trim() && (
+                      <p>В профиле клуба пока нет описания.</p>
+                    )}
                     <button
                       type="button"
                       className="ob-button"

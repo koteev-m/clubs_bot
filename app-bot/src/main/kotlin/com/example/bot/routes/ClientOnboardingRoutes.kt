@@ -32,7 +32,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.nio.charset.CharacterCodingException
 
 /** HTTP only: identity comes from the shared early signature guard; persistence rechecks authority. */
 internal fun Application.registerClientOnboardingRoutes(
@@ -58,6 +57,9 @@ internal fun Application.registerClientOnboardingRoutes(
 }
 
 private fun Route.clientInvitationEndpoints(api: OnboardingHttp) {
+    post("/manager-invitations/resolve") { api.read(call, OnboardingRead.MANAGER_INVITATION_RESOLVE, body = true) }
+    get("/manager-invitations/{id}") { api.read(call, OnboardingRead.MANAGER_INVITATION_STATUS, "id") }
+    post("/manager-invitations/{id}/claim") { api.mutate(call, OnboardingMutation.MANAGER_INVITATION_CLAIM, "id") }
     get("/locations") { call.safeOnboarding { OnboardingLocations.countries() } }
     post("/locations/search") { call.safeOnboarding { OnboardingLocations.search(call.onboardingBody()) } }
     post("/invitations/resolve") { api.read(call, OnboardingRead.INVITATION_RESOLVE, body = true) }
@@ -79,6 +81,7 @@ private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
     post("/applications/{id}/club") { api.mutate(call, OnboardingMutation.APPLICATION_CREATE_CLUB, "id") }
     get("/clubs/{id}/modules-settings") { api.read(call, OnboardingRead.CLUB_MODULE_SETTINGS_GET, "id") }
     patch("/clubs/{id}/modules-settings") { api.mutate(call, OnboardingMutation.CLUB_MODULE_SETTINGS_UPDATE, "id") }
+    get("/clubs/{id}/business-overview") { api.read(call, OnboardingRead.CLUB_BUSINESS_OVERVIEW, "id") }
     get("/clubs/{id}/finance/template") { api.read(call, OnboardingRead.CLUB_FINANCE_GET, "id") }
     post("/clubs/{id}/finance/template") { api.mutate(call, OnboardingMutation.CLUB_FINANCE_UPDATE, "id") }
     get("/clubs/{id}/booking-rules") { api.read(call, OnboardingRead.CLUB_BOOKING_RULES_GET, "id") }
@@ -94,6 +97,8 @@ private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
     }
     get("/clubs/{id}/preparation") { api.read(call, OnboardingRead.CLUB_PREPARATION_GET, "id") }
     patch("/clubs/{id}/preparation") { api.mutate(call, OnboardingMutation.CLUB_PREPARATION_UPDATE, "id") }
+    get("/clubs/{id}/managers") { api.read(call, OnboardingRead.CLUB_MANAGERS_GET, "id") }
+    post("/clubs/{id}/managers") { api.mutate(call, OnboardingMutation.CLUB_MANAGERS_UPDATE, "id") }
     get("/clubs/{id}/team") { api.read(call, OnboardingRead.CLUB_TEAM_GET, "id") }
     post("/clubs/{id}/team") { api.mutate(call, OnboardingMutation.CLUB_TEAM_UPDATE, "id") }
     get("/clubs/{id}/profile") { api.read(call, OnboardingRead.CLUB_PROFILE_GET, "id") }
@@ -112,6 +117,12 @@ private fun Route.platformInvitationEndpoints(api: OnboardingHttp) {
     post("/clients/{id}/restore") { api.mutate(call, OnboardingMutation.CLIENT_RESTORE, "id") }
     post("/clients/search") { api.read(call, OnboardingRead.PLATFORM_CLIENT_SEARCH, body = true) }
     get("/clients/{id}") { api.read(call, OnboardingRead.PLATFORM_CLIENT_GET, "id") }
+    post("/clients/{id}/members/{userId}/business-owner") {
+        api.mutate(call, OnboardingMutation.BUSINESS_OWNER_CONFIRM, "id")
+    }
+    post("/clients/{id}/members/{userId}/business-clubs/{clubId}") {
+        api.mutate(call, OnboardingMutation.BUSINESS_CLUB_CONFIRM, "id")
+    }
     post("/clients/{id}/limit") { api.mutate(call, OnboardingMutation.CLIENT_LIMIT_UPDATE, "id") }
     post("/clients/{id}/members/{userId}/revoke") { api.mutate(call, OnboardingMutation.MEMBER_REVOKE, "id") }
     post("/clients/{id}/members/{userId}/restore") { api.mutate(call, OnboardingMutation.MEMBER_RESTORE, "id") }
@@ -140,7 +151,7 @@ private class OnboardingHttp(
         pathIds: List<String> = emptyList(),
     ) = call.safeOnboarding {
         repository.read(
-            call.onboardingActor(),
+            call.onboardingActor(operation in MANAGER_READS),
             operation,
             idParameter?.let { call.positiveId(it) },
             if (body) {
@@ -195,6 +206,7 @@ private class OnboardingHttp(
                 (
                     operation in
                         setOf(
+                            OnboardingMutation.CLUB_MANAGERS_UPDATE,
                             OnboardingMutation.CLUB_TEAM_UPDATE,
                             OnboardingMutation.CLUB_PREPARATION_UPDATE,
                         ) &&
@@ -202,6 +214,11 @@ private class OnboardingHttp(
                 )
         if (issuesLink && username == null) throw OnboardingFailure(ErrorCodes.INVITATION_LINK_UNAVAILABLE)
         if (operation == OnboardingMutation.CLUB_CREATE) body = OnboardingLocations.creationBody(body)
+        if (operation == OnboardingMutation.BUSINESS_CLUB_CONFIRM) {
+            val clubId = JsonPrimitive(call.positiveId("clubId").toString())
+            if (body["clubId"] != null && body["clubId"] != clubId) throw OnboardingFailure("validation_error")
+            body = JsonObject(body + ("clubId" to clubId))
+        }
         if (operation in memberMutations) {
             val userId = call.positiveId("userId").toString()
             if (body["userId"] != null && body["userId"] != JsonPrimitive(userId)) {
@@ -211,7 +228,7 @@ private class OnboardingHttp(
         }
         val result =
             repository.mutate(
-                call.onboardingActor(),
+                call.onboardingActor(operation in MANAGER_WRITES),
                 operation,
                 idParameter?.let { call.positiveId(it) },
                 body,
@@ -219,16 +236,31 @@ private class OnboardingHttp(
             )
         val token = result["token"]?.jsonPrimitive?.content
         if (issuesLink && token != null) {
-            JsonObject(result + ("invitationLink" to JsonPrimitive("https://t.me/$username?startapp=ci_$token")))
+            val prefix = if (operation == OnboardingMutation.CLUB_MANAGERS_UPDATE) "cm" else "ci"
+            JsonObject(result + ("invitationLink" to JsonPrimitive("https://t.me/$username?startapp=${prefix}_$token")))
         } else {
             result
         }
     }
 }
 
-private fun ApplicationCall.onboardingActor(): OnboardingActor {
+private val MANAGER_READS =
+    setOf(
+        OnboardingRead.CLUB_MANAGERS_GET,
+        OnboardingRead.MANAGER_INVITATION_RESOLVE,
+        OnboardingRead.MANAGER_INVITATION_STATUS,
+    )
+private val MANAGER_WRITES = setOf(OnboardingMutation.CLUB_MANAGERS_UPDATE, OnboardingMutation.MANAGER_INVITATION_CLAIM)
+
+private fun ApplicationCall.onboardingActor(manager: Boolean = false): OnboardingActor {
     val identity = verifiedClientIdentity()
-    return OnboardingActor(identity.telegramUserId, identity.connectionKey, username = identity.username)
+    if (manager && identity.managerAuthenticatedAt == null) throw OnboardingFailure("unauthorized")
+    return OnboardingActor(
+        identity.telegramUserId,
+        identity.connectionKey,
+        username = identity.username,
+        managerAuthenticatedAt = identity.managerAuthenticatedAt,
+    )
 }
 
 private fun ApplicationCall.positiveId(parameter: String): Long =
@@ -258,6 +290,7 @@ private suspend fun ApplicationCall.safeOnboarding(block: suspend () -> JsonObje
     } catch (failure: OnboardingFailure) {
         val status =
             when (failure.code) {
+                "unauthorized" -> HttpStatusCode.Unauthorized
                 "not_found" -> HttpStatusCode.NotFound
                 "forbidden" -> HttpStatusCode.Forbidden
                 "validation_error" -> HttpStatusCode.BadRequest
@@ -280,7 +313,13 @@ private val POSITIVE_ID = Regex("[1-9][0-9]*")
 private val BOT_USERNAME = Regex("[A-Za-z][A-Za-z0-9_]{4,31}")
 private val COMMAND_KEY = Regex("[A-Za-z0-9._:-]{8,128}")
 private val invitationIssuers = setOf(OnboardingMutation.INVITATION_ISSUE, OnboardingMutation.INVITATION_REISSUE)
-private val memberMutations = setOf(OnboardingMutation.MEMBER_REVOKE, OnboardingMutation.MEMBER_RESTORE)
+private val memberMutations =
+    setOf(
+        OnboardingMutation.MEMBER_REVOKE,
+        OnboardingMutation.MEMBER_RESTORE,
+        OnboardingMutation.BUSINESS_OWNER_CONFIRM,
+        OnboardingMutation.BUSINESS_CLUB_CONFIRM,
+    )
 private val conflictCodes =
     setOf(
         ErrorCodes.VERSION_CONFLICT,

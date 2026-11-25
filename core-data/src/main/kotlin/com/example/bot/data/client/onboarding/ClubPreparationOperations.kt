@@ -16,8 +16,9 @@ internal class ClubPreparationOperations(
         val clientId = session.requireClubGrant(clubId)
         val club = sql.row("SELECT name,is_active FROM clubs WHERE id=?", clubId) ?: fail("not_found")
         val row = state(clubId)
-        val manage = manages(clientId, clubId)
-        val submit = submits(clientId, clubId, row)
+        val managedClub = session.businessClub(clientId, clubId)
+        val manage = !managedClub && manages(clientId, clubId)
+        val submit = !managedClub && submits(clientId, clubId, row)
         val invitation =
             row?.get("invitation_id")?.toLong()?.let {
                 sql.row("SELECT * FROM client_invitations WHERE id=? AND purpose='staff'", it)
@@ -54,6 +55,7 @@ internal class ClubPreparationOperations(
         body: JsonObject,
     ): MutationResult {
         val clientId = session.requireClubGrant(clubId)
+        if (session.businessClub(clientId, clubId)) fail("not_found")
         val action = body.string("action") ?: fail("validation_error")
         if (action != "submit") access.owner(clubId)
         initialize(clientId, clubId)
@@ -82,6 +84,7 @@ internal class ClubPreparationOperations(
         submission: Boolean,
     ): JsonObject {
         val clientId = session.requireClubGrant(clubId)
+        if (session.businessClub(clientId, clubId)) fail("not_found")
         if (submission) {
             if (!assignedActive(clientId, clubId, state(clubId)) ||
                 state(clubId)?.get("assignee_user_id")?.toLong() != session.userId

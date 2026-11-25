@@ -91,14 +91,14 @@ describe('private club onboarding B', () => {
   });
 
   it('keeps old approved data as history with explicit reuse and no approval consumption action', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
-      response(approved),
+    vi.spyOn(globalThis, 'fetch').mockImplementation((path) =>
+      response(String(path).endsWith('/onboarding') ? { canCreate: true } : approved),
     );
     render(<ClientAccess initialToken={null} />);
     await screen.findByText('Synthetic Street 1');
     expect(screen.getByText('Test Unit')).toBeTruthy();
     expect(
-      screen.getByRole('button', {
+      await screen.findByRole('button', {
         name: 'Использовать данные для создания',
       }),
     ).toBeTruthy();

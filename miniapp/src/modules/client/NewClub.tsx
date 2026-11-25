@@ -97,6 +97,12 @@ export default function NewClub({
         <RemoteState {...context} />
       </Shell>
     );
+  if (context.data?.canCreate !== true)
+    return (
+      <Shell title="Создать заведение" back={back}>
+        <p>Для создания нового заведения владелец платформы должен подтвердить владельца бизнеса.</p>
+      </Shell>
+    );
   return (
     <Shell
       title="Создать заведение"

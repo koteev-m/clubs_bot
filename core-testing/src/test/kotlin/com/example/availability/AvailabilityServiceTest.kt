@@ -32,8 +32,7 @@ class AvailabilityServiceTest {
         var listHoldCalls = 0
         var listBookingCalls = 0
 
-        override suspend fun findClub(clubId: Long) =
-            Club(clubId, "Europe/Berlin").also { findClubCalls += 1 }
+        override suspend fun findClub(clubId: Long) = Club(clubId, "Europe/Berlin").also { findClubCalls += 1 }
 
         override suspend fun listClubHours(clubId: Long) =
             listOf(
@@ -62,14 +61,13 @@ class AvailabilityServiceTest {
         override suspend fun findEvent(
             clubId: Long,
             startUtc: Instant,
-        ) =
-            Event(
-                id = 42,
-                clubId = clubId,
-                startUtc = startUtc,
-                endUtc = startUtc.plus(Duration.ofHours(8)),
-                isSpecial = true,
-            ).also { findEventCalls += 1 }
+        ) = Event(
+            id = 42,
+            clubId = clubId,
+            startUtc = startUtc,
+            endUtc = startUtc.plus(Duration.ofHours(8)),
+            isSpecial = true,
+        ).also { findEventCalls += 1 }
 
         override suspend fun listTables(clubId: Long) =
             listOf(
@@ -99,6 +97,7 @@ class AvailabilityServiceTest {
             assertEquals(LocalDateTime.of(2024, 3, 30, 22, 0), first.openLocal)
             assertEquals(LocalDateTime.of(2024, 3, 31, 6, 0), first.closeLocal)
             assertEquals(Duration.ofHours(7), Duration.between(first.eventStartUtc, first.eventEndUtc))
+            assertEquals(first.eventEndUtc, first.arrivalByUtc)
 
             val second = nights[1]
             assertEquals(LocalDateTime.of(2024, 4, 5, 22, 0), second.openLocal)
@@ -126,9 +125,30 @@ class AvailabilityServiceTest {
 
             assertEquals(1, first.size)
             assertEquals(2, second.size)
-            assertEquals(1.0, registry.get("availability.cache.miss").tag("operation", "nights").counter().count())
-            assertEquals(1.0, registry.get("availability.cache.hit").tag("operation", "nights").counter().count())
-            assertEquals(1L, registry.get("availability.load.latency").tag("operation", "nights").timer().count())
+            assertEquals(
+                1.0,
+                registry
+                    .get("availability.cache.miss")
+                    .tag("operation", "nights")
+                    .counter()
+                    .count(),
+            )
+            assertEquals(
+                1.0,
+                registry
+                    .get("availability.cache.hit")
+                    .tag("operation", "nights")
+                    .counter()
+                    .count(),
+            )
+            assertEquals(
+                1L,
+                registry
+                    .get("availability.load.latency")
+                    .tag("operation", "nights")
+                    .timer()
+                    .count(),
+            )
         }
 
     @Test
@@ -154,9 +174,30 @@ class AvailabilityServiceTest {
             assertEquals(1, repo.findClubCalls)
             assertEquals(1, repo.findEventCalls)
             assertEquals(1, repo.listTablesCalls)
-            assertEquals(1.0, registry.get("availability.cache.miss").tag("operation", "tables").counter().count())
-            assertEquals(1.0, registry.get("availability.cache.hit").tag("operation", "tables").counter().count())
-            assertEquals(1L, registry.get("availability.load.latency").tag("operation", "tables").timer().count())
+            assertEquals(
+                1.0,
+                registry
+                    .get("availability.cache.miss")
+                    .tag("operation", "tables")
+                    .counter()
+                    .count(),
+            )
+            assertEquals(
+                1.0,
+                registry
+                    .get("availability.cache.hit")
+                    .tag("operation", "tables")
+                    .counter()
+                    .count(),
+            )
+            assertEquals(
+                1L,
+                registry
+                    .get("availability.load.latency")
+                    .tag("operation", "tables")
+                    .timer()
+                    .count(),
+            )
         }
 
     @Test

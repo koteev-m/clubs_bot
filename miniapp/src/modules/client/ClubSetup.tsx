@@ -133,7 +133,7 @@ export default function ClubSetup({
 }) {
   const base = '/api/client/clubs/' + profile.id;
   const options = { retainOnForeground: true };
-  const canReadTeam = profile.permissions.includes('client.club.team.manage');
+  const canReadTeam = !profile.businessRole && profile.permissions.includes('client.club.team.manage');
   const teamRead = useRemote<TeamView>(
     credential,
     canReadTeam ? base + '/team' : null,
@@ -392,12 +392,7 @@ export default function ClubSetup({
     : unavailable(calendarRead);
 
   const inconsistent =
-    rules?.nights.filter(
-      (night) =>
-        night.cutoffAtOrBeforeOpen ||
-        night.arrivalAtOrAfterClose ||
-        night.cutoffAfterArrival,
-    ).length ?? 0;
+    rules?.nights.filter((night) => night.cutoffAtOrBeforeOpen).length ?? 0;
   const rulesCheck: Check = rules
     ? {
         status: snapshotsDisagree
@@ -418,8 +413,7 @@ export default function ClubSetup({
             </p>
             {inconsistent > 0 && (
               <p>
-                Для {inconsistent} ночей проверьте время окончания приёма броней
-                и прибытия.
+                Для {inconsistent} ночей проверьте время окончания приёма броней.
               </p>
             )}
           </>
@@ -739,7 +733,7 @@ export default function ClubSetup({
                 : undefined,
           }}
         />
-        <Row
+        {!profile.businessRole && <Row
           disabled={navigationBlocked}
           title="Команда"
           check={{
@@ -764,7 +758,7 @@ export default function ClubSetup({
                 ? { label: 'Команда клуба', open: openTeam }
                 : undefined,
           }}
-        />
+        />}
         <Row
           disabled={navigationBlocked}
           title="Отдельный бот клуба"

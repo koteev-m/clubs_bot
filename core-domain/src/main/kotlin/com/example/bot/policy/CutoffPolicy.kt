@@ -5,11 +5,10 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * Booking cutoff and arrival policies.
+ * Online booking cutoff.
  */
 class CutoffPolicy(
     private val onlineCutoffMinutes: Long = 60,
-    private val defaultArrivalByMinutes: Long = 120,
 ) {
     /**
      * Returns true when online booking is still allowed for the slot.
@@ -22,11 +21,6 @@ class CutoffPolicy(
         return cutoff.isBefore(slot.eventStartUtc)
     }
 
-    /**
-     * Calculates latest arrival time for the slot.
-     */
-    fun arrivalBy(slot: NightSlot): Instant {
-        val proposed = slot.eventStartUtc.plus(Duration.ofMinutes(defaultArrivalByMinutes))
-        return if (proposed.isAfter(slot.eventEndUtc)) slot.eventEndUtc else proposed
-    }
+    /** The legacy availability DTO exposes the closing instant as its arrival boundary. */
+    fun arrivalBy(slot: NightSlot): Instant = slot.eventEndUtc
 }

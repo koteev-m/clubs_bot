@@ -31,7 +31,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-open class UnifiedClubTablesRoutesTest : ClientOnboardingRoutesTestBase() {
+open class UnifiedClubTablesRoutesTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `create 15 physical tables without a plan place move and clear without creating another pair`() =
         database { source ->

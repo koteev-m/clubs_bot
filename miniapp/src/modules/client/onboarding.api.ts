@@ -53,7 +53,13 @@ export async function onboardingRequest<T>(
         typeof data.code === 'string'
           ? data.code
           : 'request_failed';
+      // A manager command may be forbidden for one assignment while the same
+      // signed user retains other grants. The roster screen rechecks its own scope.
+      const deniedManagerCommand =
+        response.status === 403 && Boolean(options.key) &&
+        /^\/api\/client\/clubs\/[1-9][0-9]*\/managers$/.test(path);
       if (
+        !deniedManagerCommand &&
         !controller.signal.aborted &&
         (options.isCurrent?.() ?? true) &&
         ([401, 403].includes(response.status) ||

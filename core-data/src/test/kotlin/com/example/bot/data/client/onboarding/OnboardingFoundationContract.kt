@@ -29,7 +29,8 @@ internal abstract class OnboardingFoundationContract {
 
     @BeforeEach
     fun setup() {
-        fixture = newFixture()
+        // These contracts exercise the historical creator bootstrap, including duplicate creation and replay.
+        fixture = newFixture(LEGACY_CLUB_CREATION_VERSION)
     }
 
     @AfterEach

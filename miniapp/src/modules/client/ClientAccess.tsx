@@ -11,8 +11,10 @@ import ClubLayout from './ClubLayout';
 import ClubFinance from './ClubFinance';
 import ClubModules from './ClubModules';
 import ClubTeam from './ClubTeam';
+import ClubManagers from './ClubManagers';
+import { businessRoleNames } from './onboarding.types';
 import { roleNames } from './team.types';
-import { scrubClientLaunchUrl } from './clientEntry';
+import { scrubClientLaunchUrl, type InvitationKind } from './clientEntry';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
   ApplicationSummary,
@@ -45,11 +47,12 @@ type Screen =
   | { type: 'finance'; id: string }
   | { type: 'modules'; id: string }
   | { type: 'team'; id: string }
+  | { type: 'managers'; id: string }
   | { type: 'booking-rules'; id: string }
   | { type: 'booking-preview'; id: string }
   | { type: 'layout'; id: string; hallId?: string }
   | { type: 'new'; id: string; previous?: ClubApplication }
-  | { type: 'invitation'; id?: string };
+  | { type: 'invitation' | 'manager-invitation'; id?: string };
 function savedScreen(): Screen {
   const params = new URLSearchParams(window.location.search);
   const id = params.get('resource');
@@ -57,8 +60,7 @@ function savedScreen(): Screen {
   if (params.get('screen') === 'client-space') return { type: 'space', id };
   if (params.get('screen') === 'application')
     return { type: 'application', id };
-  if (params.get('screen') === 'invitation')
-    return { type: 'invitation', id };
+  if (params.get('screen') === 'invitation') return { type: 'invitation', id };
   if (params.get('screen') === 'new-club') return { type: 'new', id };
   if (params.get('screen') === 'layout') {
     const hallId = params.get('hall');
@@ -73,6 +75,9 @@ function savedScreen(): Screen {
   if (params.get('screen') === 'booking-rules')
     return { type: 'booking-rules', id };
   if (params.get('screen') === 'finance') return { type: 'finance', id };
+  if (params.get('screen') === 'manager-invitation')
+    return { type: 'manager-invitation', id };
+  if (params.get('screen') === 'managers') return { type: 'managers', id };
   if (params.get('screen') === 'team') return { type: 'team', id };
   if (params.get('screen') === 'modules') return { type: 'modules', id };
   if (params.get('screen') === 'calendar') return { type: 'calendar', id };
@@ -98,9 +103,11 @@ function screenKey(screen: Screen): string {
 
 export default function ClientAccess({
   initialToken,
+  invitationKind,
   onTokenConsumed,
 }: {
   initialToken: string | null;
+  invitationKind?: InvitationKind | null;
   onTokenConsumed?: () => void;
 }) {
   const { initData } = useInitData();
@@ -129,6 +136,7 @@ export default function ClientAccess({
         key={credential}
         credential={credential}
         initialToken={initialToken}
+        invitationKind={invitationKind}
         onTokenConsumed={onTokenConsumed}
       />
     </div>
@@ -138,15 +146,19 @@ export default function ClientAccess({
 function ClientWorkspace({
   credential,
   initialToken,
+  invitationKind,
   onTokenConsumed,
 }: {
   credential: string;
   initialToken: string | null;
+  invitationKind?: InvitationKind | null;
   onTokenConsumed?: () => void;
 }) {
   const [token, setToken] = useState(initialToken);
   const [screen, setScreen] = useState<Screen>(() =>
-    token ? { type: 'invitation' } : savedScreen(),
+    token
+      ? { type: invitationKind === 'manager' ? 'manager-invitation' : 'invitation' }
+      : savedScreen(),
   );
   const [draftClient, setDraftClient] = useState(
     screen.type === 'new' ? screen.id : '',
@@ -158,8 +170,7 @@ function ClientWorkspace({
   const drafts = useRef(
     new Map<string, { fields: NewVenueFields; previous?: ClubApplication }>(),
   );
-  if (draftClient)
-    drafts.current.set(draftClient, { fields: draft, previous });
+  if (draftClient) drafts.current.set(draftClient, { fields: draft, previous });
   const pendingClient = useRef('');
   pendingClient.current = createClub.blocked ? draftClient : '';
   const dirty = useRef(false);
@@ -335,17 +346,18 @@ function ClientWorkspace({
     navigate({ type: 'home' });
     offerInitialShortcut.current = true;
   }, [navigate, onTokenConsumed]);
-  if (screen.type === 'invitation')
+  if (screen.type === 'invitation' || screen.type === 'manager-invitation')
     return (
       <InvitationScreen
         key={credential + ':' + (token ? 'token' : screen.id)}
+        manager={screen.type === 'manager-invitation'}
         reportPending={reportSectionPending}
         command={invitationCommand}
         credential={credential}
         token={token}
         id={screen.id}
         home={home}
-        resolved={(id) => navigate({ type: 'invitation', id }, true)}
+        resolved={(id) => navigate({ type: screen.type, id }, true)}
         claimed={() => {
           setToken(null);
           onTokenConsumed?.();
@@ -377,7 +389,7 @@ function ClientWorkspace({
           setDraft(blankNewVenue);
           setDraftClient('');
           setPrevious(undefined);
-          navigate({ type: 'preparation-choice', id: club.id });
+          navigate({ type: 'club', id: club.id });
         }}
       />
     );
@@ -416,14 +428,17 @@ function ClientWorkspace({
   if (
     screen.type === 'finance' ||
     screen.type === 'modules' ||
-    screen.type === 'team'
+    screen.type === 'team' ||
+    screen.type === 'managers'
   ) {
     const Component =
-      screen.type === 'team'
-        ? ClubTeam
-        : screen.type === 'finance'
-          ? ClubFinance
-          : ClubModules;
+      screen.type === 'managers'
+        ? ClubManagers
+        : screen.type === 'team'
+          ? ClubTeam
+          : screen.type === 'finance'
+            ? ClubFinance
+            : ClubModules;
     return (
       <Component
         key={screen.type + ':' + screen.id}
@@ -608,6 +623,7 @@ function ClientHome({
 function InvitationScreen({
   credential,
   token,
+  manager,
   id,
   home,
   resolved,
@@ -617,6 +633,7 @@ function InvitationScreen({
 }: {
   credential: string;
   token: string | null;
+  manager: boolean;
   id?: string;
   home: () => void;
   resolved: (id: string) => void;
@@ -635,11 +652,12 @@ function InvitationScreen({
     setCurrent(undefined);
     cancel.current();
   };
+  const base = manager
+    ? '/api/client/manager-invitations'
+    : '/api/client/invitations';
   const remote = useRemote<Invitation>(
     credential,
-    token
-      ? '/api/client/invitations/resolve'
-      : '/api/client/invitations/' + id,
+    token ? base + '/resolve' : base + '/' + id,
     token ? { token } : undefined,
     {
       onError: readError,
@@ -647,7 +665,11 @@ function InvitationScreen({
         if (
           !/^[1-9][0-9]*$/.test(received.id) ||
           !/^[1-9][0-9]*$/.test(received.version) ||
-          (id && received.id !== id)
+          (id && received.id !== id) ||
+          (manager &&
+            (received.acceptanceMode !== 'manager' ||
+              (received.role !== 'NETWORK_MANAGER' &&
+                received.role !== 'CLUB_MANAGER')))
         )
           throw new Error('Invalid invitation response');
         authority.current = {
@@ -702,9 +724,28 @@ function InvitationScreen({
   };
   const invitation = current;
   const staff = invitation?.acceptanceMode === 'staff';
+  const renew =
+    manager &&
+    invitation?.status === 'claimed' &&
+    invitation.availableActions.includes('claim');
+  const claim = () => {
+    if (!invitation) return;
+    const epoch = authority.current.epoch;
+    command.run(
+      base + '/' + invitation.id + '/claim',
+      { ...(token ? { token } : {}), expectedVersion: invitation.version },
+      (result) => accept(result, epoch),
+    );
+  };
   return (
     <Shell
-      title={staff ? 'Приглашение в команду' : 'Приглашение клиента'}
+      title={
+        manager
+          ? 'Приглашение управляющего'
+          : staff
+            ? 'Приглашение в команду'
+            : 'Приглашение клиента'
+      }
       back={() => {
         if (!command.blocked || authority.current.denied) home();
       }}
@@ -716,13 +757,20 @@ function InvitationScreen({
           <section className="po-card ob-card">
             <h2>
               {invitation.clientName}
-              {staff ? ` · ${invitation.clubName}` : ''}
+              {staff || manager ? ` · ${invitation.clubName}` : ''}
             </h2>
             <p>{invitationLabels[invitation.status]}</p>
-            {staff && invitation.role && (
+            {manager &&
+              (invitation.role === 'NETWORK_MANAGER' ||
+                invitation.role === 'CLUB_MANAGER') && (
+                <p>
+                  {businessRoleNames[invitation.role]} · {invitation.clubName}
+                </p>
+              )}
+            {staff && invitation.role && invitation.role in roleNames && (
               <p>
-                Роль: {roleNames[invitation.role]}. Только этот клуб.
-                Операционные права не выдаются.
+                Роль: {roleNames[invitation.role as keyof typeof roleNames]}.
+                Только этот клуб. Операционные права не выдаются.
               </p>
             )}
             <p className="po-muted">
@@ -733,29 +781,24 @@ function InvitationScreen({
           {invitation.status === 'issued' && token && (
             <>
               <p>
-                {staff
-                  ? 'Подтвердите свой Telegram-аккаунт. Доступ появится только после отдельного подтверждения владельцем клуба.'
-                  : invitation.acceptanceMode === 'direct'
-                    ? 'Примите приглашение, чтобы открыть свой кабинет.'
-                    : 'Это прежнее приглашение: после принятия потребуется подтверждение владельца платформы.'}
+                {manager
+                  ? 'Подтвердите свой Telegram-аккаунт и передайте отправителю код для назначения в этот клуб.'
+                  : staff
+                    ? 'Подтвердите свой Telegram-аккаунт. Доступ появится только после отдельного подтверждения владельцем клуба.'
+                    : invitation.acceptanceMode === 'direct'
+                      ? 'Примите приглашение, чтобы открыть свой кабинет.'
+                      : 'Это прежнее приглашение: после принятия потребуется подтверждение владельца платформы.'}
               </p>
               <button
                 className="po-primary"
                 disabled={
                   command.blocked || remote.loading || remote.revalidating
                 }
-                onClick={() => {
-                  const epoch = authority.current.epoch;
-                  command.run(
-                    '/api/client/invitations/' + invitation.id + '/claim',
-                    { token, expectedVersion: invitation.version },
-                    (result) => accept(result, epoch),
-                  );
-                }}
+                onClick={claim}
               >
                 {command.saving
                   ? 'Принимаем…'
-                  : staff
+                  : staff || manager
                     ? 'Подтвердить Telegram-аккаунт'
                     : 'Принять приглашение'}
               </button>
@@ -764,19 +807,43 @@ function InvitationScreen({
           {invitation.status === 'claimed' && (
             <section className="po-card ob-card">
               <h2>
-                {staff
-                  ? 'Ожидаем подтверждение владельца клуба'
-                  : 'Ожидаем подтверждение платформы'}
+                {manager
+                  ? 'Ожидаем подтверждения назначения'
+                  : staff
+                    ? 'Ожидаем подтверждение владельца клуба'
+                    : 'Ожидаем подтверждение платформы'}
               </h2>
-              <p>
-                Сообщите этот одноразовый код отправителю в исходном личном
-                чате:
-              </p>
-              <p className="ob-code">{invitation.verificationCode}</p>
-              <p className="po-muted">
-                Код нужен для сверки человека. Сам по себе он не предоставляет
-                доступ.
-              </p>
+              {renew ? (
+                <>
+                  <p>
+                    Срок кода истёк. Подтвердите аккаунт ещё раз и отправьте
+                    новый код пригласившему вас человеку.
+                  </p>
+                  <button
+                    className="po-primary"
+                    disabled={
+                      command.blocked || remote.loading || remote.revalidating
+                    }
+                    onClick={claim}
+                  >
+                    Обновить подтверждение
+                  </button>
+                </>
+              ) : (
+                invitation.verificationCode && (
+                  <>
+                    <p>
+                      Сообщите этот одноразовый код отправителю в исходном
+                      личном чате.
+                    </p>
+                    <p className="ob-code">{invitation.verificationCode}</p>
+                    <p className="po-muted">
+                      Код нужен для сверки человека. Сам по себе он не
+                      предоставляет доступ.
+                    </p>
+                  </>
+                )
+              )}
               {staff && (
                 <p>
                   Клубные разрешения пока не выданы. После подтверждения
@@ -836,34 +903,48 @@ function ClientSpace({
   return (
     <Shell
       title={remote.data?.name ?? 'Клиентское пространство'}
-      subtitle="Организация · клиентское пространство"
+      subtitle={
+        remote.data?.businessOwner
+          ? 'Кабинет владельца бизнеса'
+          : 'Организация · клиентское пространство'
+      }
       back={back}
     >
       <RemoteState {...remote} />
       {remote.data && (
         <>
-          <section className="po-card ob-card">
-            <p>
-              Разрешено всего: {remote.data.allowedClubs ?? 'не настроено'}
-            </p>
-            <p>
-              Создано: {remote.data.createdClubs ?? remote.data.clubs.length}
-            </p>
-            <p>Можно добавить: {remote.data.availableClubs ?? 0}</p>
-            {remote.data.allowedClubs == null && (
-              <p>
-                Для нового заведения владелец платформы должен установить
-                лимит. Существующие заведения доступны.
+          {remote.data.businessOwnerRequired &&
+            !remote.data.businessOwner &&
+            remote.data.permissions.includes('client.application.manage') && (
+              <p className="po-notice">
+                Для создания нового заведения владелец платформы должен
+                подтвердить владельца бизнеса.
               </p>
             )}
-            {remote.data.allowedClubs != null &&
-              remote.data.availableClubs === 0 && (
+          {remote.data.showClubLimit !== false && (
+            <section className="po-card ob-card">
+              <p>
+                Разрешено всего: {remote.data.allowedClubs ?? 'не настроено'}
+              </p>
+              <p>
+                Создано: {remote.data.createdClubs ?? remote.data.clubs.length}
+              </p>
+              <p>Можно добавить: {remote.data.availableClubs ?? 0}</p>
+              {remote.data.allowedClubs == null && (
                 <p>
-                  Для дополнительного заведения согласуйте увеличение лимита с
-                  владельцем платформы.
+                  Для нового заведения владелец платформы должен установить
+                  лимит. Существующие заведения доступны.
                 </p>
               )}
-          </section>
+              {remote.data.allowedClubs != null &&
+                remote.data.availableClubs === 0 && (
+                  <p>
+                    Для дополнительного заведения согласуйте увеличение лимита с
+                    владельцем платформы.
+                  </p>
+                )}
+            </section>
+          )}
           <section className="ob-section">
             <h2>Мои заведения</h2>
             {remote.data.clubs.length === 0 && (
@@ -880,21 +961,21 @@ function ClientSpace({
               </button>
             ))}
           </section>
+          {remote.data.canCreate === true && (
+            <button
+              className="po-primary"
+              disabled={!remote.data.availableClubs}
+              onClick={() => navigate({ type: 'new', id })}
+            >
+              Создать заведение
+            </button>
+          )}
           {remote.data.permissions.includes('client.application.manage') && (
-            <>
-              <button
-                className="po-primary"
-                disabled={!remote.data.availableClubs}
-                onClick={() => navigate({ type: 'new', id })}
-              >
-                Создать заведение
-              </button>
-              <ApplicationList
-                credential={credential}
-                path={'/api/client/clients/' + id + '/applications/search'}
-                open={(app) => navigate({ type: 'application', id: app.id })}
-              />
-            </>
+            <ApplicationList
+              credential={credential}
+              path={'/api/client/clients/' + id + '/applications/search'}
+              open={(app) => navigate({ type: 'application', id: app.id })}
+            />
           )}
         </>
       )}
@@ -977,8 +1058,8 @@ function ClientApplication({
         <>
           <ApplicationSummary application={remote.data} />
           <p className="po-notice">
-            Заявка сохранена как история. Новые заведения создаются в пределах
-            лимита клиента.
+            Заявка сохранена как история. Подтверждённый владелец бизнеса может
+            использовать её данные для создания заведения в пределах лимита.
           </p>
           {remote.data.createdClubId &&
           remote.data.availableActions.includes('openClub') ? (
@@ -990,22 +1071,33 @@ function ClientApplication({
             >
               Открыть клуб
             </button>
-          ) : (
-            <button
-              className="po-primary"
-              onClick={() =>
-                navigate({
-                  type: 'new',
-                  id: remote.data!.clientId,
-                  previous: remote.data!,
-                })
-              }
-            >
-              Использовать данные для создания
-            </button>
-          )}
+          ) : !remote.data.createdClubId ? (
+            <CreateFromApplication credential={credential} application={remote.data} navigate={navigate} />
+          ) : null}
         </>
       )}
     </Shell>
+  );
+}
+
+
+function CreateFromApplication({
+  credential,
+  application,
+  navigate,
+}: {
+  credential: string;
+  application: ClubApplication;
+  navigate: (screen: Screen) => void;
+}) {
+  const context = useRemote<OnboardingContext>(
+    credential, '/api/client/clients/' + application.clientId + '/onboarding',
+  );
+  if (!context.data) return <RemoteState {...context} />;
+  if (context.data.canCreate !== true) return null;
+  return (
+    <button className="po-primary" onClick={() => navigate({ type: 'new', id: application.clientId, previous: application })}>
+      Использовать данные для создания
+    </button>
   );
 }

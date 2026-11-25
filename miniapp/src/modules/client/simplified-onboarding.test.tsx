@@ -30,6 +30,8 @@ const context = {
   permissions: ['client.application.manage'],
   clubs: [],
   allowedClubs: 1,
+  canCreate: true,
+  businessOwner: true,
   createdClubs: 0,
   availableClubs: 1,
 };
@@ -44,6 +46,7 @@ const profile = {
   unit: '',
   timezone: 'Europe/Moscow',
   description: '',
+  businessRole: 'BUSINESS_OWNER',
   version: '1',
   savedAt: '2026-10-29T12:00:00Z',
   permissions: ['client.club.read'],
@@ -194,8 +197,8 @@ describe('simplified onboarding', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Создать заведение' }),
     );
-    await screen.findByText('Кто будет настраивать клуб?');
-    expect(await screen.findByText(/Клуб не опубликован/)).toBeTruthy();
+    await screen.findByText('Владелец бизнеса', { exact: true });
+    expect(screen.queryByText('Кто будет настраивать клуб?')).toBeNull();
     const create = fetch.mock.calls.find(([path]) =>
       String(path).endsWith('/clubs'),
     )!;
@@ -211,7 +214,7 @@ describe('simplified onboarding', () => {
       ),
     ).toBe(false);
     expect(location.search).toContain(
-      'screen=preparation-choice&resource=100',
+      'screen=club&resource=100',
     );
   });
 
@@ -261,7 +264,7 @@ describe('simplified onboarding', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Повторить ту же операцию' }),
     );
-    await screen.findByText('Кто будет настраивать клуб?');
+    await screen.findByText('Владелец бизнеса', { exact: true });
     const commands = fetch.mock.calls.filter(([path]) =>
       String(path).endsWith('/clubs'),
     );
@@ -308,6 +311,30 @@ describe('simplified onboarding', () => {
     expect(
       screen.getByText(/владелец платформы должен установить лимит/),
     ).toBeTruthy();
+  });
+
+  it('keeps restored club access visible without allowing creation from an application grant', async () => {
+    const restored = {
+      ...context,
+      businessOwnerRequired: true,
+      businessOwner: false,
+      canCreate: false,
+      showClubLimit: false,
+      clubs: [{ id: profile.id, name: profile.name }],
+    };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (path) =>
+      reply(String(path).endsWith('/onboarding') ? restored : { items: [] }),
+    );
+    history.replaceState({}, '', '/app?mode=client&screen=client-space&resource=20');
+    const page = render(<ClientAccess initialToken={null} />);
+    await screen.findByText(/Для создания нового заведения/);
+    expect(screen.getByRole('button', { name: /Клуб Открыть клуб/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Создать заведение' })).toBeNull();
+    page.unmount();
+    history.replaceState({}, '', '/app?mode=client&screen=new-club&resource=20');
+    render(<ClientAccess initialToken={null} />);
+    await screen.findByText(/Для создания нового заведения/);
+    expect(screen.queryByLabelText('Название заведения')).toBeNull();
   });
 
   it('owner sees counts, updates the total with version and displays below-usage refusal', async () => {

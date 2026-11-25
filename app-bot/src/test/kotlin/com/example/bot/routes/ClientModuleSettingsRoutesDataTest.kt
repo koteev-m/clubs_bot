@@ -21,7 +21,7 @@ import javax.sql.DataSource
 import kotlin.test.assertEquals
 
 /** Identical transport, authorization, persistence and race checks on H2 and PostgreSQL. */
-open class ClientModuleSettingsRoutesDataTest : ClientOnboardingRoutesTestBase() {
+open class ClientModuleSettingsRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `read is inert and explicit save persists canonical early rule without activating anything`() =
         database { source ->

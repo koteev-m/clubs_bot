@@ -431,3 +431,14 @@ it.each(['saving', 'unknown'])(
     expect(reportPending).toHaveBeenLastCalledWith(false);
   },
 );
+
+it('shows the stored club details without inventing a save date for a historical club', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+    response({ ...profile, savedAt: null }),
+  );
+  render(<ClubProfile {...props} />);
+  await screen.findByRole('heading', { name: profile.name, level: 1 });
+  expect(screen.getByText(profile.address)).toBeTruthy();
+  expect(screen.queryByText(/Последнее успешное сохранение/)).toBeNull();
+  expect(document.querySelector('time')).toBeNull();
+});

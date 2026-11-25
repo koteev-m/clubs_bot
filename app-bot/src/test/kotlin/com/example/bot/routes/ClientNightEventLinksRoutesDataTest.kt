@@ -29,7 +29,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
-open class ClientNightEventLinksRoutesDataTest : ClientOnboardingRoutesTestBase() {
+open class ClientNightEventLinksRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `upgrade preserves legacy rows and legacy readers and writers on an empty link table`() =
         databaseAt("69") { source ->
@@ -76,6 +76,8 @@ open class ClientNightEventLinksRoutesDataTest : ClientOnboardingRoutesTestBase(
             assertEquals(1, migrateBookingRulesFixture(source, vendor, "76"))
             assertEquals(1, migrateBookingRulesFixture(source, vendor, "77"))
             assertEquals(1, migrateBookingRulesFixture(source, vendor, "78"))
+            assertEquals(1, migrateBookingRulesFixture(source, vendor, "79"))
+            assertEquals(1, migrateBookingRulesFixture(source, vendor, "80"))
             assertEquals(1, migrateBookingRulesFixture(source, vendor))
             assertEquals("0", source.linkCount())
             assertEquals(

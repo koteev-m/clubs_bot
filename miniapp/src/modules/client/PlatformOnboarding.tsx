@@ -10,6 +10,7 @@ import {
   Shell,
 } from './OnboardingShared';
 import {
+  Club,
   ClientDetail,
   ClientSummary,
   ClubApplication,
@@ -322,8 +323,8 @@ function OwnerInvite({
           <p className="po-notice">
             Ссылка действует семь суток. Её фактический получатель сможет
             принять приглашение и открыть кабинет. Передавайте ссылку только
-            нужному человеку. Отзыв доступа не отменяет прежние действия или
-            раскрытие данных.
+            нужному человеку. После присоединения подтвердите владельца бизнеса
+            в карточке клиента, чтобы он мог создавать заведения.
           </p>
           <button
             type="submit"
@@ -838,6 +839,7 @@ function OwnerClient({
               <MemberAccess
                 key={member.userId + ':' + member.version}
                 member={member}
+                clubs={remote.data?.clubs ?? []}
                 clientId={id}
                 credential={credential}
                 updated={remote.refresh}
@@ -985,6 +987,7 @@ function MemberAccess({
   credential,
   clientId,
   member,
+  clubs,
   updated,
   readOnly = false,
 }: {
@@ -992,6 +995,7 @@ function MemberAccess({
   credential: string;
   clientId: string;
   member: Membership;
+  clubs: Club[];
   updated: () => void;
 }) {
   const command = useCommand<Membership>(credential);
@@ -1001,6 +1005,29 @@ function MemberAccess({
   const [manage, setManage] = useState(false);
   const [grants, setGrants] = useState<string[]>([]);
   const [confirmed, setConfirmed] = useState(false);
+  const [selectedClub, setSelectedClub] = useState('');
+  const [classifications, setClassifications] = useState<
+    Record<string, boolean>
+  >({});
+  const forReview =
+    member.businessClubsForReview?.find((club) => club.clubId === selectedClub)
+      ?.grants ?? [];
+  const grantKey = (grant: (typeof forReview)[number]) =>
+    [selectedClub, grant.userId, grant.permission, grant.updatedAt].join(':');
+  const memberPath =
+    '/api/platform/onboarding/clients/' +
+    clientId +
+    '/members/' +
+    member.userId;
+  const ownedClubIds = member.businessClubIds ?? [];
+  const confirmOwnership = (suffix: string, message: string, extra = {}) => {
+    if (window.confirm(message))
+      command.run(
+        memberPath + suffix,
+        { expectedVersion: member.version, ...extra },
+        updated,
+      );
+  };
   if (authorityLost(command.error))
     return (
       <section className="po-card ob-card">
@@ -1020,6 +1047,133 @@ function MemberAccess({
         <>
           {member.active ? (
             <>
+              {member.canConfirmBusinessOwner === true && (
+                <button
+                  className="ob-button"
+                  disabled={command.blocked}
+                  onClick={() =>
+                    confirmOwnership(
+                      '/business-owner',
+                      'Подтвердить этого пользователя как владельца бизнеса? Он сможет создавать клубы в пределах лимита организации.',
+                    )
+                  }
+                >
+                  Подтвердить владельца бизнеса
+                </button>
+              )}
+              {member.businessOwner === true && (
+                <>
+                  <p>Владелец бизнеса</p>
+                  {clubs
+                    .filter((club) => ownedClubIds.includes(club.id))
+                    .map((club) => (
+                      <p key={club.id}>Подтверждённое заведение: {club.name}</p>
+                    ))}
+                  {clubs.some((club) => !ownedClubIds.includes(club.id)) && (
+                    <>
+                      <Field label="Подтвердить существующее заведение владельца">
+                        <select
+                          value={selectedClub}
+                          onChange={(event) => {
+                            setSelectedClub(event.target.value);
+                            setClassifications({});
+                          }}
+                          disabled={command.blocked}
+                        >
+                          <option value="">Выберите заведение</option>
+                          {clubs
+                            .filter((club) => !ownedClubIds.includes(club.id))
+                            .map((club) => (
+                              <option key={club.id} value={club.id}>
+                                {club.name}
+                              </option>
+                            ))}
+                        </select>
+                      </Field>
+                      {forReview.length > 0 && (
+                        <fieldset
+                          disabled={command.blocked}
+                          className="ob-fields"
+                        >
+                          <legend>
+                            Проверьте прежние полномочия пользователей
+                          </legend>
+                          {forReview.map((grant) => (
+                            <Field
+                              key={grantKey(grant)}
+                              label={
+                                'Пользователь №' +
+                                grant.userId +
+                                ' · ' +
+                                (clubPermissionLabels[grant.permission] ??
+                                  grant.permission)
+                              }
+                            >
+                              <select
+                                value={
+                                  grantKey(grant) in classifications
+                                    ? String(classifications[grantKey(grant)])
+                                    : ''
+                                }
+                                onChange={(event) =>
+                                  setClassifications({
+                                    ...classifications,
+                                    [grantKey(grant)]:
+                                      event.target.value === 'true',
+                                  })
+                                }
+                              >
+                                <option value="" disabled>
+                                  Выберите решение
+                                </option>
+                                <option value="true">
+                                  Оставить независимое полномочие
+                                </option>
+                                <option value="false">
+                                  Отозвать полномочие
+                                </option>
+                              </select>
+                            </Field>
+                          ))}
+                        </fieldset>
+                      )}
+                      <button
+                        className="ob-button"
+                        disabled={
+                          command.blocked ||
+                          !selectedClub ||
+                          ownedClubIds.includes(selectedClub) ||
+                          !forReview.every(
+                            (g) => grantKey(g) in classifications,
+                          )
+                        }
+                        onClick={() => {
+                          const club = clubs.find(
+                            (item) => item.id === selectedClub,
+                          );
+                          if (club && !ownedClubIds.includes(club.id))
+                            confirmOwnership(
+                              '/business-clubs/' + club.id,
+                              'Подтвердить право этого владельца на заведение «' +
+                                club.name +
+                                '»?',
+                              forReview.length
+                                ? {
+                                    reviewedGrants: forReview.map((grant) => ({
+                                      ...grant,
+                                      keep: classifications[grantKey(grant)],
+                                    })),
+                                  }
+                                : {},
+                            );
+                        }}
+                      >
+                        Подтвердить владение заведением
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
               {member.permissions.includes('client.application.manage') && (
                 <p>Управление заявками</p>
               )}

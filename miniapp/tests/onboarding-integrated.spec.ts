@@ -125,6 +125,19 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
     .click();
   await expect(recipient.locator(".ob-code")).toHaveCount(0);
   await selectSpace(recipient, clientName);
+  await expect(
+    recipient.getByText("Для создания нового заведения владелец платформы должен подтвердить владельца бизнеса."),
+  ).toBeVisible();
+  await open(
+    owner,
+    "/app?mode=platform-owner&screen=client&resource=" + issued.clientId,
+    ownerCredential,
+  );
+  owner.once("dialog", (dialog) => dialog.accept());
+  await owner.getByRole("button", { name: "Подтвердить владельца бизнеса" }).click();
+  await expect(owner.getByText("Владелец бизнеса", { exact: true })).toBeVisible();
+  await recipient.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+
   await expect(recipient.getByText("Разрешено всего: 1")).toBeVisible();
   await recipient
     .getByRole("button", { name: "Создать заведение", exact: true })
@@ -183,16 +196,13 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
     .getByRole("button", { name: "Повторить ту же операцию" })
     .click();
   const firstClub = await (await replay).json();
-  await recipient
-    .getByRole("button", { name: "Назначить позже", exact: true })
-    .click();
   expect(commands).toHaveLength(2);
   expect(commands[0]).toEqual(commands[1]);
   await expect(
-    recipient.getByText("Не опубликован", { exact: true }),
+    recipient.getByText("Владелец бизнеса", { exact: true }),
   ).toBeVisible();
   await recipient
-    .getByRole("button", { name: "Открыть настройки клуба", exact: true })
+    .getByRole("button", { name: "Сохранённые настройки", exact: true })
     .click();
   await recipient.getByRole("button", { name: /^Профиль/ }).click();
   await expect(
@@ -249,9 +259,6 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
   await recipient.getByLabel("Полный адрес").fill("Synthetic Street 2");
   await recipient
     .getByRole("button", { name: "Создать заведение", exact: true })
-    .click();
-  await recipient
-    .getByRole("button", { name: "Назначить позже", exact: true })
     .click();
   await expect(
     recipient.getByRole("heading", {
@@ -448,7 +455,10 @@ test("lost committed invitation response replays one client and requires explici
     .getByRole("button", { name: "Принять приглашение" })
     .click();
   await selectSpace(recipient, clientName);
-  await expect(recipient.getByText("Разрешено всего: 1")).toBeVisible();
+  await expect(
+    recipient.getByText("Для создания нового заведения владелец платформы должен подтвердить владельца бизнеса."),
+  ).toBeVisible();
+  await expect(recipient.getByRole("button", { name: "Создать заведение" })).toHaveCount(0);
   for (const page of [owner, recipient]) {
     const storage = await page.evaluate(() =>
       JSON.stringify({
@@ -486,30 +496,11 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
     expect(response.ok(), await response.text()).toBe(true);
     return response.json();
   };
-  const invitation = await command(
-    "/api/platform/onboarding/invitations",
-    {
-      clientName: "Layout browser " + Date.now(),
-      recipientLabel: "Synthetic layout owner",
-    },
-    ownerCredential,
+  const history = await request.get(
+    "/fixture/historical-clubs/layout-" + browser.browserType().name(),
   );
-  const token = new URL(invitation.invitationLink).searchParams
-    .get("startapp")!
-    .slice(3);
-  await command("/api/client/invitations/" + invitation.id + "/claim", {
-    token,
-    expectedVersion: invitation.version,
-  });
-  const profile = await command(
-    "/api/client/clients/" + invitation.clientId + "/clubs",
-    {
-      venueName: "Layout acceptance club",
-      countryCode: "RU",
-      cityId: "524901",
-      address: "Synthetic layout street " + Date.now(),
-    },
-  );
+  expect(history.ok()).toBe(true);
+  const { clientId, clientName, clubs: [profile] } = await history.json();
   const page = await browser.newPage({
     baseURL,
     viewport: { width: 390, height: 844 },
@@ -528,7 +519,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   ).json();
   if (availableContext.clients.length > 1) {
     const organization = page.getByRole("button").filter({
-      has: page.getByText(invitation.clientName, { exact: true }),
+      has: page.getByText(clientName, { exact: true }),
     });
     await expect(organization).toBeVisible();
     await organization.click();
@@ -1034,7 +1025,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   });
   expect(foreign.status()).toBe(404);
   const clientResponse = await request.get(
-    "/api/platform/onboarding/clients/" + invitation.clientId,
+    "/api/platform/onboarding/clients/" + clientId,
     { headers: { "X-Telegram-Init-Data": ownerCredential } },
   );
   const detail = await clientResponse.json();
@@ -1043,7 +1034,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   );
   await command(
     "/api/platform/onboarding/clients/" +
-      invitation.clientId +
+      clientId +
       "/members/" +
       member.userId +
       "/revoke",

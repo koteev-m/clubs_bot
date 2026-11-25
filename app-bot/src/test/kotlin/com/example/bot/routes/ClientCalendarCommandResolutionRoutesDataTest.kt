@@ -39,7 +39,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** Calendar resolution reads the existing command ledger; it never re-executes a missing command. */
-open class ClientCalendarCommandResolutionRoutesDataTest : ClientOnboardingRoutesTestBase() {
+open class ClientCalendarCommandResolutionRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `a committed no op resolves across restart midnight and reversible timezone changes without writing`() =
         database { source ->

@@ -51,9 +51,10 @@ class ClientContextAuthTest {
     @Test
     fun `canonical signed header ignores legacy user and untrusted bot selection`() =
         withApp { repository ->
+            val authenticatedAt = Instant.ofEpochSecond(Instant.now().epochSecond)
             val response =
                 client.get(PATH) {
-                    header(HEADER, signed())
+                    header(HEADER, signed(date = authenticatedAt.epochSecond))
                     header("X-Telegram-Id", "99002")
                     header("X-Telegram-Username", "forged")
                     header("X-Bot-Id", "other")
@@ -68,7 +69,15 @@ class ClientContextAuthTest {
             assertEquals("X-Telegram-Init-Data", response.headers["Vary"])
             assertEquals(null, response.headers["ETag"])
             assertEquals(null, response.headers["Last-Modified"])
-            coVerify(exactly = 1) { repository.context(USER, ClientAudience.Platform) }
+            coVerify(exactly = 1) { repository.context(USER, ClientAudience.Platform, authenticatedAt) }
+        }
+
+    @Test
+    fun `a valid older platform credential carries no target authority into discovery`() =
+        withApp { repository ->
+            val old = Instant.now().minusSeconds(301)
+            assertEquals(HttpStatusCode.OK, client.get(PATH) { header(HEADER, signed(date = old.epochSecond)) }.status)
+            coVerify(exactly = 1) { repository.context(USER, ClientAudience.Platform, null) }
         }
 
     @Test
@@ -115,7 +124,7 @@ class ClientContextAuthTest {
                 response.assertClientError(HttpStatusCode.Unauthorized, "unauthorized")
             }
             client.get("/duplicate-client-fixture").assertClientError(HttpStatusCode.Unauthorized, "unauthorized")
-            coVerify(exactly = 0) { repository.context(any(), any()) }
+            coVerify(exactly = 0) { repository.context(any(), any(), matchNullable { true }) }
         }
 
     @Test
@@ -151,7 +160,7 @@ class ClientContextAuthTest {
                     }
                 }
             }
-            coVerify(exactly = 0) { repository.context(any(), any()) }
+            coVerify(exactly = 0) { repository.context(any(), any(), matchNullable { true }) }
         }
 
     @Test
@@ -186,7 +195,7 @@ class ClientContextAuthTest {
             client
                 .get("/api/client/clubs/9223372036854775807") { header(HEADER, signed()) }
                 .assertClientError(HttpStatusCode.NotFound, "not_found")
-            coVerify(exactly = 1) { repository.club(USER, ClientAudience.Platform, Long.MAX_VALUE) }
+            coVerify(exactly = 1) { repository.club(USER, ClientAudience.Platform, Long.MAX_VALUE, any()) }
         }
 
     @Test
@@ -212,7 +221,7 @@ class ClientContextAuthTest {
                 client
                     .get(PATH) { header(HEADER, signed()) }
                     .assertClientError(HttpStatusCode.InternalServerError, "internal_error")
-                coVerify(exactly = 0) { repository.context(any(), any()) }
+                coVerify(exactly = 0) { repository.context(any(), any(), matchNullable { true }) }
             }
             assertEquals(2, reads)
             assertFalse(
@@ -231,7 +240,8 @@ class ClientContextAuthTest {
     fun `repository failure returns only envelope and never replays previous data`() =
         withApp { repository ->
             assertEquals(HttpStatusCode.OK, client.get(PATH) { header(HEADER, signed()) }.status)
-            coEvery { repository.context(any(), any()) } throws IllegalStateException(SECRET_CANARY)
+            coEvery { repository.context(any(), any(), matchNullable { true }) } throws
+                IllegalStateException(SECRET_CANARY)
             client
                 .get(PATH) { header(HEADER, signed()) }
                 .assertClientError(HttpStatusCode.InternalServerError, "internal_error")
@@ -270,7 +280,8 @@ class ClientContextAuthTest {
         for (providerFailure in listOf(true, false)) {
             testApplication {
                 val repository = mockk<ClientContextRepository>()
-                coEvery { repository.context(any(), any()) } throws CancellationException("synthetic cancellation")
+                coEvery { repository.context(any(), any(), matchNullable { true }) } throws
+                    CancellationException("synthetic cancellation")
                 var reads = 0
                 var cancellations = 0
                 application {
@@ -300,8 +311,8 @@ class ClientContextAuthTest {
         block: suspend ApplicationTestBuilder.(ClientContextRepository) -> Unit,
     ) = testApplication {
         val repository = mockk<ClientContextRepository>()
-        coEvery { repository.context(any(), any()) } returns emptyList()
-        coEvery { repository.club(any(), any(), any()) } returns null
+        coEvery { repository.context(any(), any(), matchNullable { true }) } returns emptyList()
+        coEvery { repository.club(any(), any(), any(), matchNullable { true }) } returns null
         application {
             install(ContentNegotiation) { json() }
             install(ConditionalHeaders)

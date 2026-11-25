@@ -8,6 +8,7 @@ data class OnboardingActor(
     val connectionKey: String,
     val displayName: String? = null,
     val username: String? = null,
+    val managerAuthenticatedAt: java.time.Instant? = null,
 )
 
 enum class OnboardingRead {
@@ -17,6 +18,9 @@ enum class OnboardingRead {
     CLIENT_APPLICATION_SEARCH,
     CLIENT_APPLICATION_GET,
     CLUB_TEAM_GET,
+    CLUB_MANAGERS_GET,
+    MANAGER_INVITATION_RESOLVE,
+    MANAGER_INVITATION_STATUS,
     CLUB_PREPARATION_GET,
     CLUB_PROFILE_GET,
     CLUB_LAYOUT_GET,
@@ -34,6 +38,7 @@ enum class OnboardingRead {
     PLATFORM_CLUB_SEARCH,
     PLATFORM_SUMMARY,
     PLATFORM_CLIENT_GET,
+    CLUB_BUSINESS_OVERVIEW,
     PLATFORM_APPLICATION_SEARCH,
     PLATFORM_APPLICATION_GET,
 }
@@ -56,6 +61,8 @@ enum class OnboardingMutation {
     PLATFORM_APPLICATION_CANCEL,
     APPLICATION_CREATE_CLUB,
     CLUB_TEAM_UPDATE,
+    CLUB_MANAGERS_UPDATE,
+    MANAGER_INVITATION_CLAIM,
     CLUB_PREPARATION_UPDATE,
     CLUB_PROFILE_UPDATE,
     CLUB_FINANCE_UPDATE,
@@ -74,6 +81,8 @@ enum class OnboardingMutation {
     CLUB_NIGHT_EVENT_LINK,
     CLUB_BOOKING_RULES_UPDATE,
     CLIENT_LIMIT_UPDATE,
+    BUSINESS_OWNER_CONFIRM,
+    BUSINESS_CLUB_CONFIRM,
     CLIENT_ARCHIVE,
     CLIENT_RESTORE,
     CLUB_CREATE,

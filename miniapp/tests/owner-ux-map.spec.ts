@@ -276,6 +276,7 @@ test('single club opens directly with organization path; multiple contexts keep 
         json: {
           ...client,
           permissions: ['client.application.manage'],
+          canCreate: true,
           clubs: [profile],
         },
       });
@@ -326,4 +327,56 @@ test('single club opens directly with organization path; multiple contexts keep 
   await expect(page.getByRole('heading', { name: profile.name })).toHaveCount(
     0,
   );
+});
+
+for (const [prefix, rawPrefix] of [['ci_', 'cm_'], ['cm_', 'ci_']]) {
+  test('mobile launch keeps ' + prefix + ' invitation kind for a token starting with ' + rawPrefix, async ({page}) => {
+    const raw = rawPrefix + 'F'.repeat(40);
+    const paths: string[] = [];
+    const base = prefix === 'ci_' ? '/api/client/invitations' : '/api/client/manager-invitations';
+    await page.route('**/api/**', (route) => {
+      const req = route.request();
+      const path = new URL(req.url()).pathname;
+      paths.push(path);
+      if (path !== base + '/resolve' && path !== base + '/21/claim')
+        return route.fulfill({status:404,json:{code:'not_found'}});
+      expect(req.postDataJSON().token).toBe(raw);
+      return route.fulfill({json:{
+        id:'21', clientId:'20', clientName:'Тест клиента', clubId:'100', clubName:'Тест клуба', role:'CLUB_MANAGER',
+        acceptanceMode: prefix === 'ci_' ? 'direct' : 'manager', version:'1', status:'issued',
+        expiresAt:'2026-12-01T00:00:00Z', availableActions:['claim'],
+      }});
+    });
+    await page.goto('/app?startapp=' + prefix + raw + telegramHash);
+    await page.getByRole('button', {name: prefix === 'ci_' ? 'Принять приглашение' : 'Подтвердить Telegram-аккаунт'}).click();
+    await expect.poll(() => paths.includes(base + '/21/claim')).toBe(true);
+    expect(paths.every((path) => path.startsWith(base + '/'))).toBe(true);
+    expect(page.url()).not.toContain(raw);
+    expect(await page.evaluate(() => JSON.stringify({...localStorage,...sessionStorage}))).not.toContain(raw);
+  });
+}
+
+test('manager keeps roster access on mobile when a single revocation is forbidden', async ({page}) => {
+  let writes = 0;
+  const item = {id:'a906f2e6-76d7-40c7-8ba9-2310610e2589', role:'CLUB_MANAGER', userId:'51',
+    displayName:'Сотрудник', version:'1', canRevoke:true};
+  await page.route('**/api/client/clubs/100/managers', (route) => {
+    if (route.request().method() === 'POST') {
+      writes++;
+      return route.fulfill({status:403,json:{code:'forbidden'}});
+    }
+    return route.fulfill({json:{clubId:'100',clientId:'20',name:'Клуб',version:'4',canWrite:true,
+      roles:['CLUB_MANAGER'],invitations:[],legacyAssignments:[],
+      assignments:[{...item,canRevoke:writes === 0}, {...item,id:'616e3b76-8c50-4b82-a391-7cb4687d27b5',
+        userId:'50',displayName:'Собственное назначение',canRevoke:false}]}});
+  });
+  await page.goto('/app?mode=client&screen=managers&resource=100' + telegramHash);
+  await expect(page.getByRole('article').filter({hasText:'Собственное назначение'}).getByRole('button')).toHaveCount(0);
+  await page.getByRole('button', {name:'Отозвать назначение'}).click();
+  await page.getByLabel('Причина отзыва').fill('Проверено');
+  await page.getByRole('button', {name:'Подтвердить отзыв'}).click();
+  await expect(page.getByText('Это действие недоступно.', {exact:false})).toBeVisible();
+  await expect(page.getByRole('heading', {name:'Пригласить управляющего'})).toBeVisible();
+  await expect(page.getByRole('button', {name:'Отозвать назначение'})).toHaveCount(0);
+  expect(writes).toBe(1);
 });

@@ -1,6 +1,5 @@
 package com.example.bot.data.client.onboarding
 
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -39,10 +38,10 @@ internal class ClubOnboardingOperations(
             if (expected != application.long("version") && expected != existing.long("create_application_version")) {
                 fail("version_conflict")
             }
-            return result(existing.long("club_id"), "club_create", get(existing.long("club_id")))
+            return result(existing.long("club_id"), "club_create", replayCreate(existing.long("club_id")))
         }
         val direct = sql.row("SELECT club_id FROM client_direct_club_profiles WHERE application_id=?", applicationId)
-        return direct?.let { result(it.long("club_id"), "club_create", get(it.long("club_id"))) }
+        return direct?.let { result(it.long("club_id"), "club_create", replayCreate(it.long("club_id"))) }
     }
 
     private fun createApproved(
@@ -51,6 +50,7 @@ internal class ClubOnboardingOperations(
         clientId: Long,
     ): MutationResult {
         val applicationId = application.long("id")
+        val confirmedOwner = session.requireClubCreationAuthority(clientId)
         val legacyFingerprint = application.getValue("venue_fingerprint")
         val directProfiles =
             sql.rows(
@@ -95,28 +95,10 @@ internal class ClubOnboardingOperations(
             session.now,
             session.now,
         )
-        listOf(
-            READ_CLUB,
-            MANAGE_TEAM,
-            WRITE_PROFILE,
-            WRITE_LAYOUT,
-            WRITE_CALENDAR,
-            WRITE_BOOKING_RULES,
-            READ_FINANCE,
-            WRITE_FINANCE,
-            READ_MODULES,
-            WRITE_MODULES,
-        ).forEach { permission ->
-            sql.update(
-                "INSERT INTO client_club_grants(client_id,user_id,club_id,permission_code,is_active," +
-                    "created_at,updated_at) VALUES (?,?,?,?,TRUE,?,?)",
-                clientId,
-                application.long("author_user_id"),
-                clubId,
-                permission,
-                session.now,
-                session.now,
-            )
+        if (confirmedOwner) {
+            session.recordBusinessClub(clientId, clubId, checkNotNull(session.userId), "OWNER_CREATE")
+        } else {
+            session.bootstrapLegacyCreator(clientId, clubId)
         }
         sql.update(
             "UPDATE client_club_applications SET version=version+1,updated_at=? WHERE id=?",
@@ -131,55 +113,41 @@ internal class ClubOnboardingOperations(
         clubId: Long,
         write: Boolean = false,
     ): JsonObject {
-        session.requireClubGrant(clubId)
+        val clientId = session.requireClubGrant(clubId, WRITE_PROFILE.takeIf { write })
         val direct = DirectClubOperations(session)
         if (direct.exists(clubId)) return direct.get(clubId, write)
-        val association = association(clubId)
-        authorize(association, write)
+        val association = profileMetadata(clientId, clubId)
         // No club or submitted profile data is loaded before current exact authority is checked.
         val club =
             sql.row("SELECT name,description,timezone,is_active FROM clubs WHERE id=?", clubId) ?: fail("not_found")
-        val application =
-            sql.row("SELECT * FROM client_club_applications WHERE id=?", association.long("application_id"))
-                ?: fail("not_found")
-        val snapshot = approvedSnapshot(application)
-        val canWrite = hasGrant(association, WRITE_PROFILE)
-        val canLayout = hasGrant(association, WRITE_LAYOUT)
-        val canCalendar = hasGrant(association, WRITE_CALENDAR)
+        val snapshot =
+            association["application_id"]?.toLong()?.let { applicationId ->
+                val application =
+                    sql.row("SELECT * FROM client_club_applications WHERE id=?", applicationId) ?: fail("not_found")
+                approvedSnapshot(application)
+            }
+        val permissions = session.profilePermissions(clientId, clubId)
+        val canWrite = WRITE_PROFILE in permissions
         return buildJsonObject {
             put("id", clubId.toString())
             put("clientId", association.getValue("client_id"))
-            put("clientName", session.client(association.long("client_id")).getValue("display_name"))
+            put("clientName", session.client(clientId).getValue("display_name"))
             put("name", club.getValue("name"))
             put("description", club["description"].orEmpty())
             put("timezone", club.getValue("timezone"))
-            listOf("countryCode", "city", "address", "unit").forEach { put(it, snapshot.string(it).orEmpty()) }
+            listOf("countryCode", "city", "address", "unit").forEach { put(it, snapshot?.string(it).orEmpty()) }
             put("version", association.getValue("profile_version"))
-            put("savedAt", association.instant("profile_saved_at").toString())
+            put("savedAt", association["profile_saved_at"]?.let { association.instant("profile_saved_at").toString() })
+            put("permissions", strings(permissions))
+            session.businessRole(clientId, clubId)?.let { put("businessRole", it) }
             put(
-                "permissions",
-                JsonArray(
-                    (
-                        listOf(READ_CLUB) +
-                            (if (canWrite) listOf(WRITE_PROFILE) else emptyList()) +
-                            (if (canLayout) listOf(WRITE_LAYOUT) else emptyList()) +
-                            (if (canCalendar) listOf(WRITE_CALENDAR) else emptyList()) +
-                            listOf(
-                                WRITE_BOOKING_RULES,
-                                MANAGE_TEAM,
-                                READ_FINANCE,
-                                WRITE_FINANCE,
-                                READ_MODULES,
-                                WRITE_MODULES,
-                            ).filter {
-                                hasGrant(association, it) &&
-                                    (it != MANAGE_TEAM || ClubStaffAccess(session).owns(clubId))
-                            }
-                    ).map(::JsonPrimitive),
-                ),
+                "canPreviewBooking",
+                !club.active() &&
+                    association["owner_user_id"]?.toLong()?.let {
+                        session.canPreviewClub(clientId, clubId, it)
+                    } == true,
             )
-            put("canPreviewBooking", !club.active() && association.long("owner_user_id") == session.userId)
-            put("availableActions", JsonArray((if (canWrite) listOf("update") else emptyList()).map(::JsonPrimitive)))
+            put("availableActions", strings(if (canWrite) listOf("update") else emptyList()))
         }
     }
 
@@ -190,11 +158,8 @@ internal class ClubOnboardingOperations(
         val direct = DirectClubOperations(session)
         if (direct.exists(clubId)) return direct.update(clubId, body)
         body.only(listOf("expectedVersion", "name", "description", "timezone"))
-        val before = association(clubId)
-        session.client(before.long("client_id"), lock = true)
-        val association =
-            sql.row("SELECT * FROM client_club_onboarding WHERE club_id=? FOR UPDATE", clubId) ?: fail("not_found")
-        authorize(association, write = true)
+        val clientId = session.requireClubGrant(clubId, WRITE_PROFILE)
+        val association = profileMetadata(clientId, clubId, lock = true)
         if (body.id("expectedVersion") != association.long("profile_version")) fail("version_conflict")
         val club = sql.row("SELECT name,description,timezone FROM clubs WHERE id=?", clubId) ?: fail("not_found")
         val merged =
@@ -210,8 +175,10 @@ internal class ClubOnboardingOperations(
         val timezone = merged.text("timezone", TIMEZONE_LIMIT, required = true)
         if (timezone !in ZoneId.getAvailableZoneIds()) fail("validation_error")
         sql.update("UPDATE clubs SET name=?,description=?,timezone=? WHERE id=?", name, description, timezone, clubId)
+        val hasApplication = association["application_id"] != null
+        val metadataTable = if (hasApplication) "client_club_onboarding" else "client_business_clubs"
         sql.update(
-            "UPDATE client_club_onboarding SET profile_version=profile_version+1,profile_saved_at=? WHERE club_id=?",
+            "UPDATE $metadataTable SET profile_version=profile_version+1,profile_saved_at=? WHERE club_id=?",
             session.now,
             clubId,
         )
@@ -225,14 +192,9 @@ internal class ClubOnboardingOperations(
     }
 
     fun replayCreate(clubId: Long): JsonObject {
-        val direct = DirectClubOperations(session)
-        if (direct.exists(clubId)) {
-            val view = direct.get(clubId)
-            session.member(view.id("clientId"))
-            return view
-        }
-        val association = association(clubId)
-        lockedApplication(association.long("application_id"))
+        val clientId = session.requireClubGrant(clubId)
+        if (!ClubStaffAccess(session).owns(clubId)) fail("not_found")
+        if (session.businessOwnerRef(clientId, clubId) == null) session.member(clientId)
         return get(clubId)
     }
 
@@ -241,44 +203,51 @@ internal class ClubOnboardingOperations(
             sql.row("SELECT * FROM client_club_onboarding WHERE application_id=?", applicationId)
                 ?: sql.row("SELECT * FROM client_direct_club_profiles WHERE application_id=?", applicationId)
                 ?: return null
-        return if (hasGrant(association, READ_CLUB)) association.long("club_id") else null
+        return if (session.hasClubGrant(
+                association.long("client_id"),
+                association.long("club_id"),
+                READ_CLUB,
+            )
+        ) {
+            association.long("club_id")
+        } else {
+            null
+        }
     }
 
     private fun lockedApplication(applicationId: Long): DbRow {
         val before =
             sql.row("SELECT client_id FROM client_club_applications WHERE id=?", applicationId) ?: fail("not_found")
         session.client(before.long("client_id"), lock = true)
-        session.member(before.long("client_id"))
+        session.member(before.long("client_id"), manage = false)
         val application =
             sql.row("SELECT * FROM client_club_applications WHERE id=? FOR UPDATE", applicationId) ?: fail("not_found")
         if (application.long("author_user_id") != session.userId) fail("not_found")
         return application
     }
 
-    private fun association(clubId: Long): DbRow =
-        sql.row("SELECT * FROM client_club_onboarding WHERE club_id=?", clubId) ?: fail("not_found")
-
-    private fun authorize(
-        association: DbRow,
-        write: Boolean,
-    ) {
-        session.member(association.long("client_id"), manage = false)
-        if (!hasGrant(association, READ_CLUB) || (write && !hasGrant(association, WRITE_PROFILE))) fail("not_found")
+    private fun profileMetadata(
+        clientId: Long,
+        clubId: Long,
+        lock: Boolean = false,
+    ): DbRow {
+        val suffix = if (lock) " FOR UPDATE" else ""
+        val applied =
+            sql.row(
+                "SELECT * FROM client_club_onboarding WHERE client_id=? AND club_id=?$suffix",
+                clientId,
+                clubId,
+            )
+        if (applied != null) return applied
+        if (!sql.businessOwnershipSchemaPresent()) fail("not_found")
+        // Only the platform-confirmed mapping supplies profile revision metadata for a club with no creator profile.
+        return sql.row(
+            "SELECT client_id,profile_version,profile_saved_at FROM client_business_clubs " +
+                "WHERE client_id=? AND club_id=? AND evidence='PLATFORM_CONFIRMATION'$suffix",
+            clientId,
+            clubId,
+        ) ?: fail("not_found")
     }
-
-    private fun hasGrant(
-        association: DbRow,
-        permission: String,
-    ): Boolean =
-        sql.row(
-            "SELECT g.club_id FROM client_club_grants g JOIN client_clubs m ON " +
-                "m.client_id=g.client_id AND m.club_id=g.club_id WHERE g.client_id=? AND " +
-                "g.club_id=? AND g.user_id=? AND g.permission_code=? AND g.is_active=TRUE",
-            association.long("client_id"),
-            association.long("club_id"),
-            session.userId,
-            permission,
-        ) != null
 
     private fun approvedSnapshot(application: DbRow): JsonObject {
         if (application["status"] != "approved") fail("invalid_transition")

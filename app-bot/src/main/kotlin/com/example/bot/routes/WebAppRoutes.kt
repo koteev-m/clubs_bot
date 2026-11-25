@@ -60,7 +60,7 @@ private suspend fun ApplicationCall.respondMiniAppIndex(classLoader: ClassLoader
     respondMiniAppResource(classLoader, resourcePath, ContentType.Text.Html)
 }
 
-private val CLIENT_LAUNCH = Regex("ci_[A-Za-z0-9_-]{43}|client")
+private val CLIENT_LAUNCH = Regex("c[im]_[A-Za-z0-9_-]{43}|client")
 
 private suspend fun ApplicationCall.respondMiniAppResource(
     classLoader: ClassLoader,

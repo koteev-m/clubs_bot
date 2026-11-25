@@ -139,6 +139,7 @@ class ClientFinanceRoutesDataTest {
             .dataSource(
                 source,
             ).locations("classpath:db/migration/common", "classpath:db/migration/h2")
+            .target("79")
             .load()
             .migrate()
         try {

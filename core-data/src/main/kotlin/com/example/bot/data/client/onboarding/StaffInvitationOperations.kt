@@ -57,10 +57,11 @@ internal class StaffInvitationOperations(
     }
 
     fun recipient(
-        row: DbRow,
+        initial: DbRow,
         preview: Boolean,
     ): JsonObject {
-        activeClient(row.long("client_id"))
+        activeClient(initial.long("client_id"))
+        val row = invitation(initial.long("id"))
         val claimant = row["claimant_user_id"]?.toLong()
         if (claimant != null && claimant != session.userId) fail("not_found")
         if (!preview && claimant == null) fail("not_found")
@@ -95,6 +96,7 @@ internal class StaffInvitationOperations(
         body.only(listOf("token", "expectedVersion"))
         val token = body.string("token")?.takeIf { Regex("[A-Za-z0-9_-]{43}").matches(it) } ?: fail("not_found")
         if (digest(token) != row["token_hash"]) fail("not_found")
+        if (session.businessClub(row.long("client_id"), row.long("club_id"))) fail("not_found")
         session.requireLegacyClubAuthorityWrite(
             row.long("client_id"),
             row.long("club_id"),
@@ -273,7 +275,10 @@ internal class StaffInvitationOperations(
         row: DbRow,
         owner: Boolean,
     ): JsonObject {
-        val state = effective(row)
+        // Adoption closes the old invitation workflow. Keep the original accepted/revoked history.
+        val pending = row["status"] in setOf("issued", "claimed")
+        val adopted = pending && session.businessClub(row.long("client_id"), row.long("club_id"))
+        val state = if (adopted) "revoked" else effective(row)
         val candidate = row["claimant_user_id"]?.toLong()?.let { sql.row("SELECT * FROM users WHERE id=?", it) }
         return buildJsonObject {
             put("id", row["id"])
@@ -304,8 +309,9 @@ internal class StaffInvitationOperations(
                 "availableActions",
                 strings(
                     when {
+                        adopted -> emptyList()
                         owner && state == "claimed" -> listOf("confirm", "revoke_invitation")
-                        owner && row["status"] in setOf("issued", "claimed") -> listOf("revoke_invitation")
+                        owner && pending -> listOf("revoke_invitation")
                         !owner && state == "issued" -> listOf("claim")
                         else -> emptyList()
                     },

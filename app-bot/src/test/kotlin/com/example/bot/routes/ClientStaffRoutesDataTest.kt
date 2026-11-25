@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class ClientStaffRoutesDataTest : ClientOnboardingRoutesTestBase() {
+class ClientStaffRoutesDataTest : ClientOnboardingRoutesTestBase(legacyClients = true) {
     @Test
     fun `team http path persists restricts staff scopes prevents spoofing and disables old sessions`() =
         database { source ->

@@ -178,18 +178,22 @@ describe('connected onboarding screens', () => {
     ).toBe(false);
   });
 
-  it('keeps an old draft readable and offers reuse without submit or checkbox', async () => {
+  it.each([true, false])('keeps an old draft readable and gates reuse on canCreate=%s', async (canCreate) => {
     window.history.replaceState(
       {},
       '',
       '/app?mode=client&screen=application&resource=30',
     );
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => response(draft));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((path) =>
+      response(String(path).endsWith('/onboarding') ? { canCreate } : draft),
+    );
     render(<ClientAccess initialToken={null} />);
     await screen.findByText('Test Street 1');
-    expect(
-      screen.getByRole('button', { name: 'Использовать данные для создания' }),
-    ).toBeTruthy();
+    if (canCreate) {
+      await screen.findByRole('button', { name: 'Использовать данные для создания' });
+    } else {
+      expect(screen.queryByRole('button', { name: 'Использовать данные для создания' })).toBeNull();
+    }
     expect(
       screen.queryByRole('button', { name: 'Отправить заявку' }),
     ).toBeNull();

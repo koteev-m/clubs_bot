@@ -33,6 +33,7 @@ internal abstract class ClubStaffContract : ClubFinanceContract() {
             assertEquals(0, fixture.rows("SELECT * FROM client_memberships WHERE user_id=${user(fixture.bob)}").size)
             val accepted = confirm(club, pending)
             assertEquals(1, accepted.items("members").count { it.string("role") == "MANAGER" })
+            fixture.migrate()
             val context =
                 JdbcClientContextRepository(
                     fixture.source,

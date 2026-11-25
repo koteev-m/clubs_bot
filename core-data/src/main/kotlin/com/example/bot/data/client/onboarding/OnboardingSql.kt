@@ -1,5 +1,11 @@
 package com.example.bot.data.client.onboarding
 
+import com.example.bot.data.client.assignments.ASSIGN_CLUB_MANAGER
+import com.example.bot.data.client.assignments.READ_REPORTS
+import com.example.bot.data.client.assignments.REVOKE_CLUB_MANAGER
+import com.example.bot.data.client.assignments.managerPermissions
+import com.example.bot.data.client.assignments.managerRoleCodes
+import com.example.bot.data.client.assignments.targetManagerTuple
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -14,6 +20,62 @@ import java.util.UUID
 internal class OnboardingSql(
     val connection: Connection,
 ) {
+    private val hasBusinessOwnershipSchema by lazy {
+        val names =
+            rows(
+                "SELECT LOWER(TABLE_NAME) AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=CURRENT_SCHEMA " +
+                    "AND LOWER(TABLE_NAME) IN ('client_business_owners','client_business_clubs'," +
+                    "'flyway_schema_history')",
+            ).map { it["name"] }.toSet()
+        when (names.count { it == "client_business_owners" || it == "client_business_clubs" }) {
+            2 -> true
+            1 -> fail("invalid_transition")
+            else -> {
+                // Read-only historical fixtures can predate Flyway or V080. Missing migrated tables are an error.
+                if ("flyway_schema_history" in names &&
+                    rows("SELECT version FROM flyway_schema_history WHERE success=TRUE AND version IS NOT NULL")
+                        .any { (it["version"]?.substringBefore('.')?.toIntOrNull() ?: Int.MAX_VALUE) >= 80 }
+                ) {
+                    fail("invalid_transition")
+                }
+                false
+            }
+        }
+    }
+
+    fun businessOwnershipSchemaPresent(): Boolean = hasBusinessOwnershipSchema
+
+    val managerSchemaPresent: Boolean by lazy {
+        if (!businessOwnershipSchemaPresent()) {
+            false
+        } else {
+            val names =
+                rows(
+                    "SELECT LOWER(TABLE_NAME) AS name FROM INFORMATION_SCHEMA.TABLES " +
+                        "WHERE TABLE_SCHEMA=CURRENT_SCHEMA " +
+                        "AND LOWER(TABLE_NAME) IN ('client_manager_invitations','client_role_assignments'," +
+                        "'client_club_access_state','client_permission_delegations'," +
+                        "'client_manager_invitation_fences')",
+                ).map { it["name"] }.toSet()
+            if ("client_manager_invitations" in names) {
+                if (!names.containsAll(MANAGER_FOUNDATION_TABLES)) fail("invalid_transition")
+                true
+            } else {
+                val versions =
+                    rows("SELECT version FROM flyway_schema_history WHERE success=TRUE AND version IS NOT NULL")
+                if (versions.any { (it["version"]?.substringBefore('.')?.toIntOrNull() ?: Int.MAX_VALUE) >= 81 }) {
+                    fail("invalid_transition")
+                }
+                false
+            }
+        }
+    }
+
+    var usedTargetIdentity = false
+
+    // A consumed invitation and its proof must still be live after any blocking database write.
+    var managerInvitationDeadline: Instant? = null
+
     fun rows(
         sql: String,
         vararg args: Any?,
@@ -225,9 +287,8 @@ internal class OnboardingSession(
         val clientId = mapping.long("client_id")
         if (lockClient) client(clientId, lock = true)
         member(clientId, manage = false)
-        if (!hasClubGrant(clientId, clubId, READ_CLUB) ||
-            (writePermission != null && !hasClubGrant(clientId, clubId, writePermission))
-        ) {
+        val permissions = clubPermissions(clientId, clubId)
+        if (READ_CLUB !in permissions || (writePermission != null && writePermission !in permissions)) {
             fail("not_found")
         }
         return clientId
@@ -237,16 +298,55 @@ internal class OnboardingSession(
         clientId: Long,
         clubId: Long,
         permission: String,
-    ): Boolean =
-        sql.row(
-            "SELECT g.club_id FROM client_club_grants g JOIN client_clubs m ON m.client_id=g.client_id " +
-                "AND m.club_id=g.club_id WHERE g.client_id=? AND g.club_id=? AND g.user_id=? " +
-                "AND g.permission_code=? AND g.is_active=TRUE",
-            clientId,
-            clubId,
-            userId,
-            permission,
-        ) != null
+    ): Boolean = permission in clubPermissions(clientId, clubId)
+
+    /** Flat grants retained after explicit compatibility review remain independent sources. */
+    fun clubPermissions(
+        clientId: Long,
+        clubId: Long,
+    ): Set<String> {
+        val registeredOwner = registeredClubOwner(clientId, clubId)
+        val ownerSubject = registeredOwner != null && registeredOwner == userId
+        val owner = ownerSubject && isBusinessOwner(clientId, checkNotNull(registeredOwner))
+        val target = targetManagerTuple(clientId, clubId)
+        if (ownerSubject || target) requireBusinessIdentity()
+        val legacy =
+            if (target) {
+                emptyList()
+            } else {
+                sql
+                    .rows(
+                        "SELECT g.permission_code FROM client_club_grants g JOIN client_clubs c " +
+                            "ON c.client_id=g.client_id AND c.club_id=g.club_id " +
+                            "WHERE g.client_id=? AND g.club_id=? AND g.user_id=? AND g.is_active=TRUE",
+                        clientId,
+                        clubId,
+                        userId,
+                    ).map { checkNotNull(it["permission_code"]) }
+            }
+        return buildSet {
+            addAll(legacy)
+            if (owner) {
+                addAll(listOf(READ_CLUB, READ_MODULES, READ_FINANCE, READ_REPORTS))
+                if (sql.managerSchemaPresent) addAll(listOf(ASSIGN_CLUB_MANAGER, REVOKE_CLUB_MANAGER))
+            }
+            addAll(managerPermissions(clientId, clubId))
+        }
+    }
+
+    fun requireBusinessIdentity() {
+        actor.requireFreshManagerIdentity(now)
+        sql.usedTargetIdentity = true
+    }
+
+    fun businessRole(
+        clientId: Long,
+        clubId: Long,
+    ): String? {
+        if (businessOwnerRef(clientId, clubId) != null) return "BUSINESS_OWNER"
+        val roles = managerRoleCodes(clientId, clubId)
+        return listOf("NETWORK_MANAGER", "CLUB_MANAGER").firstOrNull(roles::contains)
+    }
 
     fun version(
         row: DbRow,
@@ -266,3 +366,11 @@ internal class OnboardingSession(
 private const val IDENTITY_DISPLAY_LIMIT = 255
 
 private const val H2_LOCK_TIMEOUT = 50200
+
+private val MANAGER_FOUNDATION_TABLES =
+    setOf(
+        "client_role_assignments",
+        "client_club_access_state",
+        "client_permission_delegations",
+        "client_manager_invitation_fences",
+    )

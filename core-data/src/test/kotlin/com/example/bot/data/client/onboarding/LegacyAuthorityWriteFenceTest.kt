@@ -11,7 +11,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.put
 import org.jetbrains.exposed.sql.Database
 import org.junit.jupiter.api.AfterAll
@@ -29,14 +31,14 @@ import javax.sql.DataSource
 
 /** Actual legacy writers on migrated databases; the same contract runs on H2 and PostgreSQL 16. */
 internal abstract class LegacyAuthorityWriteFenceContract {
-    protected abstract fun database(target: String? = null): AssignmentTestDatabase
+    protected abstract fun database(target: String = LEGACY_CLUB_CREATION_VERSION): AssignmentTestDatabase
 
     @Test
     fun `old staff claim cannot mutate target admission even before membership exists`() =
         runBlocking<Unit> {
             database().use { db ->
                 val fixture = fixture(db)
-                val club = club(fixture)
+                val club = migratedClub(fixture)
                 val issued = invite(fixture, club)
                 val bob = user(fixture, fixture.bob)
                 fence(fixture, club, bob, "TARGET")
@@ -52,7 +54,7 @@ internal abstract class LegacyAuthorityWriteFenceContract {
         runBlocking<Unit> {
             database().use { db ->
                 val fixture = fixture(db)
-                val club = club(fixture)
+                val club = migratedClub(fixture)
                 val claimed = claim(fixture, invite(fixture, club))
                 val bob = user(fixture, fixture.bob)
                 fence(fixture, club, bob, "TARGET")
@@ -67,7 +69,7 @@ internal abstract class LegacyAuthorityWriteFenceContract {
         runBlocking<Unit> {
             database().use { db ->
                 val fixture = fixture(db)
-                val club = club(fixture)
+                val club = migratedClub(fixture)
                 confirm(fixture, club, claim(fixture, invite(fixture, club)))
                 val bob = user(fixture, fixture.bob)
                 fence(fixture, club, bob, "SHADOW")
@@ -85,7 +87,7 @@ internal abstract class LegacyAuthorityWriteFenceContract {
         runBlocking<Unit> {
             database().use { db ->
                 val fixture = fixture(db)
-                val club = club(fixture)
+                val club = migratedClub(fixture)
                 confirm(fixture, club, claim(fixture, invite(fixture, club)))
                 val bob = user(fixture, fixture.bob)
                 fence(fixture, club, bob, "SHADOW")
@@ -117,7 +119,7 @@ internal abstract class LegacyAuthorityWriteFenceContract {
         runBlocking<Unit> {
             database().use { db ->
                 val fixture = fixture(db)
-                val club = club(fixture)
+                val club = migratedClub(fixture)
                 val bob = user(fixture, fixture.bob)
                 fence(fixture, club, bob, "SHADOW")
                 confirm(fixture, club, claim(fixture, invite(fixture, club)))
@@ -151,6 +153,7 @@ internal abstract class LegacyAuthorityWriteFenceContract {
                         OnboardingMutation.APPLICATION_CREATE_CLUB,
                         fixture.approved(first.id("clientId"), venue = "Second synthetic club"),
                     )
+                fixture.migrate()
                 confirm(fixture, first, claim(fixture, invite(fixture, first)))
                 val bob = user(fixture, fixture.bob)
                 fence(fixture, second, bob, "TARGET")
@@ -173,7 +176,7 @@ internal abstract class LegacyAuthorityWriteFenceContract {
         runBlocking<Unit> {
             database().use { db ->
                 val fixture = fixture(db)
-                val club = club(fixture)
+                val club = migratedClub(fixture)
                 confirm(fixture, club, claim(fixture, invite(fixture, club)))
                 val bob = user(fixture, fixture.bob)
                 val pending = claim(fixture, invite(fixture, club))
@@ -211,7 +214,7 @@ internal abstract class LegacyAuthorityWriteFenceContract {
         runBlocking<Unit> {
             database().use { db ->
                 val fixture = fixture(db)
-                val club = club(fixture)
+                val club = migratedClub(fixture)
                 val bob = user(fixture, fixture.bob)
                 val promoter = PromoterAdminRepositoryImpl(Database.connect(db.dataSource), fixture.clock)
                 assertTrue(promoter.setPromoterAccess(club.id("id"), bob, true) is PromoterAccessUpdateResult.Success)
@@ -258,12 +261,13 @@ internal abstract class LegacyAuthorityWriteFenceContract {
             for (allMissing in listOf(false, true)) {
                 database().use { db ->
                     val fixture = fixture(db)
-                    val club = club(fixture)
+                    val club = migratedClub(fixture)
                     val claimed = claim(fixture, invite(fixture, club))
                     fixture.execute("DROP TABLE client_permission_delegations")
                     if (allMissing) {
-                        fixture.execute("DROP TABLE client_role_assignments")
-                        fixture.execute("DROP TABLE client_club_access_state")
+                        // V081 invitations reference V077 assignments. Simulate loss of the underlying table.
+                        fixture.execute("DROP TABLE client_role_assignments CASCADE")
+                        fixture.execute("DROP TABLE client_club_access_state CASCADE")
                     }
                     val before = snapshot(fixture, includeFoundation = false)
                     rejected { confirm(fixture, club, claimed) }
@@ -273,7 +277,77 @@ internal abstract class LegacyAuthorityWriteFenceContract {
         }
 
     @Test
-    fun `new club bootstrap preserves exact compatibility grants without assignment inheritance`() =
+    fun `migrated staff can still edit their club while its prior creator must be confirmed to open another`() =
+        runBlocking<Unit> {
+            database().use { db ->
+                val fixture = fixture(db)
+                val club = club(fixture)
+                val clientId = club.id("clientId")
+                confirm(fixture, club, claim(fixture, invite(fixture, club)))
+                val bob = user(fixture, fixture.bob)
+                val savedPermissions = permissions(fixture, club, bob)
+                fixture.execute("UPDATE clients SET allowed_clubs=2 WHERE id=$clientId")
+                val second = fixture.approved(clientId, venue = "Second historical application")
+                fixture.migrate()
+                assertEquals(savedPermissions, permissions(fixture, club, bob))
+                val profile = fixture.repository.read(fixture.bob, OnboardingRead.CLUB_PROFILE_GET, club.id("id"))
+                val saved =
+                    fixture.mutate(
+                        fixture.bob,
+                        OnboardingMutation.CLUB_PROFILE_UPDATE,
+                        profile,
+                        buildJsonObject {
+                            put("name", "Updated with existing staff rights")
+                            put("description", "Existing club")
+                            put("timezone", profile.getValue("timezone"))
+                        },
+                    )
+                assertEquals("Updated with existing staff rights", saved.string("name"))
+
+                val creator = fixture.alice.copy(managerAuthenticatedAt = fixture.clock.instant())
+                val application =
+                    fixture.repository.read(
+                        creator,
+                        OnboardingRead.CLIENT_APPLICATION_GET,
+                        second.id("id"),
+                    )
+                assertFalse(application.getValue("availableActions").jsonArray.contains(JsonPrimitive("createClub")))
+                val before = snapshot(fixture)
+                val denied =
+                    assertThrows(OnboardingFailure::class.java) {
+                        runBlocking { fixture.mutate(creator, OnboardingMutation.APPLICATION_CREATE_CLUB, second) }
+                    }
+                assertEquals("not_found", denied.code)
+                val direct =
+                    assertThrows(OnboardingFailure::class.java) {
+                        runBlocking {
+                            fixture.repository.mutate(
+                                creator,
+                                OnboardingMutation.CLUB_CREATE,
+                                clientId,
+                                buildJsonObject {
+                                    put("venueName", "Another club")
+                                    put("countryCode", "RU")
+                                    put("cityId", "ru-moscow")
+                                    put("city", "Москва")
+                                    put("region", "Москва")
+                                    put("timezone", "Europe/Moscow")
+                                    put("address", "Other address")
+                                },
+                                UUID.randomUUID().toString(),
+                            )
+                        }
+                    }
+                assertEquals("not_found", direct.code)
+                assertEquals(before, snapshot(fixture))
+                assertEquals(0, fixture.count("client_business_owners"))
+                change(fixture, club, bob, "disable")
+                assertTrue(permissions(fixture, club, bob).isEmpty())
+            }
+        }
+
+    @Test
+    fun `migration preserves exact legacy bootstrap grants without assignment inheritance`() =
         runBlocking<Unit> {
             database().use { db ->
                 val fixture = fixture(db)
@@ -297,7 +371,10 @@ internal abstract class LegacyAuthorityWriteFenceContract {
                         },
                         UUID.randomUUID().toString(),
                     )
-                assertEquals(10, permissions(fixture, second, alice).size)
+                val historicalPermissions = permissions(fixture, second, alice)
+                fixture.migrate()
+                assertEquals(10, historicalPermissions.size)
+                assertEquals(historicalPermissions, permissions(fixture, second, alice))
                 assertTrue(fixture.rows("SELECT * FROM client_role_assignments").isEmpty())
                 assertTrue(
                     fixture.rows("SELECT * FROM client_club_access_state WHERE club_id=${second.id("id")}").isEmpty(),
@@ -307,7 +384,7 @@ internal abstract class LegacyAuthorityWriteFenceContract {
 
     protected fun fixture(
         db: AssignmentTestDatabase,
-        target: String? = null,
+        target: String = LEGACY_CLUB_CREATION_VERSION,
     ) = OnboardingFixture(db.dataSource, db.dialect, target)
 
     protected suspend fun club(fixture: OnboardingFixture): JsonObject =
@@ -316,6 +393,9 @@ internal abstract class LegacyAuthorityWriteFenceContract {
             OnboardingMutation.APPLICATION_CREATE_CLUB,
             fixture.approved(fixture.accept().id("clientId")),
         )
+
+    protected suspend fun migratedClub(fixture: OnboardingFixture): JsonObject =
+        club(fixture).also { fixture.migrate() }
 
     private suspend fun invite(
         fixture: OnboardingFixture,
@@ -509,7 +589,7 @@ internal abstract class LegacyAuthorityWriteFenceContract {
 }
 
 internal class LegacyAuthorityWriteFenceTest : LegacyAuthorityWriteFenceContract() {
-    override fun database(target: String?): AssignmentTestDatabase = AssignmentTestDatabase.h2(target)
+    override fun database(target: String): AssignmentTestDatabase = AssignmentTestDatabase.h2(target)
 }
 
 @Tag("it")
@@ -522,14 +602,14 @@ internal class LegacyAuthorityWriteFencePostgresIT : LegacyAuthorityWriteFenceCo
         ioDispatcher.close()
     }
 
-    override fun database(target: String?): AssignmentTestDatabase = AssignmentTestDatabase.postgres(target)
+    override fun database(target: String): AssignmentTestDatabase = AssignmentTestDatabase.postgres(target)
 
     @Test
     fun `promoter waiting for client lock observes committed target fence before any legacy mutation`() =
         runBlocking<Unit> {
             database().use { db ->
                 val fixture = fixture(db)
-                val club = club(fixture)
+                val club = migratedClub(fixture)
                 val bob = user(fixture, fixture.bob)
                 val before = snapshot(fixture, includeFoundation = false)
                 val connectionName = "legacy_role_guard_" + UUID.randomUUID().toString().replace("-", "")

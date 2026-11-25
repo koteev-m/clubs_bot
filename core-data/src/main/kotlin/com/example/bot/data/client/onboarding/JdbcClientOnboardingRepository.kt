@@ -34,10 +34,15 @@ class JdbcClientOnboardingRepository(
         withContext(dispatcher) {
             validateActor(actor)
             transaction(
+                beforeCommit = { if (it.usedTargetIdentity) actor.requireFreshManagerIdentity(clock.instant()) },
                 readOnly =
                     operation !in
                         setOf(
+                            OnboardingRead.CLUB_MANAGERS_GET,
+                            OnboardingRead.MANAGER_INVITATION_RESOLVE,
+                            OnboardingRead.MANAGER_INVITATION_STATUS,
                             OnboardingRead.CLUB_PROFILE_GET,
+                            OnboardingRead.CLUB_BUSINESS_OVERVIEW,
                             OnboardingRead.CLUB_TEAM_GET,
                             OnboardingRead.CLUB_PREPARATION_GET,
                             OnboardingRead.INVITATION_RESOLVE,
@@ -66,6 +71,9 @@ class JdbcClientOnboardingRepository(
                 val applications = ApplicationOperations(session)
                 val clients = ClientAccessOperations(session)
                 when (operation) {
+                    OnboardingRead.CLUB_MANAGERS_GET -> ClubManagers(session).roster(required(resourceId))
+                    OnboardingRead.MANAGER_INVITATION_STATUS -> ClubManagers(session).status(required(resourceId))
+                    OnboardingRead.MANAGER_INVITATION_RESOLVE -> ClubManagers(session).resolve(body)
                     OnboardingRead.INVITATION_RESOLVE -> invitations.resolve(body)
                     OnboardingRead.INVITATION_STATUS -> invitations.get(required(resourceId), platform = false)
                     OnboardingRead.CLIENT_ONBOARDING -> clients.onboarding(required(resourceId))
@@ -107,6 +115,7 @@ class JdbcClientOnboardingRepository(
                     OnboardingRead.PLATFORM_CLIENT_SEARCH -> clients.search(body)
                     OnboardingRead.PLATFORM_CLUB_SEARCH -> clients.searchClubs(body)
                     OnboardingRead.PLATFORM_SUMMARY -> clients.platformSummary()
+                    OnboardingRead.CLUB_BUSINESS_OVERVIEW -> BusinessOverview(session).get(required(resourceId))
                     OnboardingRead.PLATFORM_CLIENT_GET -> clients.get(required(resourceId))
                     OnboardingRead.PLATFORM_APPLICATION_SEARCH -> applications.search(null, platform = true, body)
                     OnboardingRead.PLATFORM_APPLICATION_GET -> applications.get(required(resourceId), platform = true)
@@ -134,14 +143,30 @@ class JdbcClientOnboardingRepository(
                 try {
                     return@withContext transaction(
                         readOnly = false,
-                        beforeCommit = { if (memberMutation) mutationContext.ensureActive() },
+                        beforeCommit = {
+                            if (memberMutation || operation in MANAGER_COMMANDS) mutationContext.ensureActive()
+                            it.managerInvitationDeadline?.let { until ->
+                                if (!clock.instant().isBefore(until)) fail("invalid_transition")
+                            }
+                            if (it.usedTargetIdentity ||
+                                operation in MANAGER_COMMANDS
+                            ) {
+                                actor.requireFreshManagerIdentity(clock.instant())
+                            }
+                        },
                     ) { sql ->
                         val ownerOperation = operation in OWNER_OPERATIONS
                         if (ownerOperation && configuredOwnerId?.takeIf { it > 0 } != actor.telegramUserId) {
                             fail("forbidden")
                         }
                         val userId =
-                            if (ownerOperation || operation == OnboardingMutation.INVITATION_CLAIM) {
+                            if (ownerOperation ||
+                                operation in
+                                setOf(
+                                    OnboardingMutation.INVITATION_CLAIM,
+                                    OnboardingMutation.MANAGER_INVITATION_CLAIM,
+                                )
+                            ) {
                                 sql.provision(actor)
                             } else {
                                 sql.user(actor.telegramUserId)?.long("id") ?: fail("not_found")
@@ -162,6 +187,13 @@ class JdbcClientOnboardingRepository(
                             if (existing["request_hash"] != requestHash) fail("idempotency_conflict")
                             current
                         } else {
+                            if (operation == OnboardingMutation.CLUB_MANAGERS_UPDATE &&
+                                body.string("action") == "confirm"
+                            ) {
+                                return@transaction ClubManagers(
+                                    session,
+                                ).confirm(required(resourceId), body, requestHash)
+                            }
                             val result = execute(session, operation, resourceId, body)
                             sql.update(
                                 "INSERT INTO client_commands(actor_user_id,connection_key," +
@@ -249,6 +281,12 @@ class JdbcClientOnboardingRepository(
             -> invitations.action(required(resourceId), operation, body)
             OnboardingMutation.MEMBER_REVOKE, OnboardingMutation.MEMBER_RESTORE ->
                 ClientAccessOperations(session).change(required(resourceId), operation, body)
+            OnboardingMutation.BUSINESS_OWNER_CONFIRM, OnboardingMutation.BUSINESS_CLUB_CONFIRM ->
+                BusinessOwnership(session).confirm(
+                    required(resourceId),
+                    body,
+                    operation == OnboardingMutation.BUSINESS_CLUB_CONFIRM,
+                )
             OnboardingMutation.CLIENT_LIMIT_UPDATE -> ClientLimitOperations(session).update(required(resourceId), body)
             OnboardingMutation.CLIENT_ARCHIVE, OnboardingMutation.CLIENT_RESTORE ->
                 ClientLifecycleOperations(session).change(required(resourceId), operation, body)
@@ -280,6 +318,8 @@ class JdbcClientOnboardingRepository(
                 ClubPreparationOperations(
                     session,
                 ).update(required(resourceId), body)
+            OnboardingMutation.CLUB_MANAGERS_UPDATE -> ClubManagers(session).update(required(resourceId), body)
+            OnboardingMutation.MANAGER_INVITATION_CLAIM -> ClubManagers(session).claim(required(resourceId), body)
             OnboardingMutation.CLUB_TEAM_UPDATE -> ClubTeamOperations(session).update(required(resourceId), body)
             OnboardingMutation.CLUB_PROFILE_UPDATE ->
                 ClubOnboardingOperations(
@@ -307,6 +347,9 @@ class JdbcClientOnboardingRepository(
             "club_calendar" -> ClubCalendarOperations(session).get(command.long("result_id"), write = true)
             "club_night_event_link" -> ClubNightEventLinks(session).receipt(command.long("result_id"))
             "club_module_settings" -> ClubModuleSettingsOperations(session).get(command.long("result_id"), write = true)
+            "manager_claim" -> ClubManagers(session).status(command.long("result_id"))
+            "manager_issue" -> ClubManagers(session).issueReceipt(command.long("result_id"))
+            "manager_roster" -> ClubManagers(session).roster(command.long("result_id"))
             "staff_invitation" -> ClubTeamOperations(session).receipt(command.long("result_id"))
             "club_team" -> ClubTeamOperations(session).get(command.long("result_id"))
             "club_preparation", "prep_invite", "prep_submit" ->
@@ -322,7 +365,7 @@ class JdbcClientOnboardingRepository(
 
     private fun <T> transaction(
         readOnly: Boolean,
-        beforeCommit: () -> Unit = {},
+        beforeCommit: (OnboardingSql) -> Unit = {},
         block: (OnboardingSql) -> T,
     ): T =
         dataSource.connection.use { connection ->
@@ -331,8 +374,9 @@ class JdbcClientOnboardingRepository(
                 if (readOnly) Connection.TRANSACTION_REPEATABLE_READ else Connection.TRANSACTION_READ_COMMITTED
             connection.autoCommit = false
             try {
-                val result = block(OnboardingSql(connection))
-                beforeCommit()
+                val sql = OnboardingSql(connection)
+                val result = block(sql)
+                beforeCommit(sql)
                 connection.commit()
                 result
             } catch (cancelled: CancellationException) {
@@ -351,9 +395,13 @@ class JdbcClientOnboardingRepository(
     private fun required(id: Long?): Long = id?.takeIf { it > 0 } ?: fail("validation_error")
 
     private companion object {
+        val MANAGER_COMMANDS =
+            setOf(OnboardingMutation.CLUB_MANAGERS_UPDATE, OnboardingMutation.MANAGER_INVITATION_CLAIM)
         val OWNER_OPERATIONS =
             setOf(
                 OnboardingMutation.CLIENT_LIMIT_UPDATE,
+                OnboardingMutation.BUSINESS_OWNER_CONFIRM,
+                OnboardingMutation.BUSINESS_CLUB_CONFIRM,
                 OnboardingMutation.CLIENT_ARCHIVE,
                 OnboardingMutation.CLIENT_RESTORE,
                 OnboardingMutation.INVITATION_ISSUE,

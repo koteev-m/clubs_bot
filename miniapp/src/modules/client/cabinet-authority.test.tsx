@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ClubCabinet from './ClubCabinet';
@@ -95,6 +96,46 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+it('shows saved settings and their current actions without deriving edit access from a role or organization', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+    reply({
+      ...profile,
+      permissions: ['client.club.read', 'client.club.profile.write'],
+      availableActions: [],
+    }),
+  );
+  const open = vi.fn();
+  render(<ClubCabinet {...props} mode="settings" open={open} />);
+  const sections = await screen.findByRole('navigation', {
+    name: 'Разделы настройки',
+  });
+  for (const name of [
+    /Профиль/,
+    /Расписание и ночи/,
+    /Залы, зоны и столы/,
+    /Правила бронирования/,
+  ]) {
+    const section = within(sections).getByRole('button', { name });
+    expect(within(section).getByText('Только просмотр')).toBeTruthy();
+    fireEvent.click(section);
+  }
+  expect(open.mock.calls.map(([section]) => section)).toEqual([
+    'profile',
+    'calendar',
+    'layout',
+    'booking-rules',
+  ]);
+  expect(
+    within(sections).queryByRole('button', { name: /Финансовые шаблоны/ }),
+  ).toBeNull();
+  expect(
+    fetch.mock.calls.every(
+      ([path, request]) =>
+        String(path).endsWith('/42/profile') && request?.method === 'GET',
+    ),
+  ).toBe(true);
+});
+
 it('P2 fences a late calendar response and erases the entire private cabinet after preparation denial', async () => {
   const late = deferred();
   const fetch = vi
@@ -328,4 +369,81 @@ it('P2 fences an HTTP 200 whose body finishes parsing only after authority loss'
   await act(async () => finishBody(calendar));
   expect(screen.queryByRole('heading', { name: profile.name })).toBeNull();
   expect(screen.queryByText('Вечеринка 08.01.2090')).toBeNull();
+});
+
+it('shows verified owner metrics and closed reports only under the reports capability', async () => {
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (path) => {
+      if (String(path).endsWith('/profile'))
+        return reply({
+          ...profile,
+          businessRole: 'BUSINESS_OWNER',
+          permissions: [
+            'client.club.read',
+            'client.club.reports.read',
+            'client.staff.assign.club_manager',
+          ],
+          availableActions: [],
+        });
+      if (String(path).endsWith('/business-overview'))
+        return reply({
+          clubId: '42',
+          nights: [
+            { businessDate: '2026-11-25', bookings: 3, checkins: 7 },
+            { businessDate: '2026-11-24', bookings: null, checkins: null },
+            { businessDate: '2026-11-23', bookings: 0, checkins: 0 },
+          ],
+          reports: [
+            {
+              nightStart: '2026-11-25T20:30Z',
+              closedAt: '2026-11-26T04:00Z',
+              people: 10,
+              totalRevenueMinor: '900719925474099123',
+            },
+          ],
+        });
+      if (String(path).endsWith('/calendar')) return reply(calendar);
+      return reply({}, 404);
+    });
+  render(<ClubCabinet {...props} />);
+  expect(await screen.findByText('Отметки о входе: 7')).toBeTruthy();
+  expect(screen.getByText('Данные о бронях и посещениях недоступны.')).toBeTruthy();
+  expect(screen.getAllByText('Отметки о входе: 0')).toHaveLength(1);
+  expect(
+    screen.getByText(/Итоговая выручка/).textContent?.replace(/\s/g, ''),
+  ).toContain('9007199254740991,23₽');
+  expect(screen.getByRole('button', { name: 'Управляющие' })).toBeTruthy();
+  expect(
+    screen.queryByRole('button', {
+      name: 'Назначить ответственного за подготовку',
+    }),
+  ).toBeNull();
+  expect(
+    fetch.mock.calls.some(([path]) => String(path).endsWith('/preparation')),
+  ).toBe(false);
+});
+
+it('opens club manager configuration without issuing report or manager roster requests', async () => {
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (path) =>
+      String(path).endsWith('/profile')
+        ? reply({ ...profile, businessRole: 'CLUB_MANAGER' })
+        : reply(calendar),
+    );
+  render(<ClubCabinet {...props} />);
+  expect(await screen.findByText('Управляющий клуба')).toBeTruthy();
+  expect(
+    screen.getByRole('button', { name: /Профиль.*Просмотр и изменение/ }),
+  ).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Управляющие' })).toBeNull();
+  expect(
+    screen.queryByRole('heading', { name: 'Отчёты закрытых смен' }),
+  ).toBeNull();
+  expect(
+    fetch.mock.calls.every(([path]) =>
+      /\/(profile|calendar)$/.test(String(path)),
+    ),
+  ).toBe(true);
 });

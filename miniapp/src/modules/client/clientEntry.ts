@@ -1,4 +1,6 @@
-const invitationParameter = /^ci_([A-Za-z0-9_-]{43})$/;
+export type InvitationKind = 'client' | 'manager';
+
+const invitationParameter = /^(ci|cm)_([A-Za-z0-9_-]{43})$/;
 
 /** Untrusted launch data chooses a screen only; the server checks the token and signed identity. */
 export function readClientEntry(
@@ -16,15 +18,21 @@ export function readClientEntry(
     fragment.get('tgWebAppStartParam'),
     embedded.get('start_param'),
   ].filter(Boolean);
-  const invitation = candidates.find(
-    (value) => value && invitationParameter.test(value),
-  );
+  const invitation = candidates
+    .map((value) => value?.match(invitationParameter))
+    .find((match) => match != null);
+  const invitationKind: InvitationKind | null = invitation
+    ? invitation[1] === 'cm'
+      ? 'manager'
+      : 'client'
+    : null;
   return {
     client:
       query.get('mode') === 'client' ||
       candidates.includes('client') ||
       Boolean(invitation),
-    token: invitation?.match(invitationParameter)?.[1] ?? null,
+    invitationKind,
+    token: invitation?.[2] ?? null,
   };
 }
 

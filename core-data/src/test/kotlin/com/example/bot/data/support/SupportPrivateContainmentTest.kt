@@ -1,5 +1,6 @@
 package com.example.bot.data.support
 
+import com.example.bot.data.client.onboarding.LEGACY_CLUB_CREATION_VERSION
 import com.example.bot.data.client.onboarding.OnboardingFixture
 import com.example.bot.data.client.onboarding.OnboardingMutation
 import com.example.bot.data.client.onboarding.id
@@ -58,6 +59,7 @@ internal abstract class SupportPrivateContainmentContract {
                 )
             privateClub =
                 fixture.mutate(fixture.alice, OnboardingMutation.APPLICATION_CREATE_CLUB, application).id("id")
+            fixture.migrate()
             fixture.execute("INSERT INTO users(id,telegram_user_id) VALUES ($guest,880063501),($staff,880063502)")
             fixture.execute(
                 "INSERT INTO clubs(id,name,timezone,is_active) VALUES ($legacyClub,'Synthetic legacy','UTC',true)",
@@ -185,7 +187,7 @@ internal abstract class SupportPrivateContainmentContract {
 }
 
 internal class SupportPrivateContainmentTest : SupportPrivateContainmentContract() {
-    override fun newFixture(): OnboardingFixture = OnboardingFixture.h2()
+    override fun newFixture(): OnboardingFixture = OnboardingFixture.h2(LEGACY_CLUB_CREATION_VERSION)
 }
 
 /** Native disposable PostgreSQL 16, with no container discovery or live database fallback. */
@@ -222,6 +224,7 @@ internal class SupportPrivateContainmentPostgresIT : SupportPrivateContainmentCo
                 },
             ),
             "postgresql",
+            LEGACY_CLUB_CREATION_VERSION,
         )
     }
 }

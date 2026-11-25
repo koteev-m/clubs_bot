@@ -2,7 +2,6 @@ package com.example.bot.routes
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Tag
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
@@ -16,7 +15,10 @@ import kotlin.test.assertEquals
 @Tag("it")
 @Testcontainers
 class ClientOnboardingPostgresRoutesIT : ClientOnboardingRoutesDataTest() {
-    override fun database(block: (DataSource) -> Unit) {
+    override fun databaseAt(
+        target: String?,
+        block: (DataSource) -> Unit,
+    ) {
         val schema = "owner_http_" + UUID.randomUUID().toString().replace("-", "")
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
             assertEquals(16, connection.metaData.databaseMajorVersion)
@@ -37,15 +39,7 @@ class ClientOnboardingPostgresRoutesIT : ClientOnboardingRoutesDataTest() {
                     maximumPoolSize = 4
                 },
             ).use { source ->
-                Flyway
-                    .configure()
-                    .dataSource(source)
-                    .locations("classpath:db/migration/common", "classpath:db/migration/postgresql")
-                    .load()
-                    .also {
-                        it.migrate()
-                        it.validate()
-                    }
+                migrateBookingRulesFixture(source, "postgresql", target)
                 block(source)
             }
         } finally {

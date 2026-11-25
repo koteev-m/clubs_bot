@@ -57,7 +57,8 @@ internal class ClubBookingPreview(
         val profile =
             sql.row("SELECT client_id,owner_user_id FROM client_direct_club_profiles WHERE club_id=?", clubId)
                 ?: sql.row("SELECT client_id,owner_user_id FROM client_club_onboarding WHERE club_id=?", clubId)
-        return profile?.long("client_id") == clientId && profile.long("owner_user_id") == session.userId
+        return profile?.long("client_id") == clientId &&
+            session.canPreviewClub(clientId, clubId, profile.long("owner_user_id"))
     }
 
     private fun BookingRulesNightPreview.previewNight(

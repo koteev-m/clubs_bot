@@ -1,6 +1,9 @@
 package com.example.bot.data.client.onboarding
 
+import com.example.bot.data.client.assignments.ASSIGN_CLUB_MANAGER
 import com.example.bot.data.client.assignments.PlatformMembershipSourceRevocation
+import com.example.bot.data.client.assignments.READ_REPORTS
+import com.example.bot.data.client.assignments.REVOKE_CLUB_MANAGER
 import com.example.bot.data.security.Role
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -30,6 +33,57 @@ internal val staffPackages =
 internal fun staffPackage(role: String?): List<String> =
     staffPackages.entries.singleOrNull { it.key.name == role }?.value ?: fail("validation_error")
 
+internal fun OnboardingSession.registeredClubOwner(
+    clientId: Long,
+    clubId: Long,
+): Long? =
+    if (sql.businessOwnershipSchemaPresent()) {
+        sql
+            .row(
+                "SELECT user_id FROM client_business_clubs WHERE client_id=? AND club_id=?",
+                clientId,
+                clubId,
+            )?.long("user_id")
+    } else {
+        null
+    }
+
+internal fun OnboardingSession.businessClub(
+    clientId: Long,
+    clubId: Long,
+) = registeredClubOwner(clientId, clubId) != null
+
+internal fun OnboardingSession.canPreviewClub(
+    clientId: Long,
+    clubId: Long,
+    creator: Long,
+): Boolean = if (businessClub(clientId, clubId)) businessOwnerRef(clientId, clubId) != null else creator == userId
+
+internal fun OnboardingSession.profilePermissions(
+    clientId: Long,
+    clubId: Long,
+): List<String> {
+    val effective = clubPermissions(clientId, clubId)
+    return listOf(
+        READ_CLUB,
+        WRITE_PROFILE,
+        WRITE_LAYOUT,
+        WRITE_CALENDAR,
+        WRITE_BOOKING_RULES,
+        MANAGE_TEAM,
+        READ_FINANCE,
+        WRITE_FINANCE,
+        READ_MODULES,
+        WRITE_MODULES,
+        READ_REPORTS,
+        ASSIGN_CLUB_MANAGER,
+        REVOKE_CLUB_MANAGER,
+    ).filter {
+        it in effective &&
+            (it != MANAGE_TEAM || (!businessClub(clientId, clubId) && ClubStaffAccess(this).owns(clubId)))
+    }
+}
+
 /** Assignment metadata never authorizes a request; the exact current grants do. */
 internal class ClubStaffAccess(
     val session: OnboardingSession,
@@ -50,7 +104,7 @@ internal class ClubStaffAccess(
 
     fun owner(clubId: Long): Long {
         val clientId = session.requireClubGrant(clubId, MANAGE_TEAM)
-        if (!owns(clubId)) fail("not_found")
+        if (session.businessClub(clientId, clubId) || !owns(clubId)) fail("not_found")
         return clientId
     }
 

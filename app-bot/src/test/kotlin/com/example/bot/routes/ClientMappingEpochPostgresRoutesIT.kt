@@ -10,7 +10,10 @@ import javax.sql.DataSource
 
 @Tag("it")
 class ClientMappingEpochPostgresRoutesIT : ClientMappingEpochRoutesDataTest() {
-    override fun database(block: (DataSource) -> Unit) {
+    override fun databaseAt(
+        target: String?,
+        block: (DataSource) -> Unit,
+    ) {
         val source = disposableSource()
         val schema = "epoch_http_" + UUID.randomUUID().toString().replace("-", "")
         DriverManager.getConnection(source.getURL(), source.user, source.password).use { connection ->
@@ -29,6 +32,7 @@ class ClientMappingEpochPostgresRoutesIT : ClientMappingEpochRoutesDataTest() {
                 .dataSource(
                     source,
                 ).locations("classpath:db/migration/common", "classpath:db/migration/postgresql")
+                .apply { target?.let { target(it) } }
                 .load()
                 .also {
                     it.migrate()

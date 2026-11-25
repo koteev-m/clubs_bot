@@ -71,7 +71,6 @@ internal class ClubBookingRulesOperations(
                 row.long("version"),
                 CabinetBookingRules(
                     cutoffMinutes = row.long("cutoff_minutes").toInt(),
-                    arrivalMinutes = row["arrival_minutes"]?.toInt(),
                     holdMinutes = row["hold_minutes"]?.toInt(),
                     retentionMinutes = row.long("retention_minutes").toInt(),
                 ),
@@ -89,7 +88,6 @@ internal class ClubBookingRulesOperations(
             listOf(
                 stored.version,
                 rules.cutoffMinutes,
-                rules.arrivalMinutes,
                 rules.holdMinutes,
                 rules.retentionMinutes,
                 clubId,
@@ -98,14 +96,14 @@ internal class ClubBookingRulesOperations(
         if (stored.version == INITIAL_VERSION + 1) {
             sql.updateWithArguments(
                 "INSERT INTO client_club_booking_rules " +
-                    "(version,cutoff_minutes,arrival_minutes,hold_minutes,retention_minutes,club_id,client_id) " +
-                    "VALUES (?,?,?,?,?,?,?)",
+                    "(version,cutoff_minutes,hold_minutes,retention_minutes,club_id,client_id) " +
+                    "VALUES (?,?,?,?,?,?)",
                 args,
             )
         } else {
             check(
                 sql.updateWithArguments(
-                    "UPDATE client_club_booking_rules SET version=?,cutoff_minutes=?,arrival_minutes=?," +
+                    "UPDATE client_club_booking_rules SET version=?,cutoff_minutes=?," +
                         "hold_minutes=?,retention_minutes=? WHERE club_id=? AND client_id=?",
                     args,
                 ) == 1,
@@ -139,13 +137,16 @@ private data class StoredBookingRules(
     val rules: CabinetBookingRules,
 )
 
-private fun JsonObject.rules(): CabinetBookingRules =
-    CabinetBookingRules(
+private fun JsonObject.rules(): CabinetBookingRules {
+    // Older clients still send this retired setting. Validate its wire format without
+    // applying a limit or overwriting the historical value in client_club_booking_rules.
+    if ("arrivalMinutes" in this) minutes("arrivalMinutes", CabinetBookingRules.OFFSET_RANGE)
+    return CabinetBookingRules(
         cutoffMinutes = minutes("cutoffMinutes", CabinetBookingRules.OFFSET_RANGE) ?: fail("validation_error"),
-        arrivalMinutes = minutes("arrivalMinutes", CabinetBookingRules.OFFSET_RANGE),
         holdMinutes = minutes("holdMinutes", CabinetBookingRules.HOLD_RANGE),
         retentionMinutes = minutes("retentionMinutes", CabinetBookingRules.OFFSET_RANGE) ?: fail("validation_error"),
     )
+}
 
 private fun JsonObject.minutes(
     field: String,
@@ -162,7 +163,7 @@ private fun JsonObject.minutes(
 private fun CabinetBookingRules.json(): JsonObject =
     buildJsonObject {
         put("cutoffMinutes", cutoffMinutes)
-        put("arrivalMinutes", arrivalMinutes?.let(::JsonPrimitive) ?: JsonNull)
+        put("arrivalMinutes", JsonNull)
         put("holdMinutes", holdMinutes?.let(::JsonPrimitive) ?: JsonNull)
         put("retentionMinutes", retentionMinutes)
     }
@@ -173,10 +174,10 @@ internal fun BookingRulesNightPreview.json(): JsonObject =
         put("opensAt", night.opensAt.toOffsetDateTime().toString())
         put("closesAt", night.closesAt.toOffsetDateTime().toString())
         put("cutoffAt", cutoffAt.toOffsetDateTime().toString())
-        put("arrivalBy", arrivalBy?.toOffsetDateTime()?.toString())
+        put("arrivalBy", JsonNull)
         put("cutoffAtOrBeforeOpen", cutoffAtOrBeforeOpen)
-        put("arrivalAtOrAfterClose", arrivalAtOrAfterClose)
-        put("cutoffAfterArrival", cutoffAfterArrival)
+        put("arrivalAtOrAfterClose", false)
+        put("cutoffAfterArrival", false)
     }
 
 private const val INITIAL_VERSION = 1L
