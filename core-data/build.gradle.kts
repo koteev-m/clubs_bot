@@ -138,6 +138,19 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // The unit job runs the complement of the it tag with the same core-data Flyway settings.
+    // Both data workers use this one partition so newly discovered integration classes are covered.
+    providers.gradleProperty("ciPostgresShard").orNull?.let { shard ->
+        require(providers.gradleProperty("runIT").orNull == "true") { "PostgreSQL shards require -PrunIT=true" }
+        useJUnitPlatform { includeTags("it") }
+        val clientClasses =
+            listOf("com/example/bot/data/client/onboarding/**", "com/example/bot/data/client/bindings/**")
+        when (shard) {
+            "data-client" -> include(clientClasses)
+            "data-other" -> exclude(clientClasses)
+            else -> error("Unknown PostgreSQL data shard: $shard")
+        }
+    }
     if (project.hasProperty("runIT")) {
         systemProperty("junit.jupiter.tags.include", "it")
     } else {

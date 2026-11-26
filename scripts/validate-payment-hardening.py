@@ -193,7 +193,7 @@ def expected_runtime_groups() -> dict[str, tuple[RequiredRuntimeTest, ...]]:
     return {path: tuple(entries) for path, entries in groups.items()}
 
 
-def verify_junit_xml(arguments: list[str]) -> None:
+def verify_junit_xml(arguments: list[str], *, exact_cases: bool = True) -> None:
     if len(arguments) < 4:
         reject("PH-TEST-RESULT", "JUnit verification requires XML, suite, start time, and test names")
     xml_path = Path(arguments[0])
@@ -227,7 +227,7 @@ def verify_junit_xml(arguments: list[str]) -> None:
         }
     except ValueError:
         reject("PH-TEST-RESULT", "JUnit XML contains a non-numeric suite count")
-    if counts["tests"] != len(expected_tests) or counts["tests"] <= 0:
+    if counts["tests"] <= 0 or (exact_cases and counts["tests"] != len(expected_tests)):
         reject(
             "PH-TEST-RESULT",
             f"required JUnit suite test count changed: expected {len(expected_tests)}, got {counts['tests']}",
@@ -236,7 +236,7 @@ def verify_junit_xml(arguments: list[str]) -> None:
         reject("PH-TEST-RESULT", f"required JUnit suite is not clean: {counts}")
 
     cases = list(suite.findall("testcase"))
-    if len(cases) != len(expected_tests):
+    if len(cases) != counts["tests"]:
         reject("PH-TEST-RESULT", "required JUnit suite contains unexpected testcase count")
     if any(case.attrib.get("classname") != expected_suite for case in cases):
         reject("PH-TEST-RESULT", "required JUnit testcase classname changed")
@@ -248,7 +248,7 @@ def verify_junit_xml(arguments: list[str]) -> None:
     executed = set(executed_names)
     missing = sorted(expected_tests - executed)
     extra = sorted(executed - expected_tests)
-    if missing or extra:
+    if missing or (exact_cases and extra):
         reject("PH-TEST-RESULT", f"required JUnit tests did not execute: {', '.join(missing)}")
     print("payment-hardening-test-result: OK")
 
@@ -414,8 +414,10 @@ def run_required_runtime(argument: str) -> None:
     print("payment-hardening-runtime: PASS")
 
 
-if len(sys.argv) > 1 and sys.argv[1] == "--verify-junit-xml":
-    verify_junit_xml(sys.argv[2:])
+if len(sys.argv) > 1 and sys.argv[1] in {"--verify-junit-xml", "--verify-junit-case"}:
+    # A shard witness can be one known case in a larger suite. Both modes require
+    # fresh XML and a clean execution of every testcase present in that suite.
+    verify_junit_xml(sys.argv[2:], exact_cases=sys.argv[1] == "--verify-junit-xml")
     raise SystemExit(0)
 
 if len(sys.argv) > 1 and sys.argv[1] == "--run-required-runtime":

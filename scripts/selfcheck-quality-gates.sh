@@ -95,15 +95,7 @@ assert_not_contains() {
   fi
 }
 
-retry_log="$TMP_DIR/retry-failure.log"
-if RETRY_MAX_ATTEMPTS=2 RETRY_DELAY_SECONDS=0 \
-  "$ROOT_DIR/scripts/retry-command.sh" bash -c 'exit 7' >"$retry_log" 2>&1; then
-  fail "expected retry-command.sh to propagate the final command failure"
-else
-  retry_status=$?
-  assert_eq "$retry_status" "7"
-fi
-assert_contains "$(cat "$retry_log")" "Command failed after 2 attempts (exit 7)"
+python3 -B "$ROOT_DIR/scripts/tests/test_gradle_ci_cache.py"
 
 (
   cd "$TMP_DIR"
@@ -1466,7 +1458,7 @@ validate_container_smoke_workflow() {
     assert_job_has_no_direct_key "$file" "smoke" "$forbidden_key"
   done
 
-  for protected_step in "Probe /ready (gating)" "Probe /health"; do
+  for protected_step in "Set up Docker Buildx" "Build app image" "Probe /ready (gating)" "Probe /health"; do
     for forbidden_key in "continue-on-error" "if"; do
       assert_step_has_no_direct_key \
         "$file" \
@@ -1475,6 +1467,13 @@ validate_container_smoke_workflow() {
         "$forbidden_key"
     done
   done
+
+  # Checkout defaults to the PR merge revision. Only content-addressed layers are imported.
+  assert_step_with_contract "$file" "smoke" "Checkout" "persist-credentials: false"
+  assert_step_uses_sha_pinned_action "$file" "Set up Docker Buildx" "docker/setup-buildx-action"
+  assert_step_uses_sha_pinned_action "$file" "Build app image" "docker/build-push-action"
+  assert_step_with_contract "$file" "smoke" "Build app image" \
+    $'context: .\nfile: Dockerfile\npush: false\nload: true\ntags: app-bot:ci\ncache-from: type=gha,scope=buildkit'
 
   assert_step_run_contract \
     "$file" \
@@ -1863,7 +1862,7 @@ DEPENDENCY_SUBMISSION_USES = (
 )
 CHECKOUT_USES = "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7"
 SETUP_JAVA_USES = "actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0"
-SETUP_GRADLE_USES = "gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0"
+SETUP_GRADLE_USES = "gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0"
 TRIVY_USES = (
     "aquasecurity/trivy-action@"
     "57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release"
@@ -2179,6 +2178,7 @@ expect(
         "gradle-version": "wrapper",
         "validate-wrappers": "true",
         "cache-provider": "basic",
+        "cache-read-only": "true",
         "dependency-graph": "generate-and-submit",
         "dependency-resolution-task": (
             "verifyResolvedProductionDependencyGraph "
@@ -2239,7 +2239,7 @@ expect(
 )
 expect(
     sca.step_mapping("dependency-check", "Gradle cache & setup", "with"),
-    {"cache-disabled": "false", "gradle-version": "wrapper", "cache-read-only": "true"},
+    {"cache-disabled": "false", "gradle-version": "wrapper", "cache-provider": "basic", "cache-read-only": "true"},
     "read-only PR Gradle cache contract",
 )
 expect(
@@ -4398,6 +4398,20 @@ assert_tests_workflow_contract_rejected \
 
 echo "quality-gate: native Gradle repository policy and Tests workflow regressions verified"
 
+for pg_mutation in cached-application missing-migration; do
+  pg_fixture="$TMP_DIR/tests-pg-$pg_mutation.yml"
+  case "$pg_mutation" in
+    cached-application)
+      before='              tasks=(test --rerun -x :core-data:test)'
+      after='              tasks=(test -x :core-data:test)' ;;
+    missing-migration)
+      before="              cases=('postgres migrations run with jsonb defaults' 'postgres atomic refund migration preserves legacy actions')"
+      after="              cases=('postgres migrations run with jsonb defaults')" ;;
+  esac
+  replace_exact_line_once "$tests_workflow" "$pg_fixture" "$before" "$after"
+  assert_tests_workflow_contract_rejected "tests-pg-$pg_mutation" "$pg_fixture"
+done
+
 for native_mutation in job runner trigger; do
   native_fixture="$TMP_DIR/tests-native-$native_mutation.yml"
   case "$native_mutation" in
@@ -6302,7 +6316,7 @@ replace_step_line_once \
   "$sca_dependency_review_fixture" \
   "dependency-check" \
   "Gradle cache & setup" \
-  "        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0" \
+  "        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0" \
   "        uses: actions/dependency-""review-action@v5"
 assert_validation_rejected \
   "sca-dependency-review-reintroduced" \
@@ -6925,6 +6939,11 @@ approved_dockerignore_contract='.git
 .vscode
 *.iml
 out/
+image-evidence/
+*.md
+docs/
+miniapp/README.md
+miniapp/docs/
 .gradle
 .kotlin
 build
@@ -7043,6 +7062,13 @@ assert_validation_rejected \
   "dockerignore-wide-src-main" \
   validate_dockerignore_contract \
   "$dockerignore_wide_src_fixture"
+
+dockerignore_revision_fixture="$TMP_DIR/dockerignore-revision-evidence"
+sed '/^image-evidence\/$/d' "$dockerignore_file" >"$dockerignore_revision_fixture"
+assert_validation_rejected \
+  "dockerignore-revision-evidence" \
+  validate_dockerignore_contract \
+  "$dockerignore_revision_fixture"
 
 dockerignore_react_dist_fixture="$TMP_DIR/dockerignore-react-dist"
 cp "$dockerignore_file" "$dockerignore_react_dist_fixture"
@@ -9343,6 +9369,12 @@ assert_validation_rejected \
   "trivy-unguarded-sarif-upload" \
   validate_trivy_filesystem_workflow \
   "$trivy_unguarded_sarif_fixture"
+
+container_smoke_push_fixture="$TMP_DIR/container-smoke-push.yml"
+replace_step_line_once \
+  "$container_smoke_workflow" "$container_smoke_push_fixture" \
+  "smoke" "Build app image" "          push: false" "          push: true"
+assert_validation_rejected "container-smoke-push" validate_container_smoke_workflow "$container_smoke_push_fixture"
 
 container_smoke_ready_continue_fixture="$TMP_DIR/container-smoke-ready-continue.yml"
 insert_step_direct_line \

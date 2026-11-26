@@ -73,14 +73,15 @@ jobs:
           java-version: '21'
 
       - name: Gradle cache & setup
-        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
           cache-disabled: false
           gradle-version: wrapper
-          cache-read-only: false
+          cache-provider: basic
+          cache-read-only: true
 
       - name: Validate payment hardening structure
-        if: needs.lint-scope.outputs.mode != 'full'
+        if: needs.lint-scope.outputs.quality_controls == 'false'
         run: python3 -B scripts/validate-payment-hardening.py .
 
       - name: Payment hardening required runtime
@@ -91,7 +92,7 @@ jobs:
 
       - name: Quality gate regression self-check
         run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage
-        if: needs.lint-scope.outputs.mode == 'full'
+        if: needs.lint-scope.outputs.quality_controls == 'true'
 
   corrected-authority:
     name: corrected-authority
@@ -232,6 +233,9 @@ jobs:
           if mode not in ("docs", "ui", "backend", "ui-backend", "full") or image not in ("true", "false"):
               raise SystemExit("lint gate: invalid change scope")
           backend = mode in ("backend", "ui-backend", "full")
+          quality = scope["outputs"]["quality_controls"]
+          if quality not in ("true", "false") or (mode == "full" and quality != "true") or (not backend and quality != "false"):
+              raise SystemExit("lint gate: invalid quality control scope")
           if (backend and image != "true") or (mode == "docs" and image != "false"):
               raise SystemExit("lint gate: inconsistent packaging scope")
           required = {

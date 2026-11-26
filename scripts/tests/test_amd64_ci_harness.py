@@ -146,7 +146,14 @@ class LogsPolicyTest(unittest.TestCase):
 
     def test_maven_retry_is_bounded_and_limited_to_plugin_resolution(self):
         help_step = self.workflow['jobs']['unit-tests']['steps'][8]['run']
-        rate_limit = "Could not GET 'https://repo.maven.apache.org/maven2/lib.pom'. Received status code 429 from server: Too Many Requests"
+        rate_limit = (
+            "FAILURE: Build failed with an exception.\n\n* What went wrong:\n"
+            "A problem occurred configuring project ':buildSrc'.\n"
+            "> Could not resolve all artifacts for configuration 'classpath'.\n"
+            "   > Could not GET 'https://repo.maven.apache.org/maven2/lib.pom'. "
+            "Received status code 429 from server: Too Many Requests\n\n"
+            "* Try:\n> Get more help at https://help.gradle.org.\n\nBUILD FAILED in 1s"
+        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'scripts').mkdir()
@@ -176,36 +183,101 @@ class LogsPolicyTest(unittest.TestCase):
                 calls.write_text('')
                 step = self.workflow['jobs'][job]['steps'][-2]['run']
                 result = subprocess.run(['bash', '-e', '-c', step], cwd=root, env=dict(
-                    os.environ, DIAGNOSTIC=rate_limit, FAIL_N='2'), capture_output=True)
+                    os.environ, DIAGNOSTIC=rate_limit, FAIL_N='2', PG_SHARD='data-other'), capture_output=True)
                 self.assertEqual(result.returncode, 37)
                 self.assertEqual(len(calls.read_text().splitlines()), 1)
 
-    def test_postgres_profile_requires_fresh_executed_migrations(self):
+    def test_postgres_matrix_requires_all_shards_and_preserves_successful_siblings(self):
+        mutations = (
+            ('strategy', {'fail-fast': False, 'matrix': {'shard': ['application', 'data-client']}}),
+            ('strategy', {'fail-fast': True, 'matrix': {'shard': ['application', 'data-client', 'data-other']}}),
+        )
+        for key, value in mutations:
+            changed = deepcopy(self.workflow)
+            changed['jobs']['integration-tests'][key] = value
+            self.assertNotEqual(self.validate(changed).returncode, 0)
+
+    def test_postgres_workers_check_all_reports_for_skips(self):
+        workflow = deepcopy(self.workflow)
+        step = workflow['jobs']['integration-tests']['steps'][-2]
+        command = 'python3 -I -S -B scripts/verify-postgres-skips.py "$PG_SHARD" "$started"'
+        self.assertIn(command, step['run'])
+        step['run'] = step['run'].replace(command, 'true')
+        self.assertNotEqual(self.validate(workflow).returncode, 0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            suite = 'com.example.bot.GuestFlowStartTest'
+            known = 'start command sends menu with four buttons'
+            out = root / 'core-testing/build/test-results/test' / f'TEST-{suite}.xml'
+            out.parent.mkdir(parents=True)
+            def verify(name, skipped, count, started=0, shard='application'):
+                out.write_text(f'<testsuite name="{suite}" tests="1" skipped="{count}">'
+                               f'<testcase classname="{suite}" name="{name}">{skipped}</testcase></testsuite>')
+                return subprocess.run([sys.executable, str(ROOT / 'scripts/verify-postgres-skips.py'),
+                                       shard, str(started)], cwd=root, capture_output=True)
+
+            self.assertEqual(verify(known, '<skipped/>', 1).returncode, 0)
+            self.assertEqual(verify(known, '', 0).returncode, 0)
+            self.assertNotEqual(verify('additional case', '<skipped/>', 1).returncode, 0)
+            self.assertNotEqual(verify(known, '<skipped/>', 0).returncode, 0)
+            self.assertNotEqual(verify(known, '', 0, started=2**63-1).returncode, 0)
+            self.assertNotEqual(verify(known, '', 0, shard='data-other').returncode, 0)
+            out = root / 'core-data/build/test-results/test' / f'TEST-{suite}.xml'
+            out.parent.mkdir(parents=True)
+            self.assertNotEqual(verify(known, '<skipped/>', 1, shard='data-client').returncode, 0)
+
+    def test_postgres_profiles_require_fresh_executed_cases(self):
         step = self.workflow['jobs']['integration-tests']['steps'][-2]['run']
-        suite = 'com.example.bot.data.migration.FlywayPostgresSmokeTest'
-        names = ('postgres migrations run with jsonb defaults', 'postgres atomic refund migration preserves legacy actions')
+        profiles = {
+            'application': ('app-bot', 'com.example.bot.tools.BootstrapValidatePostgresIT', [
+                'PostgreSQL 16 validation preserves full dump on positive and negative evidence']),
+            'data-client': ('core-data', 'com.example.bot.data.client.onboarding.BookingCutoverFencePostgresIT', [
+                'protected seating excludes direct legacy HOLD and createBooked']),
+            'data-other': ('core-data', 'com.example.bot.data.migration.FlywayPostgresSmokeTest', [
+                'postgres migrations run with jsonb defaults', 'postgres atomic refund migration preserves legacy actions']),
+        }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'scripts').symlink_to(ROOT / 'scripts', target_is_directory=True)
-            output = root / 'core-data/build/test-results/test' / f'TEST-{suite}.xml'
-            output.parent.mkdir(parents=True)
             gradle = root / 'gradlew'
-            gradle.write_text('#!/bin/sh\ncp fixture.xml "$REPORT"\n')
+            gradle.write_text('#!/bin/sh\nif [ "$MODE" = fresh ]; then cp fixture.xml "$REPORT"; fi\n')
             gradle.chmod(0o700)
-            for skipped in (False, True):
-                cases = ''.join(f'<testcase name="{name}()" classname="{suite}">' +
-                                ('<skipped/>' if skipped else '') + '</testcase>' for name in names)
-                (root / 'fixture.xml').write_text(
-                    f'<testsuite name="{suite}" tests="2" skipped="{2 if skipped else 0}" failures="0" errors="0">'
-                    + cases + '</testsuite>')
-                result = subprocess.run(['bash', '-e', '-c', step], cwd=root,
-                                        env=dict(os.environ, REPORT=str(output)), capture_output=True)
-                self.assertEqual(result.returncode == 0, not skipped, result.stderr)
-            gradle.write_text('#!/bin/sh\nexit 0\n')
-            output.unlink()
-            result = subprocess.run(['bash', '-e', '-c', step], cwd=root, capture_output=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn(b'PH-TEST-RESULT', result.stderr + result.stdout)
+            for shard, (module, suite, names) in profiles.items():
+                with self.subTest(shard=shard):
+                    output = root / module / 'build/test-results/test' / f'TEST-{suite}.xml'
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    env = dict(os.environ, PG_SHARD=shard, REPORT=str(output), MODE='fresh')
+                    # The named data-client witness belongs to a larger mandatory suite.
+                    reported = names + (['another passing case'] if shard == 'data-client' else [])
+                    for skipped in (False, True):
+                        cases = ''.join(f'<testcase name="{name}()" classname="{suite}">' +
+                                        ('<skipped/>' if skipped else '') + '</testcase>' for name in reported)
+                        (root / 'fixture.xml').write_text(
+                            f'<testsuite name="{suite}" tests="{len(reported)}" skipped="{len(reported) if skipped else 0}" '
+                            'failures="0" errors="0">' + cases + '</testsuite>')
+                        result = subprocess.run(['bash', '-e', '-c', step], cwd=root, env=env, capture_output=True)
+                        self.assertEqual(result.returncode == 0, not skipped, result.stderr)
+                        if not skipped:
+                            if shard == 'data-client':
+                                exact = subprocess.run(
+                                    [sys.executable, str(ROOT / 'scripts/validate-payment-hardening.py'),
+                                     '--verify-junit-xml', str(output), suite, '0', *names], capture_output=True)
+                                self.assertNotEqual(exact.returncode, 0)
+                            stale = subprocess.run(['bash', '-e', '-c', step], cwd=root,
+                                                   env=dict(env, MODE='stale'), capture_output=True)
+                            self.assertNotEqual(stale.returncode, 0)
+                            self.assertIn(b'stale', stale.stderr + stale.stdout)
+                    # A clean zero-failure report with only unrelated cases cannot prove the witness.
+                    (root / 'fixture.xml').write_text(f'<testsuite name="{suite}" tests="1">'
+                                                     f'<testcase name="unrelated()" classname="{suite}"/></testsuite>')
+                    wrong_case = subprocess.run(['bash', '-e', '-c', step], cwd=root, env=env, capture_output=True)
+                    self.assertNotEqual(wrong_case.returncode, 0)
+                    output.unlink()
+                    missing = subprocess.run(['bash', '-e', '-c', step], cwd=root,
+                                             env=dict(env, MODE='missing'), capture_output=True)
+                    self.assertNotEqual(missing.returncode, 0)
+                    self.assertIn(b'PH-TEST-RESULT', missing.stderr + missing.stdout)
 
     def test_gradle_test_and_MDC_prerequisites_remain(self):
         text = (ROOT / 'app-bot/build.gradle.kts').read_text()

@@ -1,5 +1,14 @@
 # Project status checkpoint
 
+## CLB-CI-OPTIMIZATION, 2026-11-26
+
+Local CI optimization on `codex/clb-ci-optimization`, based on merged main
+`d94f31d48beff31105e0845fdd5a29e446bdb389`. The PostgreSQL matrix, scope
+selection and cache changes are the candidate for a Draft PR to main.
+The [verification report](CLB-CI-OPTIMIZATION.md) records the hosted baseline,
+local test inventories and timings. This CI change selects the full route.
+Compare its completed GitHub Actions jobs and critical path with run 45694799240.
+
 ## PR #569 — multipart CI repair, 2026-11-14
 
 - Continuation of the existing Draft PR on `codex/stage-readonly-snapshot`, input

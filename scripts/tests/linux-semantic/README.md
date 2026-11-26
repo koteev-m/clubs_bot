@@ -252,7 +252,8 @@ gh workflow run tests.yml --repo koteev-m/clubs_bot --ref APPROVED_FEATURE_BRANC
 ```
 
 This dispatch also runs **unit-tests** (H2 build, SEC-02 and coverage),
-**integration-tests** (PostgreSQL) and their **tests-required** aggregate.
+**integration-tests** (three PostgreSQL matrix jobs with a separate service in each)
+and their **tests-required** aggregate.
 On ordinary PRs and pushes to main, Lint calls this workflow for changes that need
 JVM checks. The required `lint` status includes the result. The native prototype
 runs only on explicit Tests dispatch.

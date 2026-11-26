@@ -1184,6 +1184,7 @@ module WorkflowCapabilityPolicy
             "gradle-version" => "wrapper",
             "validate-wrappers" => true,
             "cache-provider" => "basic",
+            "cache-read-only" => true,
             "dependency-graph" => "generate-and-submit",
             "dependency-resolution-task" =>
               "verifyResolvedProductionDependencyGraph " \
@@ -2286,7 +2287,7 @@ module WorkflowCapabilityPolicy
       "context" => ".", "file" => "Dockerfile", "push" => false, "load" => true,
       "platforms" => "linux/${{ matrix.arch }}",
       "labels" => "org.opencontainers.image.revision=${{ env.CANDIDATE_SHA }}",
-      "cache-from" => "type=gha,scope=pr-image-${{ matrix.arch }}",
+      "cache-from" => "type=gha,scope=pr-image-${{ matrix.arch }}\ntype=gha,scope=buildkit\n",
       "cache-to" => "type=gha,mode=max,scope=pr-image-${{ matrix.arch }}",
       "provenance" => false,
     }, "#{context}/non-publishing image build")

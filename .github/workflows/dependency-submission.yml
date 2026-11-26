@@ -51,6 +51,7 @@ jobs:
           gradle-version: wrapper
           validate-wrappers: true
           cache-provider: basic
+          cache-read-only: true
           dependency-graph: generate-and-submit
           dependency-resolution-task: >-
             verifyResolvedProductionDependencyGraph

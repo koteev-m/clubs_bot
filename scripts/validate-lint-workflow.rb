@@ -194,9 +194,8 @@ delegated = one_step(lint_steps, "Quality gate regression self-check")
 structural = one_step(release_steps, "Validate release-state structure")
 suite = one_step(release_steps, "Run strict release-state suite")
 reject_contract("structural validator is conditional") if structural.key?("if")
-[delegated, suite].each do |step|
-  reject_contract("full suite scope changed") unless step["if"] == full_scope
-end
+reject_contract("release suite scope changed") unless suite["if"] == full_scope
+reject_contract("quality suite scope changed") unless delegated["if"] == "needs.lint-scope.outputs.quality_controls == 'true'"
 unless delegated["run"] == "./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage"
   reject_contract("lint must invoke the exact delegated selfcheck mode")
 end
@@ -289,6 +288,9 @@ expected_aggregator = {
       if mode not in ("docs", "ui", "backend", "ui-backend", "full") or image not in ("true", "false"):
           raise SystemExit("lint gate: invalid change scope")
       backend = mode in ("backend", "ui-backend", "full")
+      quality = scope["outputs"]["quality_controls"]
+      if quality not in ("true", "false") or (mode == "full" and quality != "true") or (not backend and quality != "false"):
+          raise SystemExit("lint gate: invalid quality control scope")
       if (backend and image != "true") or (mode == "docs" and image != "false"):
           raise SystemExit("lint gate: inconsistent packaging scope")
       required = {
@@ -315,7 +317,7 @@ reject_contract("lint aggregator must require every worker success, always and f
 
 payment_structure = one_step(lint_steps, "Validate payment hardening structure")
 unless payment_structure == {
-  "name" => "Validate payment hardening structure", "if" => "needs.lint-scope.outputs.mode != 'full'",
+  "name" => "Validate payment hardening structure", "if" => "needs.lint-scope.outputs.quality_controls == 'false'",
   "run" => "python3 -B scripts/validate-payment-hardening.py .",
 }
   reject_contract("backend payment structure check changed")
@@ -339,8 +341,9 @@ expected_setup = [
   },
   {
     "name" => "Gradle cache & setup",
-    "uses" => "gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70",
-    "with" => {"cache-disabled" => false, "gradle-version" => "wrapper", "cache-read-only" => false},
+    "uses" => "gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92",
+    "with" => {"cache-disabled" => false, "gradle-version" => "wrapper", "cache-provider" => "basic",
+               "cache-read-only" => true},
   },
 ]
 reject_contract("core checkout/JDK/cache setup changed") unless lint_steps.first(3) == expected_setup

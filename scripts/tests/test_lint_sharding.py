@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
@@ -222,25 +223,25 @@ class LintScopeTests(unittest.TestCase):
         self.assertEqual(result.returncode == 0, ok, result.stderr)
         values = dict(row.split("=", 1) for row in result.stdout.splitlines())
         if ok:
-            self.assertEqual(set(values), {"mode", "image"})
+            self.assertEqual(set(values), {"mode", "image", "quality_controls"})
         return values
 
     def test_push_checks_whole_range_and_falls_back_for_unknown_and_renamed_paths(self):
         self.write("README.md", "doc")
         self.commit()
-        self.assertEqual({"mode": "docs", "image": "false"}, self.mode())
+        self.assertEqual({"mode": "docs", "image": "false", "quality_controls": "false"}, self.mode())
         self.write("miniapp/src/widgets/ToastHost.tsx", "presentation edit")
         self.commit()
-        self.assertEqual({"mode": "ui", "image": "false"}, self.mode())
+        self.assertEqual({"mode": "ui", "image": "false", "quality_controls": "false"}, self.mode())
         self.write(self.style, ".test {}")
         self.commit()
-        self.assertEqual({"mode": "ui", "image": "false"}, self.mode())
+        self.assertEqual({"mode": "ui", "image": "false", "quality_controls": "false"}, self.mode())
         self.git("mv", self.protected, "miniapp/README.md")
         self.commit()
         self.write("README.md", "last commit touches only docs")
         self.commit()
-        self.assertEqual({"mode": "full", "image": "true"}, self.mode())
-        self.assertEqual({"mode": "full", "image": "true"}, self.mode(base="0" * 40))
+        self.assertEqual({"mode": "full", "image": "true", "quality_controls": "true"}, self.mode())
+        self.assertEqual({"mode": "full", "image": "true", "quality_controls": "true"}, self.mode(base="0" * 40))
         self.mode(base="1" * 40, ok=False)
         self.mode(revision=self.base, ok=False)
 
@@ -257,37 +258,75 @@ class LintScopeTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.write(path, "fixture")
                 self.commit()
-                self.assertEqual({"mode": mode, "image": image}, self.mode())
+                self.assertEqual({"mode": mode, "image": image, "quality_controls": str(mode == "full").lower()}, self.mode())
 
     def test_backend_docs_contracts_dependency_and_security_paths(self):
-        for path, mode in (
-            ("miniapp/src/main/resources/miniapp/assets/js/api.js", "ui-backend"),
-            ("miniapp/src/modules/payments/api/payments.api.ts", "ui-backend"),
-            ("miniapp/src/modules/auth/hooks/useInitData.ts", "ui-backend"),
-            ("miniapp/src/shared/api/http.ts", "ui-backend"),
-            ("miniapp/src/app/CabinetEntry.tsx", "ui-backend"),
-            ("miniapp/src/modules/client/onboarding.api.ts", "ui-backend"),
-            ("app-bot/src/main/kotlin/demo/Music.kt", "backend"),
-            ("core-security/src/main/kotlin/demo/Auth.kt", "full"),
-            ("docs/dr.md", "full"),
-            ("docs/ops/release-rollback.md", "full"),
-            ("docs/ops/owner-team-contract.md", "full"),
-            ("docs/ops/owner-manager-contract.md", "full"),
-            ("app-bot/src/main/kotlin/bot/routes/PaymentsFinalizeRoutes.kt", "full"),
-            ("app-bot/src/main/kotlin/bot/plugins/MigrationsPlugin.kt", "full"),
-            ("app-bot/src/main/kotlin/bot/security/Rbac.kt", "full"),
-            ("app-bot/src/main/kotlin/bot/di/PaymentsModule.kt", "full"),
-            ("app-bot/src/test/kotlin/bot/telegram/webhook/TelegramWebhookIngressWorkerTest.kt", "backend"),
-            ("miniapp/pnpm-lock.yaml", "full"),
-            ("buildSrc/src/main/kotlin/build/Dependencies.kt", "full"),
-            (".github/workflows/tests.yml", "full"),
-            ("unknown/new.file", "full"),
+        for path, mode, quality in (
+            ("miniapp/src/main/resources/miniapp/assets/js/api.js", "ui-backend", False),
+            ("miniapp/src/modules/payments/api/payments.api.ts", "ui-backend", False),
+            ("miniapp/src/modules/auth/hooks/useInitData.ts", "ui-backend", False),
+            ("miniapp/src/shared/api/http.ts", "ui-backend", False),
+            ("miniapp/src/app/CabinetEntry.tsx", "ui-backend", False),
+            ("miniapp/src/modules/client/onboarding.api.ts", "ui-backend", False),
+            ("app-bot/src/main/kotlin/demo/Music.kt", "backend", False),
+            ("core-security/src/main/kotlin/demo/Auth.kt", "ui-backend", False),
+            ("docs/dr.md", "full", True),
+            ("docs/ops/release-rollback.md", "full", True),
+            ("docs/ops/owner-team-contract.md", "full", True),
+            ("docs/ops/owner-manager-contract.md", "full", True),
+            ("app-bot/src/main/kotlin/bot/routes/PaymentsFinalizeRoutes.kt", "ui-backend", True),
+            ("app-bot/src/main/kotlin/bot/plugins/MigrationsPlugin.kt", "backend", True),
+            ("app-bot/src/main/kotlin/bot/security/Rbac.kt", "ui-backend", False),
+            ("app-bot/src/main/kotlin/bot/di/PaymentsModule.kt", "ui-backend", True),
+            ("app-bot/src/test/kotlin/bot/telegram/webhook/TelegramWebhookIngressWorkerTest.kt", "backend", False),
+            ("core-data/src/main/kotlin/bot/data/client/ClubManagers.kt", "backend", False),
+            ("core-data/src/main/kotlin/bot/data/db/DbConfig.kt", "backend", True),
+            ("core-data/src/main/resources/db/migration/postgresql/V081__club_manager_invitations.sql", "backend", False),
+            ("core-data/src/main/resources/db/migration/h2/V056__atomic_booking_refunds.sql", "backend", True),
+            ("core-data/src/main/resources/db/migration/common/V6__telegram_notify_endpoints.sql", "backend", False),
+            ("core-data/src/main/resources/db/migration/new_dialect/V082__unknown.sql", "full", True),
+            ("scripts/deploy/remote-compose-release.sh", "full", True),
+            ("scripts/lint-scope.py", "full", True),
+            (".github/workflows/change-scope.yml", "full", True),
+            ("miniapp/pnpm-lock.yaml", "full", True),
+            ("miniapp/src/modules/auth/unknown.sh", "full", True),
+            ("miniapp/public/future.workflow", "full", True),
+            ("buildSrc/src/main/kotlin/build/Dependencies.kt", "full", True),
+            (".github/workflows/tests.yml", "full", True),
+            ("unknown/new.file", "full", True),
         ):
             with self.subTest(path=path):
                 before = self.git("rev-parse", "HEAD")
                 self.write(path, "fixture")
                 self.commit()
-                self.assertEqual({"mode": mode, "image": "true"}, self.mode(base=before))
+                self.assertEqual({"mode": mode, "image": "true", "quality_controls": str(quality).lower()}, self.mode(base=before))
+
+    def test_deleted_and_renamed_migrations_retain_backend_and_all_required_controls(self):
+        schema = "core-data/src/main/resources/db/migration/postgresql/V081__club_manager_invitations.sql"
+        guarded = "core-data/src/main/resources/db/migration/h2/V056__atomic_booking_refunds.sql"
+        self.write(schema, "schema")
+        self.write(guarded, "guarded schema")
+        base = self.commit()
+        (self.repo / schema).unlink()
+        self.commit()
+        self.assertEqual({"mode": "backend", "image": "true", "quality_controls": "false"}, self.mode(base=base))
+        self.git("mv", guarded, self.style + ".new.css")
+        self.commit()
+        self.assertEqual({"mode": "ui-backend", "image": "true", "quality_controls": "true"}, self.mode(base=base))
+        self.write(".github/workflows/new.yml", "ci")
+        self.commit()
+        self.assertEqual({"mode": "full", "image": "true", "quality_controls": "true"}, self.mode(base=base))
+
+    def test_selfcheck_product_mutation_inputs_are_never_classified_as_ordinary_backend(self):
+        source = SELFCHECK.read_text()
+        fixture = source.split("payment_hardening_files=(\n", 1)[1].split("\n)", 1)[0]
+        paths = [row.strip().strip('"') for row in fixture.splitlines()]
+        self.assertTrue(any(path.endswith(".sql") for path in paths))
+        self.assertTrue(any(path.endswith(".kt") for path in paths))
+        areas_for = runpy.run_path(str(ROOT / "scripts/lint-scope.py"))["areas_for"]
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertTrue(areas_for(path.encode()) & {"full", "quality"})
 
     def test_pr_uses_branch_and_merge_diffs_with_verified_parents(self):
         self.git("switch", "-qc", "candidate")
@@ -297,12 +336,12 @@ class LintScopeTests(unittest.TestCase):
         self.write(self.protected, "advanced base")
         base = self.commit()
         self.git("merge", "--no-ff", "-qm", "merge", head)
-        self.assertEqual({"mode": "docs", "image": "false"}, self.mode(base=base, candidate=head))
+        self.assertEqual({"mode": "docs", "image": "false", "quality_controls": "false"}, self.mode(base=base, candidate=head))
         self.mode(base=self.base, candidate=head, ok=False)
         self.write(self.protected, "change in merged result")
         self.git("add", "-A")
         self.git("commit", "--amend", "--no-edit", "-q")
-        self.assertEqual({"mode": "full", "image": "true"}, self.mode(base=base, candidate=head))
+        self.assertEqual({"mode": "full", "image": "true", "quality_controls": "true"}, self.mode(base=base, candidate=head))
 
     def test_sensitive_candidate_change_already_on_base_is_still_full(self):
         self.git("switch", "-qc", "candidate")
@@ -313,7 +352,7 @@ class LintScopeTests(unittest.TestCase):
         self.write(self.protected, "shared")
         base = self.commit()
         self.git("merge", "--no-ff", "-qm", "merge", head)
-        self.assertEqual({"mode": "full", "image": "true"}, self.mode(base=base, candidate=head))
+        self.assertEqual({"mode": "full", "image": "true", "quality_controls": "true"}, self.mode(base=base, candidate=head))
 
     def test_mode_changes_and_whitespace_are_not_fast_successes(self):
         self.write("README.md", "trailing ")
@@ -322,7 +361,7 @@ class LintScopeTests(unittest.TestCase):
         (self.repo / "README.md").unlink()
         (self.repo / "README.md").symlink_to(self.protected)
         self.commit()
-        self.assertEqual({"mode": "full", "image": "true"}, self.mode())
+        self.assertEqual({"mode": "full", "image": "true", "quality_controls": "true"}, self.mode())
 
 
 class LintTopologyTest(unittest.TestCase):
@@ -345,6 +384,19 @@ class LintTopologyTest(unittest.TestCase):
         self.assertEqual("lint", self.workflow["jobs"]["lint"]["name"])
         self.assertEqual("release-state", self.security["jobs"]["release-state"]["name"])
         self.assertNotIn("release-state", self.workflow["jobs"]["lint"]["needs"])
+
+    def test_workflow_contracts_run_on_the_early_read_only_guard(self):
+        guard = workflow_model(WORKFLOW.with_name("ci-guards.yml"))
+        self.assertEqual(guard["permissions"], {"contents": "read"})
+        job = guard["jobs"]["verify-actions-pinned"]
+        self.assertNotIn("needs", job)
+        self.assertEqual(job["steps"][0]["with"], {"persist-credentials": False})
+        step, = [item for item in job["steps"] if item.get("name") == "Check workflow contracts"]
+        self.assertEqual(set(step), {"name", "run"})
+        self.assertEqual(step["run"].splitlines(), [
+            "ruby scripts/validate-workflow-capabilities.rb .",
+            "ruby scripts/validate-lint-workflow.rb .github/workflows/lint.yml",
+        ])
 
     def test_missing_workers_and_aggregator_dependencies_are_rejected(self):
         for worker in WORKERS:
@@ -406,7 +458,7 @@ class LintTopologyTest(unittest.TestCase):
 
     def test_actual_aggregator_success_failure_cancelled_and_unexpected_skipped(self):
         success = {worker: {"result": "success", "outputs": {}} for worker in WORKERS}
-        success["lint-scope"]["outputs"] = {"mode": "full", "image": "true"}
+        success["lint-scope"]["outputs"] = {"mode": "full", "image": "true", "quality_controls": "true"}
         self.assertEqual(0, self.aggregate(success).returncode)
         for worker in WORKERS:
             for status in ("failure", "cancelled", "skipped", "neutral", "", None):
@@ -425,16 +477,18 @@ class LintTopologyTest(unittest.TestCase):
                 self.assertNotEqual(0, self.aggregate(needs).returncode)
 
     def test_fast_lint_requires_exact_skips_and_successful_mandatory_jobs(self):
-        for mode, image, required in (
-            ("docs", "false", []),
-            ("ui", "false", ["miniapp"]),
-            ("ui", "true", ["miniapp", "container-smoke", "pr-image"]),
-            ("backend", "true", ["jvm", "lint-core", "container-smoke", "pr-image"]),
-            ("ui-backend", "true", ["jvm", "lint-core", "miniapp", "container-smoke", "pr-image"]),
+        for mode, image, quality, required in (
+            ("docs", "false", "false", []),
+            ("ui", "false", "false", ["miniapp"]),
+            ("ui", "true", "false", ["miniapp", "container-smoke", "pr-image"]),
+            ("backend", "true", "false", ["jvm", "lint-core", "container-smoke", "pr-image"]),
+            ("backend", "true", "true", ["jvm", "lint-core", "container-smoke", "pr-image"]),
+            ("ui-backend", "true", "false", ["jvm", "lint-core", "miniapp", "container-smoke", "pr-image"]),
+            ("ui-backend", "true", "true", ["jvm", "lint-core", "miniapp", "container-smoke", "pr-image"]),
         ):
             for event in ("push", "pull_request"):
                 needs = {job: {"result": "skipped"} for job in WORKERS}
-                needs["lint-scope"] = {"result": "success", "outputs": {"mode": mode, "image": image}}
+                needs["lint-scope"] = {"result": "success", "outputs": {"mode": mode, "image": image, "quality_controls": quality}}
                 for job in required:
                     if job != "pr-image" or event == "pull_request":
                         needs[job]["result"] = "success"
@@ -445,7 +499,10 @@ class LintTopologyTest(unittest.TestCase):
                         bad[job]["result"] = "skipped" if needs[job]["result"] == "success" else "cancelled"
                         self.assertNotEqual(0, self.aggregate(bad, event).returncode)
         for outputs in ({}, {"mode": "full"}, {"mode": "backend", "image": "false"},
-                        {"mode": "docs", "image": "true"}, {"mode": "other", "image": "true"}):
+                        {"mode": "docs", "image": "true"}, {"mode": "other", "image": "true"},
+                        {"mode": "full", "image": "true", "quality_controls": "false"},
+                        {"mode": "ui", "image": "true", "quality_controls": "true"},
+                        {"mode": "backend", "image": "true", "quality_controls": "invalid"}):
             needs["lint-scope"]["outputs"] = outputs
             self.assertNotEqual(0, self.aggregate(needs).returncode)
 
@@ -500,7 +557,27 @@ class LintTopologyTest(unittest.TestCase):
                        "LINT_BASE": base, "DIFF_STATUS": str(code)}
                 result = subprocess.run(["bash", "-e", "-c", command], env=env)
                 self.assertEqual(expected, result.returncode)
-                self.assertEqual("" if expected else "mode=full\nimage=true\n", output.read_text())
+                self.assertEqual("" if expected else "mode=full\nimage=true\nquality_controls=true\n", output.read_text())
+
+    def test_quality_scope_is_forwarded_and_invalid_combinations_are_blocking(self):
+        scope = workflow_model(WORKFLOW.with_name("change-scope.yml"))
+        job = scope["jobs"]["changes"]
+        self.assertEqual("${{ steps.range.outputs.quality_controls }}", job["outputs"]["quality_controls"])
+        self.assertEqual({"value": "${{ jobs.changes.outputs.quality_controls }}"},
+                         scope["on"]["workflow_call"]["outputs"]["quality_controls"])
+        step = job["steps"][-1]
+        self.assertEqual("${{ steps.range.outputs.quality_controls }}", step["env"]["QUALITY"])
+        for mode, image, quality, ok in (
+            ("backend", "true", "false", True), ("backend", "true", "true", True),
+            ("ui-backend", "true", "false", True), ("full", "true", "true", True),
+            ("docs", "false", "true", False), ("ui", "true", "true", False),
+            ("full", "true", "false", False), ("ui-backend", "false", "true", False),
+            ("backend", "true", "", False),
+        ):
+            with self.subTest(mode=mode, image=image, quality=quality):
+                result = subprocess.run(["bash", "-e", "-c", step["run"]], capture_output=True,
+                                        env={**os.environ, "MODE": mode, "IMAGE": image, "QUALITY": quality})
+                self.assertEqual(ok, result.returncode == 0)
 
     def test_scope_output_and_fast_checks_cannot_be_disabled(self):
         for step in range(len(self.workflow["jobs"]["miniapp"]["steps"])):
@@ -517,7 +594,7 @@ class LintTopologyTest(unittest.TestCase):
         # Execute the existing shell regression block itself, including negative
         # YAML, timeout, delegation, exact candidate and shell-failure fixtures.
         source = SELFCHECK.read_text()
-        helpers = source[source.index("fail() {"):source.index('retry_log=')]
+        helpers = source[source.index("fail() {"):source.index("assert_not_contains() {")]
         contracts = source[source.index("validate_lint_release_state_contract() {"):
                            source.index('quiesced_contract_validator=')]
         with tempfile.TemporaryDirectory() as directory:
