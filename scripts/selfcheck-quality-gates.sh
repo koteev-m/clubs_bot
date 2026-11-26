@@ -1473,7 +1473,7 @@ validate_container_smoke_workflow() {
   assert_step_uses_sha_pinned_action "$file" "Set up Docker Buildx" "docker/setup-buildx-action"
   assert_step_uses_sha_pinned_action "$file" "Build app image" "docker/build-push-action"
   assert_step_with_contract "$file" "smoke" "Build app image" \
-    $'context: .\nfile: Dockerfile\npush: false\nload: true\ntags: app-bot:ci\ncache-from: type=gha,scope=buildkit'
+    $'context: .\nfile: Dockerfile\npush: false\nload: true\ntags: app-bot:ci\ncache-from: |\ntype=gha,scope=release-image-amd64\ntype=gha,scope=buildkit'
 
   assert_step_run_contract \
     "$file" \
@@ -3822,7 +3822,7 @@ output: ${{ steps.trivy-output.outputs.jvm_sarif }}
 exit-code: 1
 version: v0.69.3'
 trivy_image_with_contract='scan-type: image
-image-ref: ${{ needs.build-and-push.outputs.image-ref }}
+image-ref: ${{ needs.assemble-index.outputs.image-ref }}
 severity: HIGH,CRITICAL
 limit-severities-for-sarif: true
 trivyignores: .trivyignore
@@ -3837,7 +3837,7 @@ trivy_runtime_sarif_with_contract='sarif_file: ${{ steps.trivy-output.outputs.jv
 checkout_path: ${{ github.workspace }}
 category: trivy-jvm-runtime'
 trivy_image_sarif_with_contract='sarif_file: trivy-image-results.sarif
-category: trivy-release-image'
+category: trivy-release-image-${{ matrix.arch }}'
 trivy_filesystem_artifact_with_contract='name: trivy-filesystem-report
 path: ${{ steps.trivy-output.outputs.filesystem_sarif }}
 if-no-files-found: error'
@@ -3846,7 +3846,7 @@ path: |
 ${{ steps.trivy-output.outputs.jvm_inventory }}
 ${{ steps.trivy-output.outputs.jvm_sarif }}
 if-no-files-found: error'
-trivy_image_artifact_with_contract='name: trivy-image-report
+trivy_image_artifact_with_contract='name: trivy-image-report-${{ matrix.arch }}
 path: trivy-image-results.sarif
 if-no-files-found: error'
 container_smoke_run_contract='docker run -d --name app-bot-ci \
@@ -6914,6 +6914,7 @@ validate_trivy_filesystem_workflow "$security_scan_workflow"
 validate_trivy_runtime_workflow "$security_scan_workflow"
 validate_trivy_image_workflow "$docker_publish_workflow"
 ruby "$ROOT_DIR/scripts/tests/test_pr_image_workflow.rb"
+ruby "$ROOT_DIR/scripts/tests/test_docker_publish_workflow.rb"
 echo "quality-gate: Trivy workflow contract verified"
 
 validate_container_smoke_workflow "$container_smoke_workflow"
@@ -8335,8 +8336,8 @@ when "canonical-verifier-wrong-script-path"
 when "canonical-verifier-inline-python"
   replace_once(
     workflows.join("docker-publish.yml"),
-    "            --event-name \"$EXPECTED_EVENT_NAME\"\n",
-    "            --event-name \"$EXPECTED_EVENT_NAME\"\n" \
+    "            --native-build\n",
+    "            --native-build\n" \
     "          python3 - <<'PY'\n" \
     "          print(\"duplicate inline verifier\")\n" \
     "          PY\n"
@@ -8344,15 +8345,15 @@ when "canonical-verifier-inline-python"
 when "canonical-verifier-extra-argument"
   replace_once(
     workflows.join("docker-publish.yml"),
-    "            --event-name \"$EXPECTED_EVENT_NAME\"\n",
-    "            --event-name \"$EXPECTED_EVENT_NAME\" \\\n" \
+    "            --native-build\n",
+    "            --native-build \\\n" \
     "            --allow-unsigned\n"
   )
 when "canonical-verifier-mutable-image-ref"
   replace_once(
     workflows.join("docker-publish.yml"),
     "          REGISTRY_ACTOR: ${{ github.actor }}\n" \
-    "          IMAGE_REF: ${{ needs.build-and-push.outputs.image-ref }}\n" \
+    "          IMAGE_REF: ${{ needs.assemble-index.outputs.image-ref }}\n" \
     "          EXPECTED_REPOSITORY: ${{ github.repository }}",
     "          REGISTRY_ACTOR: ${{ github.actor }}\n" \
     "          IMAGE_REF: ${{ env.IMAGE_NAME }}:latest\n" \
@@ -8447,7 +8448,7 @@ when "canonical-trivy-exit-zero"
 when "canonical-trivy-mutable-image-ref"
   replace_once(
     workflows.join("docker-publish.yml"),
-    '          image-ref: ${{ needs.build-and-push.outputs.image-ref }}',
+    '          image-ref: ${{ needs.assemble-index.outputs.image-ref }}',
     '          image-ref: ${{ env.IMAGE_NAME }}:latest'
   )
 when "dependency-submission-strict-removed"

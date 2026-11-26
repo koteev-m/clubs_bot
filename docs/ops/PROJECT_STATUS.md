@@ -1,5 +1,16 @@
 # Project status checkpoint
 
+## CLB-CI-OPTIMIZATION-ROUND-2, 2026-11-26
+
+Draft PR candidate on `codex/clb-ci-optimization-round-2` from main
+`5364851c61cae78977faae62fc544b114d2f3033` after PR #575. Native AMD64 and
+ARM64 builds feed an immutable OCI index. Release tags wait for signature
+and SLSA verification, the SBOM and both Trivy scans. The
+[verification report](CLB-CI-OPTIMIZATION-ROUND-2.md) records the 36:36
+hosted baseline, the local OCI handoff and the PostgreSQL comparison.
+Independent review corrected build-attempt propagation and serialized shared tag updates.
+Measure the first hosted Docker Publish after merge against the 36:36 baseline.
+
 ## CLB-CI-OPTIMIZATION, 2026-11-26
 
 Local CI optimization on `codex/clb-ci-optimization`, based on merged main
