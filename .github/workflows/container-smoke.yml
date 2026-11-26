@@ -48,7 +48,9 @@ jobs:
           push: false
           load: true
           tags: app-bot:ci
-          cache-from: type=gha,scope=buildkit
+          cache-from: |
+            type=gha,scope=release-image-amd64
+            type=gha,scope=buildkit
 
       - name: Wait for Postgres (port check)
         run: |

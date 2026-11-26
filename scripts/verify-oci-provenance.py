@@ -168,6 +168,7 @@ class VerificationContext:
     workflow_ref: str
     workflow_name: str
     event_name: str
+    native_build: bool = False
 
     @property
     def image_path(self) -> str:
@@ -620,6 +621,11 @@ def validate_context(context: VerificationContext) -> str:
         reject("image reference is not the expected immutable GHCR digest")
     if COMMIT_SHA.fullmatch(context.expected_sha) is None:
         reject("expected SHA is not a canonical commit SHA")
+    if context.native_build and any(
+        re.fullmatch(r"[1-9][0-9]*", value) is None
+        for value in (context.run_id, context.run_attempt)
+    ):
+        reject("native provenance requires a canonical run ID and attempt")
     expected_workflow_ref = (
         f"{context.repository}/.github/workflows/docker-publish.yml@"
         f"{context.expected_ref}"
@@ -772,6 +778,24 @@ def verify_oci_provenance(
             f"{platform_name} config descriptor",
             {PLATFORM_CONFIG_TYPES[platform_media_type]},
         )
+        if context.native_build:
+            config_digest = platform_config["digest"]
+            config_raw, _ = transport.fetch(
+                context.image_path,
+                f"{context.repository_url}/blobs/{config_digest}",
+                CONFIG_BLOB_REQUEST,
+                expected_digest=config_digest,
+                authorization=authorization,
+            )
+            validate_bytes(config_raw, platform_config, f"{platform_name} config")
+            config = parse_object(config_raw, f"{platform_name} config")
+            if f"{config.get('os')}/{config.get('architecture')}" != platform_name:
+                reject("image config does not match the descriptor platform")
+            revision = nested(
+                config, "image revision label", "config", "Labels", "org.opencontainers.image.revision"
+            )
+            if revision != context.expected_sha:
+                reject("image revision label does not match the expected SHA")
         platform_layers = platform_manifest.get("layers")
         if not isinstance(platform_layers, list):
             reject(f"{platform_name} manifest layers must be an array")
@@ -1007,10 +1031,10 @@ def verify_oci_provenance(
             f"pkg:docker/ghcr.io/{context.image_path}@"
         )
         expected_subject_suffix = f"?platform={quote(platform_name, safe='')}"
-        expected_sha_subject = (
-            f"{expected_subject_prefix}sha-{context.expected_sha[:7]}"
-            f"{expected_subject_suffix}"
-        )
+        # BuildKit uses @latest in the PURL for a digest-only image export.
+        # The signed platform manifest, config and provenance bind the actual revision.
+        expected_tag = "latest" if context.native_build else f"sha-{context.expected_sha[:7]}"
+        expected_subject = f"{expected_subject_prefix}{expected_tag}{expected_subject_suffix}"
         subject_names: set[str] = set()
         for subject in subjects:
             if not isinstance(subject, dict):
@@ -1047,7 +1071,10 @@ def verify_oci_provenance(
                     "SLSA provenance subject digest does not match the "
                     "verified platform image"
                 )
-        if expected_sha_subject not in subject_names:
+        if context.native_build:
+            if subject_names != {expected_subject}:
+                reject("SLSA provenance does not match the native build subject")
+        elif expected_subject not in subject_names:
             reject("SLSA provenance lacks the immutable Git SHA subject")
 
         build_definition = require_mapping(
@@ -1194,6 +1221,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workflow-ref", required=True)
     parser.add_argument("--workflow-name", required=True)
     parser.add_argument("--event-name", required=True)
+    parser.add_argument("--native-build", action="store_true")
     return parser
 
 
@@ -1212,6 +1240,7 @@ def main(
         workflow_ref=args.workflow_ref,
         workflow_name=args.workflow_name,
         event_name=args.event_name,
+        native_build=args.native_build,
     )
     environment = os.environ if environ is None else environ
     try:

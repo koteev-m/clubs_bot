@@ -25,6 +25,7 @@ module WorkflowCapabilityPolicy
   CANONICAL_PUBLISHER = ".github/workflows/docker-publish.yml"
   PR_IMAGE_WORKFLOW = ".github/workflows/docker-image.yml"
   CANONICAL_PUBLISHER_JOB = "build-and-push"
+  CANONICAL_REGISTRY_WRITERS = %w[build-and-push assemble-index publish-tags].freeze
   PROVENANCE_VERIFIER_PATH = "scripts/verify-oci-provenance.py"
   GRADLE_VERIFICATION_METADATA_PATH = "gradle/verification-metadata.xml"
   DEPENDENCY_SUBMISSION_WORKFLOW = ".github/workflows/dependency-submission.yml"
@@ -67,19 +68,43 @@ module WorkflowCapabilityPolicy
     </component>
   XML
 
+  PUBLISHER_BUILDX_STEP = {
+    "name" => "Set up Docker Buildx",
+    "uses" => "docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5",
+  }.freeze
+  PUBLISHER_LOGIN_STEP = {
+    "name" => "Log in to GHCR",
+    "uses" => PUBLISHER_LOGIN_ACTION,
+    "with" => {
+      "registry" => "ghcr.io",
+      "username" => "${{ github.actor }}",
+      "password" => "${{ github.token }}",
+    },
+  }.freeze
+
   CANONICAL_STEP_NAMES = {
     "build-and-push" => [
       "Checkout",
-      "Set up QEMU (multi-arch emulation)",
+      "Verify native runner and release revision",
       "Set up Docker Buildx",
       "Extract metadata (tags, labels)",
       "Log in to GHCR",
       "Build & Push",
+    ],
+    "assemble-index" => [
+      "Set up Docker Buildx",
+      "Log in to GHCR",
+      "Assemble candidate OCI index",
       "Install cosign",
       "Sign image (keyless)",
-      "Capture image reference",
       "Generate SBOM (CycloneDX via Syft)",
       "Upload SBOM",
+    ],
+    "publish-tags" => [
+      "Set up Docker Buildx",
+      "Extract metadata (tags, labels)",
+      "Log in to GHCR",
+      "Publish verified release tags",
     ],
     "verify-and-provenance" => [
       "Checkout",
@@ -222,7 +247,15 @@ module WorkflowCapabilityPolicy
     [CANONICAL_PUBLISHER, CANONICAL_PUBLISHER_JOB] => {
       "contents" => "read",
       "packages" => "write",
+    },
+    [CANONICAL_PUBLISHER, "assemble-index"] => {
+      "contents" => "read",
+      "packages" => "write",
       "id-token" => "write",
+    },
+    [CANONICAL_PUBLISHER, "publish-tags"] => {
+      "contents" => "read",
+      "packages" => "write",
     },
     [CANONICAL_PUBLISHER, "verify-and-provenance"] => {
       "contents" => "read",
@@ -562,6 +595,21 @@ module WorkflowCapabilityPolicy
     "type=semver,pattern={{major}}.{{minor}},prefix=v",
   ].freeze
 
+  PUBLISHER_METADATA_STEP = {
+    "name" => "Extract metadata (tags, labels)",
+    "id" => "meta",
+    "uses" => "docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81",
+    "with" => {
+      "images" => "${{ env.IMAGE_NAME }}",
+      "tags" => RELEASE_METADATA_TAGS.join("\n") + "\n",
+      "labels" => <<~'LABELS',
+        org.opencontainers.image.source=${{ github.repository }}
+        org.opencontainers.image.revision=${{ github.sha }}
+        org.opencontainers.image.title=app-bot
+      LABELS
+    },
+  }.freeze
+
   def reject(message)
     warn "workflow-capabilities: #{message}"
     exit 1
@@ -850,14 +898,34 @@ module WorkflowCapabilityPolicy
       job.reject { |key, _value| key == "steps" },
       {
         "if" => "github.event_name == 'push' || github.ref == 'refs/heads/main'",
-        "runs-on" => "ubuntu-latest",
+        "outputs" => {
+          "amd64-digest" => "${{ matrix.arch == 'amd64' && steps.build.outputs.digest || '' }}",
+          "amd64-attempt" => "${{ matrix.arch == 'amd64' && github.run_attempt || '' }}",
+          "arm64-digest" => "${{ matrix.arch == 'arm64' && steps.build.outputs.digest || '' }}",
+          "arm64-attempt" => "${{ matrix.arch == 'arm64' && github.run_attempt || '' }}",
+        },
+        "runs-on" => "${{ matrix.runner }}",
+        "timeout-minutes" => 45,
+        "strategy" => {
+          "fail-fast" => false,
+          "matrix" => {
+            "include" => [
+              {
+                "arch" => "amd64",
+                "runner" => "ubuntu-24.04",
+                "runner_arch" => "X64",
+              },
+              {
+                "arch" => "arm64",
+                "runner" => "ubuntu-24.04-arm",
+                "runner_arch" => "ARM64",
+              },
+            ],
+          },
+        },
         "permissions" => {
           "contents" => "read",
           "packages" => "write",
-          "id-token" => "write",
-        },
-        "outputs" => {
-          "image-ref" => "${{ steps.image-ref.outputs.image }}",
         },
       },
       "#{context}/job fields"
@@ -868,44 +936,25 @@ module WorkflowCapabilityPolicy
         {
           "name" => "Checkout",
           "uses" => CHECKOUT_ACTION,
-          "with" => {"persist-credentials" => false},
-        },
-        {
-          "name" => "Set up QEMU (multi-arch emulation)",
-          "uses" => "docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf",
-        },
-        {
-          "name" => "Set up Docker Buildx",
-          "uses" => "docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5",
-        },
-        {
-          "name" => "Extract metadata (tags, labels)",
-          "id" => "meta",
-          "uses" => "docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81",
           "with" => {
-            "images" => "${{ env.IMAGE_NAME }}",
-            "tags" => <<~'TAGS',
-              type=sha,format=short
-              type=ref,event=branch
-              type=semver,pattern={{version}},prefix=v
-              type=semver,pattern={{major}}.{{minor}},prefix=v
-            TAGS
-            "labels" => <<~'LABELS',
-              org.opencontainers.image.source=${{ github.repository }}
-              org.opencontainers.image.revision=${{ github.sha }}
-              org.opencontainers.image.title=app-bot
-            LABELS
+            "persist-credentials" => false,
+            "ref" => "${{ github.sha }}",
           },
         },
         {
-          "name" => "Log in to GHCR",
-          "uses" => PUBLISHER_LOGIN_ACTION,
-          "with" => {
-            "registry" => "ghcr.io",
-            "username" => "${{ github.actor }}",
-            "password" => "${{ github.token }}",
+          "name" => "Verify native runner and release revision",
+          "env" => {
+            "EXPECTED_RUNNER_ARCH" => "${{ matrix.runner_arch }}",
           },
+          "run" => <<~'BASH',
+            set -euo pipefail
+            test "$RUNNER_ARCH" = "$EXPECTED_RUNNER_ARCH"
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          BASH
         },
+        PUBLISHER_BUILDX_STEP,
+        PUBLISHER_METADATA_STEP,
+        PUBLISHER_LOGIN_STEP,
         {
           "name" => "Build & Push",
           "id" => "build",
@@ -914,13 +963,72 @@ module WorkflowCapabilityPolicy
             "context" => ".",
             "file" => "Dockerfile",
             "push" => true,
-            "platforms" => "linux/amd64,linux/arm64",
-            "tags" => "${{ steps.meta.outputs.tags }}",
+            "platforms" => "linux/${{ matrix.arch }}",
+            "outputs" => "type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true",
             "labels" => "${{ steps.meta.outputs.labels }}",
-            "cache-from" => "type=gha",
-            "cache-to" => "type=gha,mode=max",
+            "cache-from" => "type=gha,scope=release-image-${{ matrix.arch }}\ntype=gha,scope=buildkit\n",
+            "cache-to" => "type=gha,mode=max,scope=release-image-${{ matrix.arch }}",
             "provenance" => true,
           },
+        },
+      ],
+      context
+    )
+  end
+
+  def validate_assemble_index_job(job, steps, context)
+    validate_exact_value(
+      job.reject { |key, _value| key == "steps" },
+      {
+        "needs" => "build-and-push",
+        "runs-on" => "ubuntu-latest",
+        "timeout-minutes" => 15,
+        "permissions" => {
+          "contents" => "read",
+          "packages" => "write",
+          "id-token" => "write",
+        },
+        "outputs" => {
+          "image-ref" => "${{ steps.image-ref.outputs.image }}",
+          "build-attempt" => "${{ needs.build-and-push.outputs.amd64-attempt }}",
+        },
+      },
+      "#{context}/job fields"
+    )
+    validate_exact_steps(
+      steps,
+      [
+        PUBLISHER_BUILDX_STEP,
+        PUBLISHER_LOGIN_STEP,
+        {
+          "name" => "Assemble candidate OCI index",
+          "id" => "image-ref",
+          "env" => {
+            "AMD64_DIGEST" => "${{ needs.build-and-push.outputs.amd64-digest }}",
+            "AMD64_ATTEMPT" => "${{ needs.build-and-push.outputs.amd64-attempt }}",
+            "ARM64_DIGEST" => "${{ needs.build-and-push.outputs.arm64-digest }}",
+            "ARM64_ATTEMPT" => "${{ needs.build-and-push.outputs.arm64-attempt }}",
+          },
+          "run" => <<~'BASH',
+            set -euo pipefail
+            [[ "$AMD64_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+            if [[ "$AMD64_ATTEMPT" != "$ARM64_ATTEMPT" ]]; then
+              echo "::error::Native builds came from different attempts. Re-run all jobs."
+              exit 1
+            fi
+            [[ "$AMD64_DIGEST" =~ ^sha256:[a-f0-9]{64}$ && "$ARM64_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+            [[ "$AMD64_DIGEST" != "$ARM64_DIGEST" ]]
+            sources=("$IMAGE_NAME@$AMD64_DIGEST" "$IMAGE_NAME@$ARM64_DIGEST")
+            annotation="index:io.github.actions.run-number=$GITHUB_RUN_NUMBER"
+            # Buildx prints one trailing newline after the index bytes in dry-run mode.
+            index=$(docker buildx imagetools create --dry-run --annotation "$annotation" "${sources[@]}")
+            digest="sha256:$(printf '%s' "$index" | shasum -a 256 | cut -d' ' -f1)"
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            docker buildx imagetools create --metadata-file "$RUNNER_TEMP/release-index.json" \
+              --annotation "$annotation" --tag "$IMAGE_NAME@$digest" "${sources[@]}"
+            test "$(jq -er '."containerimage.descriptor".digest' "$RUNNER_TEMP/release-index.json")" = "$digest"
+            echo "image=$IMAGE_NAME@$digest" >> "$GITHUB_OUTPUT"
+          BASH
         },
         {
           "name" => "Install cosign",
@@ -928,19 +1036,17 @@ module WorkflowCapabilityPolicy
         },
         {
           "name" => "Sign image (keyless)",
-          "env" => {"COSIGN_EXPERIMENTAL" => "true"},
-          "run" => "cosign sign --yes ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}",
-        },
-        {
-          "name" => "Capture image reference",
-          "id" => "image-ref",
-          "run" => 'echo "image=${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"',
+          "env" => {
+            "COSIGN_EXPERIMENTAL" => "true",
+            "IMAGE_REF" => "${{ steps.image-ref.outputs.image }}",
+          },
+          "run" => "cosign sign --yes \"$IMAGE_REF\"",
         },
         {
           "name" => "Generate SBOM (CycloneDX via Syft)",
           "uses" => "anchore/sbom-action@251a468eed47e5082b105c3ba6ee500c0e65a764",
           "with" => {
-            "image" => "${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}",
+            "image" => "${{ steps.image-ref.outputs.image }}",
             "format" => "cyclonedx-json",
             "output-file" => "sbom.cdx.json",
           },
@@ -951,7 +1057,71 @@ module WorkflowCapabilityPolicy
           "with" => {
             "name" => "sbom",
             "path" => "sbom.cdx.json",
+            "if-no-files-found" => "error",
           },
+        },
+      ],
+      context
+    )
+  end
+
+  def validate_publish_tags_job(job, steps, context)
+    validate_exact_value(
+      job.reject { |key, _value| key == "steps" },
+      {
+        "needs" => ["assemble-index", "verify-and-provenance", "trivy-image"],
+        "concurrency" => {"group" => "docker-publish-release-tags", "queue" => "max"},
+        "runs-on" => "ubuntu-latest",
+        "timeout-minutes" => 10,
+        "permissions" => {
+          "contents" => "read",
+          "packages" => "write",
+        },
+      },
+      "#{context}/job fields"
+    )
+    validate_exact_steps(
+      steps,
+      [
+        PUBLISHER_BUILDX_STEP,
+        PUBLISHER_METADATA_STEP,
+        PUBLISHER_LOGIN_STEP,
+        {
+          "name" => "Publish verified release tags",
+          "env" => {
+            "IMAGE_REF" => "${{ needs.assemble-index.outputs.image-ref }}",
+            "RELEASE_TAGS" => "${{ steps.meta.outputs.tags }}",
+          },
+          "run" => <<~'BASH',
+            set -euo pipefail
+            [[ "$IMAGE_REF" = "$IMAGE_NAME@"* ]]
+            expected_digest="${IMAGE_REF#*@}"
+            [[ "$expected_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            [[ "$GITHUB_RUN_NUMBER" =~ ^[1-9][0-9]{0,14}$ ]]
+            tags=()
+            while IFS= read -r ref; do
+              [[ "$ref" = "$IMAGE_NAME:"* ]]
+              [[ "${ref#"$IMAGE_NAME:"}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]
+              # The promotion queue protects this read and the subsequent tag updates.
+              # Indexes from the previous publisher have no run-number annotation.
+              if manifest=$(docker buildx imagetools inspect --raw "$ref" 2>"$RUNNER_TEMP/inspect-error"); then
+                published=$(jq -er '.annotations["io.github.actions.run-number"] // "0"' <<< "$manifest")
+                [[ "$published" =~ ^(0|[1-9][0-9]{0,14})$ ]]
+                if (( published > GITHUB_RUN_NUMBER )); then
+                  echo "Keeping $ref from newer workflow run $published"
+                  continue
+                fi
+              elif [[ "$(<"$RUNNER_TEMP/inspect-error")" != "ERROR: $ref: not found" ]]; then
+                cat "$RUNNER_TEMP/inspect-error" >&2
+                exit 1
+              fi
+              tags+=(--tag "$ref")
+            done <<< "$RELEASE_TAGS"
+            (( ${#tags[@]} )) || exit 0
+            docker buildx imagetools create --metadata-file "$RUNNER_TEMP/promoted-index.json" "${tags[@]}" "$IMAGE_REF"
+            digest=$(jq -er '."containerimage.descriptor".digest' "$RUNNER_TEMP/promoted-index.json")
+            test "$digest" = "$expected_digest"
+          BASH
         },
       ],
       context
@@ -962,7 +1132,7 @@ module WorkflowCapabilityPolicy
     validate_exact_value(
       job.reject { |key, _value| key == "steps" },
       {
-        "needs" => CANONICAL_PUBLISHER_JOB,
+        "needs" => "assemble-index",
         "runs-on" => "ubuntu-latest",
         "permissions" => {
           "contents" => "read",
@@ -995,7 +1165,7 @@ module WorkflowCapabilityPolicy
         "name" => "Verify image signature (keyless)",
         "env" => {
           "COSIGN_EXPERIMENTAL" => "true",
-          "IMAGE_REF" => "${{ needs.build-and-push.outputs.image-ref }}",
+          "IMAGE_REF" => "${{ needs.assemble-index.outputs.image-ref }}",
         },
         "run" => <<~'BASH',
           set -euo pipefail
@@ -1025,12 +1195,12 @@ module WorkflowCapabilityPolicy
         "env" => {
           "GH_TOKEN" => "${{ github.token }}",
           "REGISTRY_ACTOR" => "${{ github.actor }}",
-          "IMAGE_REF" => "${{ needs.build-and-push.outputs.image-ref }}",
+          "IMAGE_REF" => "${{ needs.assemble-index.outputs.image-ref }}",
           "EXPECTED_REPOSITORY" => "${{ github.repository }}",
           "EXPECTED_REF" => "${{ github.ref }}",
           "EXPECTED_SHA" => "${{ github.sha }}",
           "EXPECTED_RUN_ID" => "${{ github.run_id }}",
-          "EXPECTED_RUN_ATTEMPT" => "${{ github.run_attempt }}",
+          "EXPECTED_RUN_ATTEMPT" => "${{ needs.assemble-index.outputs.build-attempt }}",
           "EXPECTED_WORKFLOW_REF" => "${{ github.workflow_ref }}",
           "EXPECTED_WORKFLOW_NAME" => "${{ github.workflow }}",
           "EXPECTED_EVENT_NAME" => "${{ github.event_name }}",
@@ -1046,7 +1216,8 @@ module WorkflowCapabilityPolicy
             --run-attempt "$EXPECTED_RUN_ATTEMPT" \
             --workflow-ref "$EXPECTED_WORKFLOW_REF" \
             --workflow-name "$EXPECTED_WORKFLOW_NAME" \
-            --event-name "$EXPECTED_EVENT_NAME"
+            --event-name "$EXPECTED_EVENT_NAME" \
+            --native-build
         BASH
       },
       "#{context}/provenance verifier invocation"
@@ -1071,7 +1242,8 @@ module WorkflowCapabilityPolicy
     validate_exact_value(
       job.reject { |key, _value| key == "steps" },
       {
-        "needs" => CANONICAL_PUBLISHER_JOB,
+        "needs" => "assemble-index",
+        "strategy" => {"fail-fast" => false, "matrix" => {"arch" => %w[amd64 arm64]}},
         "runs-on" => "ubuntu-latest",
         "permissions" => {
           "contents" => "read",
@@ -1096,9 +1268,10 @@ module WorkflowCapabilityPolicy
       {
         "name" => "Trivy image scan",
         "uses" => TRIVY_ACTION,
+        "env" => {"TRIVY_PLATFORM" => "linux/${{ matrix.arch }}"},
         "with" => {
           "scan-type" => "image",
-          "image-ref" => "${{ needs.build-and-push.outputs.image-ref }}",
+          "image-ref" => "${{ needs.assemble-index.outputs.image-ref }}",
           "severity" => "HIGH,CRITICAL",
           "limit-severities-for-sarif" => true,
           "trivyignores" => ".trivyignore",
@@ -1118,7 +1291,7 @@ module WorkflowCapabilityPolicy
         "uses" => UPLOAD_SARIF_ACTION,
         "with" => {
           "sarif_file" => "trivy-image-results.sarif",
-          "category" => "trivy-release-image",
+          "category" => "trivy-release-image-${{ matrix.arch }}",
         },
       },
       "#{context}/Trivy SARIF upload"
@@ -1130,7 +1303,7 @@ module WorkflowCapabilityPolicy
         "if" => "${{ always() && hashFiles('trivy-image-results.sarif') != '' }}",
         "uses" => UPLOAD_ARTIFACT_ACTION,
         "with" => {
-          "name" => "trivy-image-report",
+          "name" => "trivy-image-report-${{ matrix.arch }}",
           "path" => "trivy-image-results.sarif",
           "if-no-files-found" => "error",
         },
@@ -1207,6 +1380,10 @@ module WorkflowCapabilityPolicy
     case job_name
     when "build-and-push"
       validate_build_and_push_job(job, steps, context)
+    when "assemble-index"
+      validate_assemble_index_job(job, steps, context)
+    when "publish-tags"
+      validate_publish_tags_job(job, steps, context)
     when "verify-and-provenance"
       validate_provenance_job(job, steps, context)
     when "trivy-image"
@@ -1216,13 +1393,14 @@ module WorkflowCapabilityPolicy
 
   # Defense-in-depth only: deliberately recognizes obvious literal command starts.
   # Capability and credential policy, not shell semantic analysis, proves exclusivity.
-  def literal_shell_publisher?(run)
+  def literal_shell_publisher?(run, allow_index_create: false)
     return false unless run.is_a?(String)
     run.each_line.any? do |line|
       stripped = line.lstrip
       next false if stripped.start_with?("#")
       stripped.match?(%r{\A(?:/usr/bin/)?docker\s+(?:image\s+)?push(?:\s|$)}) ||
-        stripped.match?(%r{\A(?:/usr/bin/)?docker\s+buildx\b[^\n]*\s--push(?:=true)?(?:\s|$)})
+        stripped.match?(%r{\A(?:/usr/bin/)?docker\s+buildx\b[^\n]*\s--push(?:=true)?(?:\s|$)}) ||
+        (!allow_index_create && stripped.match?(%r{\A(?:/usr/bin/)?docker\s+buildx\s+imagetools\s+create(?:\s|$)}))
     end
   end
 
@@ -1235,7 +1413,10 @@ module WorkflowCapabilityPolicy
 
   def validate_registry_and_literal_policy(path, job_name, job, effective)
     context = "#{path}/#{job_name}"
-    canonical = path == CANONICAL_PUBLISHER && job_name == CANONICAL_PUBLISHER_JOB
+    registry_writer = path == CANONICAL_PUBLISHER && CANONICAL_REGISTRY_WRITERS.include?(job_name)
+    canonical_builder = registry_writer && job_name == CANONICAL_PUBLISHER_JOB
+    canonical_tags = registry_writer && job_name == "publish-tags"
+    canonical_metadata = canonical_builder || canonical_tags
     login_count = 0
     publisher_count = 0
     metadata_count = 0
@@ -1255,19 +1436,10 @@ module WorkflowCapabilityPolicy
         step.key?("env")
       uses = step["uses"]
       if uses.is_a?(String) && uses.start_with?("docker/login-action@")
-        reject("#{context}: Docker login is outside the canonical publisher") unless canonical
+        reject("#{context}: Docker login is outside the canonical publisher") unless registry_writer
         login_count += 1
-        expected_login = {
-          "name" => "Log in to GHCR",
-          "uses" => PUBLISHER_LOGIN_ACTION,
-          "with" => {
-            "registry" => "ghcr.io",
-            "username" => "${{ github.actor }}",
-            "password" => "${{ github.token }}",
-          },
-        }
-        validate_exact_value(step, expected_login, "#{context}/canonical GHCR login")
-        unless effective["packages"] == (canonical ? "write" : "read")
+        validate_exact_value(step, PUBLISHER_LOGIN_STEP, "#{context}/canonical GHCR login")
+        unless effective["packages"] == "write"
           reject("#{context}: Docker login lacks the exact packages capability")
         end
       end
@@ -1275,14 +1447,14 @@ module WorkflowCapabilityPolicy
       if uses.is_a?(String) && uses.start_with?("docker/build-push-action@")
         push = step.dig("with", "push")
         if push == true || push == "true"
-          reject("#{context}: build-push publication is outside canonical publisher") unless canonical
+          reject("#{context}: build-push publication is outside canonical publisher") unless canonical_builder
           publisher_count += 1
         end
       end
 
       if uses.is_a?(String) && uses.start_with?("docker/metadata-action@")
         tags = metadata_tags(step)
-        if canonical
+        if canonical_metadata
           metadata_count += 1
           reject("#{context}: canonical release metadata tags changed") unless tags == RELEASE_METADATA_TAGS
           reject("#{context}: duplicate canonical release metadata tags") unless tags.uniq == tags
@@ -1291,15 +1463,17 @@ module WorkflowCapabilityPolicy
         end
       end
 
-      if literal_shell_publisher?(step["run"])
+      index_step = (job_name == "assemble-index" && step["name"] == "Assemble candidate OCI index") ||
+        (canonical_tags && step["name"] == "Publish verified release tags")
+      if literal_shell_publisher?(step["run"], allow_index_create: registry_writer && index_step)
         reject("#{context}: literal Docker publisher is forbidden (defense-in-depth)")
       end
     end
 
-    return unless canonical
+    return unless registry_writer
     reject("#{context}: canonical GHCR login count changed") unless login_count == 1
-    reject("#{context}: canonical publisher action count changed") unless publisher_count == 1
-    reject("#{context}: canonical metadata action count changed") unless metadata_count == 1
+    reject("#{context}: canonical publisher action count changed") unless publisher_count == (canonical_builder ? 1 : 0)
+    reject("#{context}: canonical metadata action count changed") unless metadata_count == (canonical_metadata ? 1 : 0)
   end
 
   def expected_secret_names(path, job_name)
@@ -1323,7 +1497,7 @@ module WorkflowCapabilityPolicy
 
   def expected_github_token_refs(path, job_name)
     key = [path, job_name]
-    return 1 if key == [CANONICAL_PUBLISHER, CANONICAL_PUBLISHER_JOB]
+    return 1 if path == CANONICAL_PUBLISHER && CANONICAL_REGISTRY_WRITERS.include?(job_name)
     return 1 if key == [CANONICAL_PUBLISHER, "verify-and-provenance"]
     return 1 if DEPLOY_JOBS.key?(key)
     0
@@ -2287,7 +2461,7 @@ module WorkflowCapabilityPolicy
       "context" => ".", "file" => "Dockerfile", "push" => false, "load" => true,
       "platforms" => "linux/${{ matrix.arch }}",
       "labels" => "org.opencontainers.image.revision=${{ env.CANDIDATE_SHA }}",
-      "cache-from" => "type=gha,scope=pr-image-${{ matrix.arch }}\ntype=gha,scope=buildkit\n",
+      "cache-from" => "type=gha,scope=pr-image-${{ matrix.arch }}\ntype=gha,scope=release-image-${{ matrix.arch }}\ntype=gha,scope=buildkit\n",
       "cache-to" => "type=gha,mode=max,scope=pr-image-${{ matrix.arch }}",
       "provenance" => false,
     }, "#{context}/non-publishing image build")
@@ -2349,7 +2523,7 @@ module WorkflowCapabilityPolicy
       if path == CANONICAL_PUBLISHER
         inline_marker = INLINE_PROVENANCE_MARKERS.find { |marker| raw.include?(marker) }
         reject("#{path}: inline OCI provenance verifier is forbidden") if inline_marker
-        expected_jobs = %w[build-and-push trivy-image verify-and-provenance].sort
+        expected_jobs = %w[assemble-index build-and-push publish-tags trivy-image verify-and-provenance].sort
         reject("#{path}: canonical job inventory changed") unless jobs.keys.sort == expected_jobs
         unless workflow_permissions == {"contents" => "read"}
           reject("#{path}: canonical workflow baseline must be contents: read")
@@ -2381,7 +2555,7 @@ module WorkflowCapabilityPolicy
             trigger_key => EXPECTED_TRIGGERS.fetch(CANONICAL_PUBLISHER),
             "permissions" => {"contents" => "read"},
             "concurrency" => {
-              "group" => "docker-publish-${{ github.ref }}",
+              "group" => "docker-publish-${{ github.ref }}-${{ github.run_attempt == '1' && 'initial' || github.run_id }}",
               "cancel-in-progress" => true,
             },
             "env" => {
@@ -2439,7 +2613,9 @@ module WorkflowCapabilityPolicy
         dedicated_native = path == Clb91BNativeWorkflow::PATH && job_name == "native"
         expected_runner = (native_prototype || dedicated_native) ? "ubuntu-24.04" : "ubuntu-latest"
         # Only the exact two-entry native matrix validated above may select a runner.
-        expected_runner = "${{ matrix.runner }}" if path == PR_IMAGE_WORKFLOW && job_name == "image-security"
+        native_image = (path == PR_IMAGE_WORKFLOW && job_name == "image-security") ||
+          (path == CANONICAL_PUBLISHER && job_name == CANONICAL_PUBLISHER_JOB)
+        expected_runner = "${{ matrix.runner }}" if native_image
         if native_prototype && job["if"] != TestsWorkflow::DIRECT_DISPATCH
           reject("#{context}: native prototype must be manual-only")
         end

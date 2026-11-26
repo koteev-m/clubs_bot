@@ -188,6 +188,8 @@ def build_graph(
     attestation_mutator: AttestationMutator | None = None,
     index_mutator: IndexMutator | None = None,
     docker_platform: str | None = None,
+    native_build: bool = False,
+    config_mutator: PlatformMutator | None = None,
     attestation_mode: str = "legacy",
     attestation_target_overrides: dict[str, str] | None = None,
 ) -> FixtureGraph:
@@ -203,6 +205,7 @@ def build_graph(
         workflow_ref=WORKFLOW_REF,
         workflow_name=WORKFLOW_NAME,
         event_name=EVENT_NAME,
+        native_build=native_build,
     )
     routes: dict[str, FakeRoute] = {}
     token_query = urlencode(
@@ -233,6 +236,18 @@ def build_graph(
             else "application/vnd.oci.image.layer.v1.tar+gzip"
         )
         config_raw = f"platform-config:{platform_name}".encode("ascii")
+        if native_build:
+            os_name, arch = platform_name.split("/")
+            config = {
+                "os": os_name,
+                "architecture": arch,
+                "config": {"Labels": {"org.opencontainers.image.revision": SHA}},
+            }
+            if config_mutator:
+                config_mutator(platform_name, config)
+            config_raw = encode(config)
+            config_url = f"{context.repository_url}/blobs/{sha256_digest(config_raw)}"
+            routes[config_url] = FakeRoute(config_raw, Message())
         layer_raw = f"platform-layer:{platform_name}".encode("ascii")
         platform_manifest = {
             "schemaVersion": 2,
@@ -270,8 +285,9 @@ def build_graph(
             platform_name,
         )
         platform_digest = platform_digests[attested_platform_name]
+        subject_tag = "latest" if native_build else f"sha-{SHA[:7]}"
         subject_name = (
-            f"pkg:docker/ghcr.io/{context.image_path}@sha-{SHA[:7]}"
+            f"pkg:docker/ghcr.io/{context.image_path}@{subject_tag}"
             f"?platform={attested_platform_name.replace('/', '%2F')}"
         )
         statement = {
@@ -507,6 +523,41 @@ class OciVerifierBehaviorTest(unittest.TestCase):
             "workflow-token-not-logged",
             json.dumps(graph.transport.calls),
         )
+
+    def test_native_index_preserves_both_staged_platform_provenances(self) -> None:
+        graph = build_graph(native_build=True, attestation_mode="modern-inline")
+        statements = verifier.verify_oci_provenance(graph.context, graph.transport)
+        self.assertEqual([platform for platform, _ in statements], ["linux/amd64", "linux/arm64"])
+
+    def test_native_subject_matches_digest_only_export(self) -> None:
+        def mutate(platform, statement):
+            if platform == "linux/arm64":
+                statement["subject"][0]["name"] = statement["subject"][0]["name"].replace("@latest?", "@other?")
+        graph = build_graph(native_build=True, statement_mutator=mutate)
+        self.assert_policy_failure(graph, "does not match the native build subject")
+
+    def test_native_build_identity_matches_the_expected_run_attempt_and_sha(self) -> None:
+        for field, value in (("github_run_id", "999"), ("github_run_attempt", "9"), ("github_workflow_sha", "f" * 40)):
+            with self.subTest(field=field):
+                def mutate(platform, statement):
+                    if platform == "linux/arm64":
+                        metadata = statement["predicate"]["buildDefinition"]["internalParameters"]
+                        metadata[field] = value
+
+                graph = build_graph(native_build=True, statement_mutator=mutate)
+                self.assert_policy_failure(graph, f"metadata mismatch: {field}")
+
+    def test_native_image_config_binds_platform_and_deploy_revision(self) -> None:
+        for field, error in (("architecture", "descriptor platform"), ("revision", "revision label")):
+            with self.subTest(field=field):
+                def mutate(platform, config):
+                    if platform == "linux/arm64":
+                        if field == "architecture":
+                            config["architecture"] = "amd64"
+                        else:
+                            config["config"]["Labels"]["org.opencontainers.image.revision"] = "f" * 40
+                graph = build_graph(native_build=True, config_mutator=mutate)
+                self.assert_policy_failure(graph, error)
 
     def test_modern_oci_artifact_inline_empty_config_is_accepted(self) -> None:
         graph = build_graph(attestation_mode="modern-inline")
