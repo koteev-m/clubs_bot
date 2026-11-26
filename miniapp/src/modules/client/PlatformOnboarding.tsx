@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import InvitationDelivery, { invitationScope, invitationRole } from './InvitationDelivery';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Building2, LayoutGrid, Users } from 'lucide-react';
 import { ApplicationList } from './ClientAccess';
 import { useCommand, useRemote } from './onboarding.hooks';
@@ -8,6 +9,7 @@ import {
   Field,
   RemoteState,
   Shell,
+  useUnsavedChanges,
 } from './OnboardingShared';
 import {
   Club,
@@ -46,6 +48,41 @@ function currentScreen(): OwnerScreen {
   return { type: 'overview' };
 }
 
+// Commands owned by a detail screen must survive until the server gives a
+// definite result. Session-owned commands already survive Back and Forward.
+const NavigationGuards = createContext<{ pending: Set<symbol>; drafts: Set<symbol> } | null>(null);
+
+function useDetailDraft(dirty: boolean) {
+  const guards = useContext(NavigationGuards);
+  useUnsavedChanges(dirty);
+  useLayoutEffect(() => {
+    if (!guards || !dirty) return;
+    const entry = Symbol();
+    guards.drafts.add(entry);
+    return () => { guards.drafts.delete(entry); };
+  }, [guards, dirty]);
+}
+
+function useDetailCommand<T>(credential: string) {
+  const command = useCommand<T>(credential);
+  const pending = useContext(NavigationGuards)?.pending;
+  useLayoutEffect(() => {
+    if (!command.blocked || !pending) return;
+    const entry = Symbol();
+    pending.add(entry);
+    const preventUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', preventUnload);
+    return () => {
+      pending.delete(entry);
+      window.removeEventListener('beforeunload', preventUnload);
+    };
+  }, [pending, command.blocked]);
+  return command;
+}
+
 export default function PlatformOnboarding({
   credential,
   invite,
@@ -53,9 +90,13 @@ export default function PlatformOnboarding({
   credential: string;
   invite?: InvitationDraft;
 }) {
-  if (invite)
-    return <PlatformNavigation credential={credential} invite={invite} />;
-  return <PlatformSession key={credential} credential={credential} />;
+  const [guards] = useState(() => ({ pending: new Set<symbol>(), drafts: new Set<symbol>() }));
+  return (
+    <NavigationGuards.Provider value={guards}>
+      {invite ? <PlatformNavigation credential={credential} invite={invite} /> :
+        <PlatformSession key={credential} credential={credential} />}
+    </NavigationGuards.Provider>
+  );
 }
 
 function PlatformSession({ credential }: { credential: string }) {
@@ -75,51 +116,104 @@ function PlatformNavigation({
   const [screen, setScreen] = useState<OwnerScreen>(currentScreen);
   const limitDraft = useClientLimitDraft(credential);
   const lifecycle = useClientLifecycle(credential);
+  const returning = useRef(false);
+  const guards = useContext(NavigationGuards);
+  const canLeave = useCallback(() => !guards?.pending.size &&
+    (!guards?.drafts.size || window.confirm('Есть несохранённые изменения. Уйти без сохранения?')), [guards]);
+  const [receiptId, setReceiptId] = useState<string>();
+  const depth = useRef<number>(window.history.state?.ownerTrail?.length ?? 0);
   const navigate = useCallback((next: OwnerScreen, replace = false) => {
+    if (!canLeave()) return false;
     const current = currentScreen();
-    if (!replace && JSON.stringify(current) === JSON.stringify(next)) return;
+    if (!replace && JSON.stringify(current) === JSON.stringify(next)) return true;
     const url = new URL(window.location.href);
     url.searchParams.set('mode', 'platform-owner');
     if (next.type === 'overview') url.searchParams.delete('screen');
     else url.searchParams.set('screen', next.type);
     if ('id' in next) url.searchParams.set('resource', next.id);
     else url.searchParams.delete('resource');
-    if (replace) window.history.replaceState({ onboarding: true }, '', url);
-    else window.history.pushState({ onboarding: true }, '', url);
+    const trail: string[] = window.history.state?.ownerTrail ?? [];
+    const state = { onboarding: true, ownerTrail: replace ? trail : [...trail, JSON.stringify(current)] };
+    if (replace) window.history.replaceState(state, '', url);
+    else window.history.pushState(state, '', url);
+    depth.current = state.ownerTrail.length;
     setScreen(next);
-  }, []);
+    return true;
+  }, [canLeave]);
   useEffect(() => {
-    const initial = currentScreen();
-    if (initial.type !== 'overview' && !window.history.state?.onboarding) {
-      const original = window.location.href;
-      const overview = new URL(original);
-      overview.searchParams.delete('screen');
-      overview.searchParams.delete('resource');
-      window.history.replaceState({ onboarding: true }, '', overview);
-      window.history.pushState({ onboarding: true }, '', original);
-    }
-    const pop = () => setScreen(currentScreen());
+    const pop = () => {
+      const target = window.history.state?.ownerTrail?.length ?? 0;
+      if (!returning.current && target !== depth.current && !canLeave()) {
+        window.history.go(depth.current - target);
+        return;
+      }
+      depth.current = target;
+      returning.current = false;
+      setScreen(currentScreen());
+    };
     window.addEventListener('popstate', pop);
     return () => window.removeEventListener('popstate', pop);
-  }, []);
+  }, [canLeave]);
   const overview = screen.type === 'overview';
-  const back = useCallback(() => window.history.back(), []);
-  const home = () => navigate({ type: 'overview' });
+  const returnTo = (parent: OwnerScreen) => {
+    if (returning.current) return;
+    const trail: string[] = window.history.state?.ownerTrail ?? [];
+    const index = trail.lastIndexOf(JSON.stringify(parent));
+    if (index < 0) navigate(parent, true);
+    else if (canLeave()) {
+      returning.current = true;
+      window.history.go(index - trail.length);
+    }
+  };
+  const home = () => returnTo({ type: 'overview' });
+  const back = () => {
+    if (screen.type === 'client' || screen.type === 'invitation') returnTo({ type: 'clients' });
+    else if (screen.type === 'application') returnTo({ type: 'applications' });
+    else home();
+  };
   const openInvitation = (invitation: Invitation) => {
-    invite.forgetLink();
-    navigate({ type: 'invitation', id: invitation.id });
+    if (navigate({ type: 'invitation', id: invitation.id }, screen.type === 'invite' || screen.type === 'invitation')) {
+      invite.forgetLink();
+      setReceiptId(undefined);
+    }
   };
   const openApplication = (application: ClubApplication) =>
     navigate({ type: 'application', id: application.id });
-  if (screen.type === 'invite')
-    return <OwnerInvite draft={invite} back={back} open={openInvitation} />;
+  useEffect(() => {
+    if (screen.type === 'invite' && invite.invitation) {
+      setReceiptId(invite.invitation.id);
+      navigate({ type: 'invitation', id: invite.invitation.id }, true);
+    }
+  }, [screen.type, invite.invitation, navigate]);
+  const forgetLink = invite.forgetLink;
+  useEffect(() => {
+    if (receiptId && screen.type !== 'invitation' && screen.type !== 'invite') {
+      setReceiptId(undefined);
+      forgetLink();
+    }
+  }, [screen.type, receiptId, forgetLink]);
+  const receipt = screen.type === 'invitation' && screen.id === receiptId && invite.invitation?.id === screen.id
+    ? invite.invitation : undefined;
+  if (screen.type === 'invite' || receipt)
+    return (
+      <OwnerInvite
+        draft={invite}
+        back={receipt ? () => returnTo({ type: 'client', id: receipt.clientId }) : back}
+        open={openInvitation}
+        another={() => {
+          invite.reset();
+          setReceiptId(undefined);
+          navigate({ type: 'invite' }, true);
+        }}
+      />
+    );
   if (screen.type === 'invitation')
     return (
       <OwnerInvitation
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={back}
+        back={(clientId) => clientId ? returnTo({ type: 'client', id: clientId }) : back()}
         open={openInvitation}
       />
     );
@@ -168,14 +262,14 @@ function PlatformNavigation({
           </button>
           <button
             aria-current={screen.type === 'clubs' ? 'page' : undefined}
-            onClick={() => navigate({ type: 'clubs' })}
+            onClick={() => navigate({ type: 'clubs' }, !overview)}
           >
             <Building2 size={21} />
             <span>Клубы</span>
           </button>
           <button
             aria-current={screen.type === 'clients' ? 'page' : undefined}
-            onClick={() => navigate({ type: 'clients' })}
+            onClick={() => navigate({ type: 'clients' }, !overview)}
           >
             <Users size={21} />
             <span>Доступы</span>
@@ -192,7 +286,13 @@ function PlatformNavigation({
           <OwnerOverview credential={credential} />
           <button
             className="po-primary"
-            onClick={() => navigate({ type: 'invite' })}
+            onClick={() => {
+              if (invite.invitation && !invite.command.blocked) {
+                invite.reset();
+                setReceiptId(undefined);
+              }
+              navigate({ type: 'invite' });
+            }}
           >
             Пригласить клиента
           </button>
@@ -235,11 +335,13 @@ function PlatformNavigation({
 }
 
 function OwnerInvite({
+  another,
   draft,
   back,
   open,
 }: {
   draft: ReturnType<typeof useInvitationDraft>;
+  another: () => void;
   back: () => void;
   open: (invitation: Invitation) => void;
 }) {
@@ -256,7 +358,7 @@ function OwnerInvite({
   } = draft;
   return (
     <Shell
-      title="Пригласить клиента"
+      title={invitation ? 'Приглашение клиента' : 'Пригласить клиента'}
       subtitle="Доступ к кабинету с разрешённым количеством заведений."
       owner
       back={back}
@@ -349,7 +451,7 @@ function OwnerInvite({
             type="button"
             className="ob-button"
             disabled={command.blocked}
-            onClick={draft.reset}
+            onClick={another}
           >
             Пригласить другого клиента
           </button>
@@ -406,62 +508,11 @@ function InvitationCommandState({
 }
 
 function InvitationLink({ invitation }: { invitation: Invitation }) {
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState(false);
-  const link = invitation.invitationLink;
-  const usable = Boolean(
-    link &&
-      /^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{4,31}\?startapp=ci_[A-Za-z0-9_-]{43}$/.test(
-        link,
-      ),
-  );
-  useEffect(() => {
-    setCopied(false);
-    setCopyError(false);
-  }, [link]);
   return (
-    <section className="po-card ob-card">
-      <h2>{usable ? 'Приглашение создано' : 'Ссылка не получена'}</h2>
-      {usable ? (
-        <>
-          <p>Отправьте эту ссылку человеку в Telegram.</p>
-          <p className="ob-link">{link}</p>
-          <p>
-            Ссылка действует семь суток — до{' '}
-            {new Date(invitation.expiresAt).toLocaleString('ru-RU')}.
-          </p>
-          <button
-            type="button"
-            className="ob-button"
-            onClick={() => {
-              setCopied(false);
-              void Promise.resolve()
-                .then(() => navigator.clipboard.writeText(link!))
-                .then(() => {
-                  setCopied(true);
-                  setCopyError(false);
-                })
-                .catch(() => setCopyError(true));
-            }}
-          >
-            Копировать ссылку
-          </button>
-          {copied && <p role="status">Ссылка скопирована</p>}
-          {copyError && (
-            <p role="alert">Не удалось скопировать. Выделите ссылку вручную.</p>
-          )}
-          <p className="po-muted">
-            Ссылка показывается только при выдаче. Если потеряете её, выпустите
-            новую.
-          </p>
-        </>
-      ) : (
-        <p className="po-notice">
-          Первоначальный ответ со ссылкой не получен. Запись сохранена; откройте
-          приглашение и выпустите новую ссылку.
-        </p>
-      )}
-    </section>
+    <InvitationDelivery key={invitation.id} link={invitation.invitationLink} prefix="ci"
+      recipient={invitation.recipientLabel} role={invitationRole(invitation)}
+      scope={invitationScope(invitation)} expiresAt={invitation.expiresAt}
+      missingLinkHelp="Откройте приглашение и выпустите новую ссылку для этого клиента." />
   );
 }
 
@@ -473,7 +524,7 @@ function OwnerInvitation({
 }: {
   credential: string;
   id: string;
-  back: () => void;
+  back: (clientId?: string) => void;
   open: (invitation: Invitation) => void;
 }) {
   const remote = useRemote<Invitation>(
@@ -482,7 +533,8 @@ function OwnerInvitation({
   );
   const [invitation, setInvitation] = useState<Invitation>();
   const [confirmed, setConfirmed] = useState(false);
-  const command = useCommand<Invitation>(credential);
+  const command = useDetailCommand<Invitation>(credential);
+  useDetailDraft(Boolean(confirmed && invitation?.availableActions.includes('confirm')));
   useEffect(() => {
     if (authorityLost(command.error) || remote.error) setInvitation(undefined);
     else if (remote.data) setInvitation(remote.data);
@@ -493,17 +545,13 @@ function OwnerInvitation({
       '/api/platform/onboarding/invitations/' + id + '/' + name,
       { expectedVersion: invitation.version },
       (result) => {
-        if (name === 'reissue') {
-          setInvitation(result);
-        } else {
-          setInvitation(result);
-          setConfirmed(false);
-        }
+        setInvitation(result);
+        setConfirmed(false);
       },
     );
   };
   return (
-    <Shell title="Приглашение клиента" owner back={back}>
+    <Shell title="Приглашение клиента" owner back={() => back(invitation?.clientId)} backDisabled={command.blocked}>
       <RemoteState {...remote} />
       {invitation && (
         <>
@@ -998,7 +1046,7 @@ function MemberAccess({
   clubs: Club[];
   updated: () => void;
 }) {
-  const command = useCommand<Membership>(credential);
+  const command = useDetailCommand<Membership>(credential);
   const restorableClubGrants = member.clubGrants.filter(
     (grant) => grant.permission !== bookingRulesPermission,
   );
@@ -1009,6 +1057,9 @@ function MemberAccess({
   const [classifications, setClassifications] = useState<
     Record<string, boolean>
   >({});
+  useDetailDraft(!readOnly && !authorityLost(command.error) && Boolean(
+    member.active ? selectedClub : manage || grants.length || confirmed,
+  ));
   const forReview =
     member.businessClubsForReview?.find((club) => club.clubId === selectedClub)
       ?.grants ?? [];
@@ -1326,7 +1377,8 @@ function OwnerApplication({
   const [commercialReference, setCommercialReference] = useState('');
   const [commercialAgreedAt, setCommercialAgreedAt] = useState('');
   const [confirmed, setConfirmed] = useState(false);
-  const command = useCommand<ClubApplication>(credential);
+  const command = useDetailCommand<ClubApplication>(credential);
+  useDetailDraft(Boolean(application && (reason || internalNote || commercialReference || commercialAgreedAt || confirmed)));
   useEffect(() => {
     if (authorityLost(command.error) || remote.error) {
       setApplication(undefined);
@@ -1354,6 +1406,10 @@ function OwnerApplication({
       },
       (result) => {
         setApplication(result);
+        setReason('');
+        setInternalNote('');
+        setCommercialReference('');
+        setCommercialAgreedAt('');
         setConfirmed(false);
       },
     );

@@ -2,6 +2,7 @@ package com.example.bot.data.client.onboarding
 
 import com.example.bot.data.client.ClientAudience
 import com.example.bot.data.client.JdbcClientContextRepository
+import com.example.bot.data.client.bindings.BindingTestSource
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.sql.SQLException
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 
 /** This same contract is inherited by H2 and PostgreSQL 16, including racing commands. */
@@ -68,6 +70,36 @@ internal abstract class ClubStaffContract : ClubFinanceContract() {
             expect("not_found") { fixture.repository.read(fixture.bob, OnboardingRead.CLUB_TEAM_GET, club) }
             expect("not_found") { fixture.repository.read(fixture.owner, OnboardingRead.CLUB_TEAM_GET, club) }
             expect("not_found") { fixture.repository.read(fixture.bob, OnboardingRead.CLUB_FINANCE_GET, club) }
+        }
+
+    @Test
+    fun `legacy staff confirmation rolls back if the invitation expires before commit`() =
+        runBlocking<Unit> {
+            val club = create(approved()).id("id")
+            val pending = claim(invite(club, "MANAGER"))
+            val confirm = ownerBody(club, "confirm", pending)
+            val deadline = Instant.parse(pending.string("expiresAt"))
+            val source = BindingTestSource(fixture.source)
+            source.beforeSql = { statement, _ ->
+                if (statement.startsWith("INSERT INTO client_commands")) fixture.clock.current = deadline
+            }
+            val repository = JdbcClientOnboardingRepository(source, fixture.owner.telegramUserId, fixture.clock)
+            val commands = fixture.count("client_commands")
+            val audits = fixture.count("audit_log")
+
+            expect("invalid_transition") {
+                repository.mutate(fixture.alice, OnboardingMutation.CLUB_TEAM_UPDATE, club, confirm, "staff-expiry")
+            }
+
+            assertEquals(deadline, fixture.clock.current)
+            assertTrue(grants(club, fixture.bob).isEmpty())
+            assertEquals(0L, fixture.count("client_club_staff"))
+            assertEquals(commands, fixture.count("client_commands"))
+            assertEquals(audits, fixture.count("audit_log"))
+            assertEquals(
+                "claimed",
+                fixture.rows("SELECT status FROM client_invitations WHERE id=${pending.id("id")}").single()["status"],
+            )
         }
 
     @Test

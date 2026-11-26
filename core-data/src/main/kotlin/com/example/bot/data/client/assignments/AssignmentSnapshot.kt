@@ -20,7 +20,13 @@ internal class AssignmentSnapshot(
             it.long("user_id")
         }
     val admissions = sql.rows("SELECT * FROM client_club_access_state WHERE client_id=?", clientId)
-    val roles = sql.rows("SELECT * FROM client_role_assignments WHERE client_id=? ORDER BY id", clientId)
+    val roles =
+        sql.rows(
+            "SELECT id,client_id,club_id,user_id,role_code,policy_version,policy_hash,selector_kind,selector_json," +
+                "admission_epoch,status,version,issuer_authority_ref,expires_at FROM client_role_assignments " +
+                "WHERE client_id=? ORDER BY id",
+            clientId,
+        )
     val delegations = sql.rows("SELECT * FROM client_permission_delegations WHERE client_id=? ORDER BY id", clientId)
     private val registeredPermissions = sql.rows("SELECT code FROM permissions").map { it["code"] }.toSet()
 

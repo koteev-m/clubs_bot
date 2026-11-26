@@ -80,6 +80,7 @@ internal class InvitationOperations(
     ): MutationResult {
         session.requireUnarchived(invitation.long("client_id"))
         if (invitation["token_hash"] != digest(token(body))) fail("not_found")
+        requireBoundRecipient(invitation)
         val claimant = invitation["claimant_user_id"]?.toLong()
         if (claimant != null && claimant != session.userId) fail("not_found")
         if (effective(invitation) !in setOf("issued", "claimed", "accepted")) fail("not_found")
@@ -139,7 +140,12 @@ internal class InvitationOperations(
                     invitation.long("client_id"),
                     checkNotNull(invitation.getValue("recipient_label")),
                     id,
-                    checkNotNull(invitation["acceptance_policy"]),
+                    if (sql.directServiceInvitations && emptyCabinet(invitation.long("client_id"))) {
+                        "recipient_acceptance"
+                    } else {
+                        checkNotNull(invitation["acceptance_policy"])
+                    },
+                    invitation["bound_user_id"]?.toLong() ?: invitation["claimant_user_id"]?.toLong(),
                 )
             }
             else -> fail("validation_error")
@@ -150,13 +156,15 @@ internal class InvitationOperations(
         JsonArray(
             sql
                 .rows(
-                    "SELECT * FROM client_invitations WHERE client_id=? AND purpose='client' ORDER BY id DESC",
+                    "${sql.clientInvitationSelect} WHERE client_id=? AND purpose='client' ORDER BY id DESC",
                     clientId,
                 ).map { view(it, platform = true) },
         )
 
     private fun confirm(invitation: DbRow): MutationResult {
         if (effective(invitation) != "claimed") fail("invalid_transition")
+        requirePlatformInviter(invitation)
+        sql.invitationDeadline = invitation.instant("expires_at")
         val clientId = invitation.long("client_id")
         val userId = invitation.long("claimant_user_id")
         if (sql.row("SELECT * FROM client_memberships WHERE client_id=? AND user_id=?", clientId, userId) != null) {
@@ -194,15 +202,11 @@ internal class InvitationOperations(
 
     private fun acceptRecipient(invitation: DbRow): MutationResult {
         val clientId = invitation.long("client_id")
+        requirePlatformInviter(invitation)
+        sql.invitationDeadline = invitation.instant("expires_at")
         session.requireLegacyClientAuthorityWrite(clientId, checkNotNull(session.userId))
         // Direct acceptance is exclusively for a newly issued empty cabinet, never an account transfer.
-        if (session.client(clientId).active()) fail("invalid_transition")
-        if (sql.row("SELECT client_id FROM client_memberships WHERE client_id=? LIMIT 1", clientId) != null ||
-            sql.row("SELECT client_id FROM client_clubs WHERE client_id=? LIMIT 1", clientId) != null ||
-            sql.row("SELECT client_id FROM client_club_applications WHERE client_id=? LIMIT 1", clientId) != null
-        ) {
-            fail("invalid_transition")
-        }
+        if (!emptyCabinet(clientId)) fail("invalid_transition")
         sql.update("UPDATE clients SET is_active=TRUE,updated_at=? WHERE id=?", session.now, clientId)
         sql.update(
             "INSERT INTO client_memberships(client_id,user_id,is_active,created_at,updated_at) VALUES (?,?,TRUE,?,?)",
@@ -233,11 +237,35 @@ internal class InvitationOperations(
         return result(row(invitation.long("id")), platform = false)
     }
 
+    private fun emptyCabinet(clientId: Long): Boolean =
+        !session.client(clientId).active() &&
+            sql.row("SELECT client_id FROM client_memberships WHERE client_id=? LIMIT 1", clientId) == null &&
+            sql.row("SELECT client_id FROM client_clubs WHERE client_id=? LIMIT 1", clientId) == null &&
+            sql.row("SELECT client_id FROM client_club_applications WHERE client_id=? LIMIT 1", clientId) == null
+
+    private fun requireBoundRecipient(invitation: DbRow) {
+        val bound = invitation["bound_user_id"]?.toLong() ?: return
+        if (bound != session.userId) fail("not_found")
+    }
+
+    private fun requirePlatformInviter(invitation: DbRow) {
+        val issuer =
+            invitation["inviter_user_id"]?.toLong()?.let {
+                sql.row("SELECT telegram_user_id FROM users WHERE id=?", it)
+            } ?: sql.row(
+                "SELECT u.telegram_user_id FROM audit_log a JOIN users u ON u.id=a.actor_user_id " +
+                    "WHERE a.entity_type='CLIENT_ONBOARDING' AND a.entity_id=? AND a.action='client.invitation.issue'",
+                invitation.long("id"),
+            )
+        if (session.ownerId == null || issuer?.get("telegram_user_id") != session.ownerId.toString()) fail("not_found")
+    }
+
     private fun create(
         clientId: Long,
         label: String,
         previousId: Long?,
         acceptancePolicy: String,
+        boundUser: Long? = null,
     ): MutationResult {
         val secret = randomToken()
         val id =
@@ -254,6 +282,14 @@ internal class InvitationOperations(
                 session.now,
                 acceptancePolicy,
             )
+        if (sql.directServiceInvitations) {
+            sql.update(
+                "UPDATE client_invitations SET inviter_user_id=?,bound_user_id=? WHERE id=?",
+                session.userId,
+                boundUser,
+                id,
+            )
+        }
         session.audit("client.invitation.issue", clientId, id, 1)
         val response = JsonObject(view(row(id), platform = true) + ("token" to JsonPrimitive(secret)))
         return MutationResult("invitation", id, clientId, response)
@@ -275,12 +311,12 @@ internal class InvitationOperations(
         )
     }
 
-    private fun row(id: Long): DbRow = sql.row("SELECT * FROM client_invitations WHERE id=?", id) ?: fail("not_found")
+    private fun row(id: Long): DbRow = sql.row("${sql.clientInvitationSelect} WHERE id=?", id) ?: fail("not_found")
 
     private fun locked(id: Long): DbRow {
         val before = row(id)
         session.client(before.long("client_id"), lock = true)
-        return sql.row("SELECT * FROM client_invitations WHERE id=? FOR UPDATE", id) ?: fail("not_found")
+        return sql.row("${sql.clientInvitationSelect} WHERE id=? FOR UPDATE", id) ?: fail("not_found")
     }
 
     private fun token(body: JsonObject): String =
@@ -289,13 +325,14 @@ internal class InvitationOperations(
             ?.takeIf { Regex("[A-Za-z0-9_-]{43}").matches(it) } ?: fail("not_found")
 
     private fun byToken(body: JsonObject): DbRow =
-        sql.row("SELECT * FROM client_invitations WHERE token_hash=?", digest(token(body))) ?: fail("not_found")
+        sql.row("${sql.clientInvitationSelect} WHERE token_hash=?", digest(token(body))) ?: fail("not_found")
 
     private fun authorizeRecipient(
         invitation: DbRow,
         preview: Boolean,
     ) {
         session.requireUnarchived(invitation.long("client_id"))
+        requireBoundRecipient(invitation)
         val claimant = invitation["claimant_user_id"]?.toLong()
         if (claimant != null && claimant != session.userId) fail("not_found")
         if (!preview && claimant == null) fail("not_found")
@@ -353,6 +390,16 @@ internal class InvitationOperations(
             put("recipientLabel", if (platform) invitation.getValue("recipient_label") else "")
             put("status", state)
             put("acceptanceMode", if (invitation["acceptance_policy"] == "recipient_acceptance") "direct" else "legacy")
+            put(
+                "acceptanceFlow",
+                if (invitation["acceptance_policy"] ==
+                    "recipient_acceptance"
+                ) {
+                    "direct"
+                } else {
+                    "confirmation"
+                },
+            )
             put("version", invitation.getValue("version"))
             put("expiresAt", invitation.instant("expires_at").toString())
             put(

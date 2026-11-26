@@ -4,12 +4,14 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ClientAccess from './ClientAccess';
 import PlatformOnboarding from './PlatformOnboarding';
 import { ClubApplication, Invitation } from './onboarding.types';
 
+const telegramBack = vi.hoisted(() => ({ current: undefined as (() => void) | undefined }));
 const auth = vi.hoisted(() => ({ initData: 'synthetic-client-a' }));
 vi.mock('../auth/hooks/useInitData', () => ({ useInitData: () => auth }));
 vi.mock('../../app/providers/TelegramProvider', () => ({
@@ -18,8 +20,8 @@ vi.mock('../../app/providers/TelegramProvider', () => ({
     BackButton: {
       show: vi.fn(),
       hide: vi.fn(),
-      onClick: vi.fn(),
-      offClick: vi.fn(),
+      onClick: (handler: () => void) => { telegramBack.current = handler; },
+      offClick: () => { telegramBack.current = undefined; },
     },
   }),
 }));
@@ -233,6 +235,69 @@ describe('connected onboarding screens', () => {
     expect(fetch.mock.calls[0][1]?.headers).toEqual(
       fetch.mock.calls[1][1]?.headers,
     );
+  });
+
+  it('keeps an application decision draft on screen and Telegram Back until discard is confirmed', async () => {
+    history.replaceState({}, '', '/app?mode=platform-owner&screen=application&resource=30');
+    vi.spyOn(globalThis, 'fetch').mockImplementation((path) => response(
+      String(path).endsWith('/search') ? { items: [], nextCursor: null } :
+        { ...draft, availableActions: ['reject'] },
+    ));
+    const confirm = vi.mocked(window.confirm).mockReturnValue(false);
+    render(<PlatformOnboarding credential="owner" />);
+    const field = await screen.findByLabelText('Причина / сообщение клиенту') as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: 'Уточните адрес' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+    act(() => telegramBack.current!());
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(field.value).toBe('Уточните адрес');
+    confirm.mockReturnValue(true);
+    act(() => telegramBack.current!());
+    expect(location.search).toContain('screen=applications');
+  });
+
+  it('protects unsent membership grants on browser Back and opening another platform detail', async () => {
+    history.replaceState({ ownerTrail: [] }, '', '/app?mode=platform-owner&screen=clients');
+    history.pushState({ ownerTrail: [JSON.stringify({ type: 'clients' })] }, '',
+      '/app?mode=platform-owner&screen=client&resource=20');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => response({
+      id: '20', name: 'Организация', clubs: [], invitations: [invitation],
+      members: [{ userId: '90', version: '1', active: false, permissions: [],
+        clubGrants: [], restorablePermissions: ['client.application.manage'] }],
+    }));
+    const confirm = vi.mocked(window.confirm).mockReturnValue(false);
+    render(<PlatformOnboarding credential="owner" />);
+    const grant = await screen.findByRole('checkbox', { name: 'Управление заявками' }) as HTMLInputElement;
+    fireEvent.click(grant);
+    fireEvent.click(screen.getByRole('button', { name: /Candidate/ }));
+    const moves = vi.spyOn(history, 'go');
+    act(() => history.back());
+    await waitFor(() => expect(moves).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(location.search).toContain('screen=client&resource=20'));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(grant.checked).toBe(true);
+  });
+
+  it('keeps an unknown invitation reissue and its key through browser Back', async () => {
+    history.replaceState({ ownerTrail: [] }, '', '/app?mode=platform-owner&screen=client&resource=20');
+    history.pushState({ ownerTrail: [JSON.stringify({ type: 'client', id: '20' })] }, '',
+      '/app?mode=platform-owner&screen=invitation&resource=10');
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((path) =>
+      String(path).endsWith('/reissue')
+        ? Promise.reject(new Error('response lost'))
+        : response({ ...invitation, availableActions: ['reissue'] }),
+    );
+    render(<PlatformOnboarding credential="synthetic-owner" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Выпустить новую ссылку' }));
+    const retry = await screen.findByRole('button', { name: 'Повторить ту же операцию' });
+    const moves = vi.spyOn(history, 'go');
+    act(() => history.back());
+    await waitFor(() => expect(moves).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(location.search).toContain('screen=invitation'));
+    fireEvent.click(retry);
+    const attempts = fetch.mock.calls.filter(([path]) => String(path).endsWith('/reissue'));
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0][1]?.headers).toEqual(attempts[1][1]?.headers);
   });
 
   it('account switch discards old private responses and uses the new explicit credential', async () => {

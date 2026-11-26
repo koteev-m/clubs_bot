@@ -133,8 +133,9 @@ internal class LegacyStaffAssignments(
     private fun history(staff: DbRow): List<DbRow> =
         sql.rows(
             "SELECT a.id,a.entity_id,a.action,a.actor_user_id,a.metadata_json,a.created_at," +
-                "i.id AS invitation_id,i.inviter_user_id,i.staff_role,i.version AS invitation_version,i.accepted_at " +
-                "FROM audit_log a LEFT JOIN client_invitations i ON a.action='client.staff.invitation.confirm' " +
+                "i.id AS invitation_id,i.inviter_user_id,i.staff_role,i.version AS invitation_version,i.accepted_at," +
+                "i.acceptance_policy FROM audit_log a LEFT JOIN client_invitations i ON a.action IN " +
+                "('client.staff.invitation.confirm','client.staff.invitation.accept') " +
                 "AND i.id=a.entity_id AND i.client_id=? AND i.club_id=? AND i.claimant_user_id=? " +
                 "AND i.purpose='staff' AND i.status='accepted' WHERE a.entity_type='CLIENT_ONBOARDING' " +
                 "AND (i.id IS NOT NULL OR (a.entity_id=? AND a.action IN " +
@@ -160,10 +161,16 @@ internal class LegacyStaffAssignments(
                 val validEvent =
                     recorded == audit.long("invitation_version") &&
                         event.textValue("candidateUserId") == staff["user_id"]
-                val validIssuer =
-                    audit["inviter_user_id"] == audit["actor_user_id"] &&
-                        audit.instant("accepted_at") <= audit.instant("created_at")
-                if (validEvent && validIssuer) {
+                val validActor =
+                    if (audit["action"] == "client.staff.invitation.accept") {
+                        audit["acceptance_policy"] == "recipient_acceptance" &&
+                            audit["actor_user_id"] == staff["user_id"] &&
+                            event.textValue("inviterUserId") == audit["inviter_user_id"]
+                    } else {
+                        audit["acceptance_policy"] == "owner_confirmation" &&
+                            audit["actor_user_id"] == audit["inviter_user_id"]
+                    }
+                if (validEvent && validActor && audit.instant("accepted_at") <= audit.instant("created_at")) {
                     transition(event, audit["staff_role"], prior, audit.long("invitation_id"))
                 } else {
                     null
@@ -223,16 +230,23 @@ internal class LegacyStaffAssignments(
         audit: DbRow,
         event: JsonObject,
         staff: DbRow,
-    ): Boolean =
-        sql.row(
+    ): Boolean {
+        val (type, id) =
+            when (audit["action"]) {
+                "client.staff.platform_revoke" -> "member" to staff.long("user_id")
+                "client.staff.invitation.accept" -> "invitation" to audit.long("invitation_id")
+                else -> "club_team" to staff.long("club_id")
+            }
+        return sql.row(
             "SELECT actor_user_id FROM client_commands WHERE actor_user_id=? AND connection_key='platform' " +
                 "AND key_hash=? AND client_id=? AND result_type=? AND result_id=?",
             audit["actor_user_id"]?.toLongOrNull(),
             event.textValue("commandCorrelation"),
             staff.long("client_id"),
-            if (audit["action"] == "client.staff.platform_revoke") "member" else "club_team",
-            if (audit["action"] == "client.staff.platform_revoke") staff.long("user_id") else staff.long("club_id"),
+            type,
+            id,
         ) != null
+    }
 
     private fun parseMetadata(row: DbRow): JsonObject? =
         try {

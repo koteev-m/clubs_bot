@@ -22,7 +22,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
+open class ClientManagerRoutesDataTest : NetworkManagerPolicyContract() {
     override fun legacyDatabase(block: (DataSource) -> Unit) = databaseAt("79", block)
 
     @Test
@@ -43,15 +43,18 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                     requestAs(profile, RECIPIENT, profileChange(ownerProfile), HttpMethod.Patch).status,
                 )
                 val network = invite(path, RECIPIENT, "NETWORK_MANAGER")
-                val claimed = claim(network, FOREIGN)
+                val preview = ok("$C/manager-invitations/resolve", FOREIGN, obj("token" to network.string("token")))
+                assertEquals("direct", preview.string("acceptanceFlow"))
+                assertEquals("issued", preview.string("status"))
                 assertEquals(HttpStatusCode.NotFound, requestAs(path, FOREIGN).status)
                 assertEquals("0", source.scalar("SELECT COUNT(*) FROM client_role_assignments"))
-                val listed = ok(path, RECIPIENT)["invitations"]!!.jsonArray.single().jsonObject
-                assertEquals(JsonNull, listed["verificationCode"])
-                val networkResult = confirm(path, RECIPIENT, claimed)
+                val accepted = claim(network, FOREIGN)
+                assertEquals("accepted", accepted.string("status"))
+                assertEquals(JsonNull, accepted["verificationCode"])
+                val networkResult = ok(path, RECIPIENT)
                 assertEquals(1, networkResult["assignments"]!!.jsonArray.size)
                 val manager = invite(path, FOREIGN, "CLUB_MANAGER")
-                val clubClaim = claim(manager, SECOND_MANAGER)
+                claim(manager, SECOND_MANAGER)
                 assertEquals(HttpStatusCode.NotFound, requestAs(otherProfile, FOREIGN).status)
                 assertEquals(HttpStatusCode.NotFound, requestAs(otherProfile, SECOND_MANAGER).status)
                 assertEquals(HttpStatusCode.NotFound, requestAs("$C/clubs/$other/managers", FOREIGN).status)
@@ -63,9 +66,7 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                         "recipientLabel" to "Peer",
                     )
                 assertEquals(HttpStatusCode.Forbidden, requestAs(path, FOREIGN, peerInvite).status)
-                val takeover = confirmBody(path, RECIPIENT, clubClaim)
-                assertEquals(HttpStatusCode.NotFound, requestAs(path, RECIPIENT, takeover).status)
-                val confirmed = confirm(path, FOREIGN, clubClaim)
+                val confirmed = ok(path, FOREIGN)
                 assertEquals(1, confirmed["assignments"]!!.jsonArray.size)
                 val clubManager = confirmed["assignments"]!!.jsonArray.single().jsonObject
                 checkWorkspaces(club, other)
@@ -75,14 +76,19 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                 assertEquals("Manager saved", saved.string("name"))
                 assertEquals(HttpStatusCode.NotFound, requestAs(path, SECOND_MANAGER).status)
                 val pending = invite(path, FOREIGN, "CLUB_MANAGER")
-                val unconfirmed = claim(pending, THIRD_MANAGER)
-                val staleConfirm = confirmBody(path, FOREIGN, unconfirmed)
                 revoke(path, RECIPIENT, networkResult["assignments"]!!.jsonArray.single().jsonObject)
                 assertEquals(HttpStatusCode.NotFound, requestAs(path, FOREIGN).status)
                 assertEquals("Manager saved", ok(profile, SECOND_MANAGER).string("name"))
                 // A source created while the network manager had authority survives its issuer's revocation.
                 // That former issuer cannot consume an earlier pending invitation.
-                assertEquals(HttpStatusCode.NotFound, requestAs(path, FOREIGN, staleConfirm).status)
+                assertEquals(
+                    HttpStatusCode.NotFound,
+                    requestAs(
+                        "$C/manager-invitations/${pending.string("createdInvitationId")}/claim",
+                        THIRD_MANAGER,
+                        obj("token" to pending.string("token"), "expectedVersion" to "1"),
+                    ).status,
+                )
                 val unclaimed = invite(path, RECIPIENT, "CLUB_MANAGER")
                 revoke(path, RECIPIENT, clubManager)
                 assertEquals(HttpStatusCode.NotFound, requestAs(profile, SECOND_MANAGER).status)
@@ -118,7 +124,8 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
             withApp(source) {
                 val (club, _) = business(source)
                 val path = "$C/clubs/$club/managers"
-                val accepted = confirm(path, RECIPIENT, claim(invite(path, RECIPIENT, "NETWORK_MANAGER"), FOREIGN))
+                claim(invite(path, RECIPIENT, "NETWORK_MANAGER"), FOREIGN)
+                val accepted = ok(path, RECIPIENT)
                 // Model a historical or out-of-band flat row. TARGET resolves only its accepted sources.
                 source.connection.use { connection ->
                     connection
@@ -128,7 +135,7 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                                 "SELECT m.client_id,m.club_id,u.id,?,TRUE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP " +
                                 "FROM client_clubs m CROSS JOIN users u WHERE m.club_id=? AND u.telegram_user_id=?",
                         ).use { insert ->
-                            for (permission in listOf("client.club.read", "client.club.profile.write")) {
+                            for (permission in listOf("client.club.read", "client.club.team.manage")) {
                                 insert.setString(1, permission)
                                 insert.setLong(2, club.toLong())
                                 insert.setLong(3, FOREIGN)
@@ -138,11 +145,8 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                 }
                 val profile = "$C/clubs/$club/profile"
                 val permitted = ok(profile, FOREIGN)
-                assertFalse(JsonPrimitive("client.club.profile.write") in permitted.getValue("permissions").jsonArray)
-                assertEquals(
-                    HttpStatusCode.NotFound,
-                    requestAs(profile, FOREIGN, profileChange(permitted), HttpMethod.Patch).status,
-                )
+                assertFalse(JsonPrimitive("client.club.team.manage") in permitted.getValue("permissions").jsonArray)
+                assertEquals(HttpStatusCode.NotFound, requestAs("$C/clubs/$club/team", FOREIGN).status)
                 revoke(
                     path,
                     RECIPIENT,
@@ -158,12 +162,13 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
         }
 
     @Test
-    fun `direct appointment requires a fresh claimant code and a revoked source cannot be restored by replay`() =
+    fun `historical appointment requires a fresh code and replay cannot restore a revoked source`() =
         database { source ->
             withApp(source) {
                 val (club, _) = business(source)
                 val path = "$C/clubs/$club/managers"
                 val issued = invite(path, RECIPIENT, "CLUB_MANAGER")
+                historicalPolicy(source, issued)
                 val claim = claim(issued, SECOND_MANAGER)
                 val id = claim.string("id")
                 val recipient = "$C/manager-invitations/$id"
@@ -218,7 +223,7 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                 val first = "$C/clubs/$club/managers"
                 val second = "$C/clubs/$other/managers"
                 val direct = invite(first, RECIPIENT, "CLUB_MANAGER")
-                confirm(first, RECIPIENT, claim(direct, SECOND_MANAGER))
+                claim(direct, SECOND_MANAGER)
                 val stillUnclaimed = invite(second, RECIPIENT, "NETWORK_MANAGER")
                 val clientId = direct.string("clientId")
                 val member =
@@ -258,7 +263,7 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                 assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_role_assignments WHERE status='REVOKED'"))
                 // A newly issued and explicitly re-confirmed source is independent of the disabled one.
                 val newInvite = invite(first, RECIPIENT, "CLUB_MANAGER")
-                confirm(first, RECIPIENT, claim(newInvite, SECOND_MANAGER))
+                claim(newInvite, SECOND_MANAGER)
                 ok("$C/clubs/$club/profile", SECOND_MANAGER)
                 assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_role_assignments WHERE status='REVOKED'"))
                 assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_role_assignments WHERE status='ACTIVE'"))
@@ -272,7 +277,7 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                 val (club, other) = business(source)
                 val path = "$C/clubs/$club/managers"
                 val network = invite(path, RECIPIENT, "NETWORK_MANAGER")
-                confirm(path, RECIPIENT, claim(network, FOREIGN))
+                claim(network, FOREIGN)
                 val unclaimedOwnerLink = invite(path, RECIPIENT, "CLUB_MANAGER")
                 val clientId = network.string("clientId")
                 val owner =
@@ -294,7 +299,14 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                         ),
                     ).status,
                 )
-                val claim = claim(invite(path, FOREIGN, "CLUB_MANAGER"), SECOND_MANAGER)
+                val issued = invite(path, FOREIGN, "CLUB_MANAGER")
+                source.connection.use { connection ->
+                    connection.createStatement().use {
+                        it.executeUpdate(
+                            "INSERT INTO users(telegram_user_id) VALUES ($SECOND_MANAGER)",
+                        )
+                    }
+                }
                 // A guest's independent SELF role survives staff appointment and revocation.
                 source.connection.use { connection ->
                     connection
@@ -306,7 +318,8 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                             assertEquals(1, it.executeUpdate())
                         }
                 }
-                val roster = confirm(path, FOREIGN, claim)
+                claim(issued, SECOND_MANAGER)
+                val roster = ok(path, FOREIGN)
                 val profile = "$C/clubs/$club/profile"
                 ok(profile, SECOND_MANAGER, profileChange(ok(profile, SECOND_MANAGER)), HttpMethod.Patch)
                 revoke(
@@ -336,8 +349,8 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
             withApp(source) {
                 val (club, _) = business(source)
                 val path = "$C/clubs/$club/managers"
-                confirm(path, RECIPIENT, claim(invite(path, RECIPIENT, "NETWORK_MANAGER"), FOREIGN))
-                confirm(path, RECIPIENT, claim(invite(path, RECIPIENT, "CLUB_MANAGER"), FOREIGN))
+                claim(invite(path, RECIPIENT, "NETWORK_MANAGER"), FOREIGN)
+                claim(invite(path, RECIPIENT, "CLUB_MANAGER"), FOREIGN)
                 val network = ok(path, FOREIGN)
                 val own =
                     network
@@ -367,12 +380,124 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
         }
 
     @Test
-    fun `concurrent confirmation and cancellation of a claimed appointment commit one outcome`() =
+    fun `only one Telegram recipient accepts a multi-club invitation and both assignments commit`() =
+        database { source ->
+            withApp(source) {
+                val (club, other) = business(source)
+                val path = "$C/clubs/$club/managers"
+                val roster = ok(path, RECIPIENT)
+                val selected = listOf(club, other).map(::JsonPrimitive)
+                val request =
+                    JsonObject(
+                        obj(
+                            "action" to "invite",
+                            "expectedVersion" to roster.string("version"),
+                            "role" to "NETWORK_MANAGER",
+                            "recipientLabel" to "Network",
+                        ) + ("clubIds" to JsonArray(selected)),
+                    )
+                val invitation = ok(path, RECIPIENT, request)
+                val preview = ok("$C/manager-invitations/resolve", FOREIGN, obj("token" to invitation.string("token")))
+                assertEquals(
+                    setOf(club, other),
+                    preview
+                        .getValue("clubs")
+                        .jsonArray
+                        .map { it.jsonObject.string("id") }
+                        .toSet(),
+                )
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM client_role_assignments"))
+                val accept = "$C/manager-invitations/${preview.string("id")}/claim"
+                val body = obj("expectedVersion" to preview.string("version"), "token" to invitation.string("token"))
+                val outcomes =
+                    coroutineScope {
+                        listOf(FOREIGN, SECOND_MANAGER)
+                            .map { user ->
+                                async { requestAs(accept, user, body).status }
+                            }.awaitAll()
+                    }
+                assertEquals(setOf(HttpStatusCode.OK, HttpStatusCode.NotFound), outcomes.toSet())
+                val winner = if (outcomes.first() == HttpStatusCode.OK) FOREIGN else SECOND_MANAGER
+                assertEquals(HttpStatusCode.Conflict, requestAs(accept, winner, body).status)
+                ok(path, winner)
+                ok("$C/clubs/$other/managers", winner)
+                assertEquals("2", source.scalar("SELECT COUNT(*) FROM client_role_assignments WHERE status='ACTIVE'"))
+                assertEquals("1", source.scalar("SELECT COUNT(DISTINCT user_id) FROM client_role_assignments"))
+                val otherPath = "$C/clubs/$other/managers"
+                val sourceToRemove =
+                    ok(otherPath, RECIPIENT)
+                        .getValue("assignments")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                revoke(otherPath, RECIPIENT, sourceToRemove)
+                val status = ok("$C/manager-invitations/${preview.string("id")}", winner)
+                assertEquals(listOf(club), status.getValue("clubs").jsonArray.map { it.jsonObject.string("id") })
+                assertEquals(HttpStatusCode.NotFound, requestAs(otherPath, winner).status)
+                ok(path, winner)
+            }
+        }
+
+    @Test
+    fun `cancelled and expired manager links cannot admit anyone`() =
+        database { source ->
+            withApp(source) {
+                val (club, _) = business(source)
+                val path = "$C/clubs/$club/managers"
+                val canceled = invite(path, RECIPIENT, "CLUB_MANAGER")
+                val row =
+                    canceled
+                        .getValue("invitations")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                val cancel =
+                    JsonObject(
+                        obj(
+                            "action" to "revoke_invitation",
+                            "expectedVersion" to canceled.string("version"),
+                            "invitationId" to row.string("id"),
+                            "expectedInvitationVersion" to row.string("version"),
+                        ) + ("confirmed" to JsonPrimitive(true)),
+                    )
+                ok(path, RECIPIENT, cancel)
+                val expired = invite(path, RECIPIENT, "CLUB_MANAGER")
+                source.connection.use { connection ->
+                    connection.createStatement().use {
+                        it.executeUpdate(
+                            "UPDATE client_manager_invitations SET expires_at=created_at WHERE id=${expired.string(
+                                "createdInvitationId",
+                            )}",
+                        )
+                    }
+                }
+                for ((invitation, expected) in listOf(canceled to "revoked", expired to "expired")) {
+                    val token = invitation.string("token")
+                    val preview = ok("$C/manager-invitations/resolve", FOREIGN, obj("token" to token))
+                    assertEquals(expected, preview.string("status"))
+                    assertTrue(preview.getValue("availableActions").jsonArray.isEmpty())
+                    val accept = "$C/manager-invitations/${preview.string("id")}/claim"
+                    assertTrue(
+                        requestAs(
+                            accept,
+                            FOREIGN,
+                            obj("expectedVersion" to preview.string("version"), "token" to token),
+                        ).status.value in
+                            400..499,
+                    )
+                }
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM client_role_assignments"))
+            }
+        }
+
+    @Test
+    fun `concurrent historical confirmation and cancellation of a claimed appointment commit one outcome`() =
         database { source ->
             withApp(source) {
                 val (club, _) = business(source)
                 val path = "$C/clubs/$club/managers"
                 val invitation = invite(path, RECIPIENT, "CLUB_MANAGER")
+                historicalPolicy(source, invitation)
                 val claimed = claim(invitation, FOREIGN)
                 val approval = confirmBody(path, RECIPIENT, claimed)
                 val cancel =
@@ -401,6 +526,21 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
             }
         }
 
+    private fun historicalPolicy(
+        source: DataSource,
+        issued: JsonObject,
+    ) {
+        source.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    "UPDATE client_manager_invitations SET acceptance_policy='owner_confirmation' WHERE id=?",
+                ).use {
+                    it.setLong(1, issued.string("createdInvitationId").toLong())
+                    assertEquals(1, it.executeUpdate())
+                }
+        }
+    }
+
     private suspend fun ApplicationTestBuilder.workspace(user: Long): JsonObject =
         ok("$C/context", user)["clients"]!!.jsonArray.single().jsonObject
 
@@ -425,8 +565,7 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
         assertTrue(JsonPrimitive("client.staff.assign.club_manager") in ownerPermissions)
         assertEquals("true", ok(onboarding, RECIPIENT).string("businessOwner"))
         assertEquals("false", ok(settings, RECIPIENT).string("canWrite"))
-        assertEquals("NETWORK_MANAGER", profile(FOREIGN).string("businessRole"))
-        assertEquals("false", ok(settings, FOREIGN).string("canWrite"))
+        checkNetworkSettings(path, other, settings)
         assertEquals("CLUB_MANAGER", profile(SECOND_MANAGER).string("businessRole"))
         assertEquals("true", ok(settings, SECOND_MANAGER).string("canWrite"))
         for (manager in listOf(FOREIGN, SECOND_MANAGER)) {
@@ -444,6 +583,37 @@ open class ClientManagerRoutesDataTest : LegacyStaffAdoptionContract() {
                 client.get(settings) { header("X-Telegram-Init-Data", stale) }.status,
             )
         }
+    }
+
+    private suspend fun ApplicationTestBuilder.checkNetworkSettings(
+        path: String,
+        other: String,
+        settings: String,
+    ) {
+        val network = ok("$path/profile", FOREIGN)
+        assertEquals("NETWORK_MANAGER", network.string("businessRole"))
+        val allowed =
+            setOf(
+                "client.club.read",
+                "client.club.reports.read",
+                "client.club.modules.read",
+                "client.club.finance.read",
+                "client.club.profile.write",
+                "client.club.layout.write",
+                "client.club.calendar.write",
+                "client.club.booking_rules.write",
+                "client.club.finance.write",
+                "client.club.modules.write",
+                "client.staff.assign.club_manager",
+                "client.staff.revoke.club_manager",
+            )
+        assertEquals(allowed.map(::JsonPrimitive).toSet(), network.getValue("permissions").jsonArray.toSet())
+        assertEquals("true", ok(settings, FOREIGN).string("canWrite"))
+        ok("$path/profile", FOREIGN, profileChange(network), HttpMethod.Patch)
+        assertEquals(
+            HttpStatusCode.NotFound,
+            requestAs("$C/clubs/$other/profile", FOREIGN, profileChange(network), HttpMethod.Patch).status,
+        )
     }
 
     private suspend fun ApplicationTestBuilder.revoke(

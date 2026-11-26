@@ -145,7 +145,7 @@ class JdbcClientOnboardingRepository(
                         readOnly = false,
                         beforeCommit = {
                             if (memberMutation || operation in MANAGER_COMMANDS) mutationContext.ensureActive()
-                            it.managerInvitationDeadline?.let { until ->
+                            it.invitationDeadline?.let { until ->
                                 if (!clock.instant().isBefore(until)) fail("invalid_transition")
                             }
                             if (it.usedTargetIdentity ||
@@ -193,6 +193,9 @@ class JdbcClientOnboardingRepository(
                                 return@transaction ClubManagers(
                                     session,
                                 ).confirm(required(resourceId), body, requestHash)
+                            }
+                            if (operation == OnboardingMutation.MANAGER_INVITATION_CLAIM) {
+                                return@transaction ClubManagers(session).claim(required(resourceId), body, requestHash)
                             }
                             val result = execute(session, operation, resourceId, body)
                             sql.update(
@@ -319,7 +322,6 @@ class JdbcClientOnboardingRepository(
                     session,
                 ).update(required(resourceId), body)
             OnboardingMutation.CLUB_MANAGERS_UPDATE -> ClubManagers(session).update(required(resourceId), body)
-            OnboardingMutation.MANAGER_INVITATION_CLAIM -> ClubManagers(session).claim(required(resourceId), body)
             OnboardingMutation.CLUB_TEAM_UPDATE -> ClubTeamOperations(session).update(required(resourceId), body)
             OnboardingMutation.CLUB_PROFILE_UPDATE ->
                 ClubOnboardingOperations(

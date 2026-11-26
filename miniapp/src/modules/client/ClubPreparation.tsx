@@ -1,3 +1,5 @@
+import InvitationDelivery from './InvitationDelivery';
+import { roleNames } from './team.types';
 import { useEffect, useState } from 'react';
 import { useClubConfiguration } from './configuration.hooks';
 import { useRemote } from './onboarding.hooks';
@@ -361,9 +363,7 @@ function Preparation({
                     </>
                   )}
                   <p>
-                    Сотрудник принимает ссылку в Telegram. Затем вы сверяете
-                    его аккаунт и код в личном чате и подтверждаете доступ в
-                    разделе «Команда».
+                    Сотрудник получит доступ к подготовке этого клуба после принятия приглашения в Telegram.
                   </p>
                   <button
                     type="button"
@@ -379,7 +379,7 @@ function Preparation({
                         openTeam();
                     }}
                   >
-                    Открыть команду и подтверждение
+                    Открыть команду
                   </button>
                   <button
                     type="button"
@@ -511,41 +511,14 @@ function Preparation({
               текущих прав.
             </p>
           )}
-          {link && (
-            <section aria-label="Приглашение ответственного">
-              <h3>Приглашение создано</h3>
-              <Field label="Ссылка ответственного">
-                <input
-                  readOnly
-                  value={link}
-                  onFocus={(event) => event.currentTarget.select()}
-                />
-              </Field>
-              <button
-                type="button"
-                className="ob-button"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(link);
-                    setMessage('Ссылка скопирована');
-                  } catch {
-                    setMessage('Выделите ссылку и скопируйте вручную.');
-                  }
-                }}
-              >
-                Скопировать ссылку
-              </button>
-              <button
-                type="button"
-                className="ob-button"
-                onClick={() => {
-                  setLink(undefined);
-                  setMessage('Ссылка скрыта. Она не выдаётся повторно.');
-                }}
-              >
-                Скрыть ссылку
-              </button>
-            </section>
+          {link && view.invitation?.id === linkId && view.invitation?.status === 'issued' && (
+            <InvitationDelivery key={linkId} link={link} prefix="ci" label="Ссылка ответственного"
+              recipient={view.invitation.recipientLabel} role={roleNames.CLUB_ADMIN}
+              scope={view.name} expiresAt={view.invitation.expiresAt}
+              hide={() => {
+                setLink(undefined);
+                setMessage('Ссылка скрыта. Она не выдаётся повторно.');
+              }} />
           )}
           {message && <p role="status">{message}</p>}
           {!choice && (

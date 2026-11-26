@@ -19,6 +19,59 @@ import java.util.UUID
 /** The same new contract runs on H2 and real PostgreSQL, alongside retained legacy lifecycle tests. */
 internal abstract class SimplifiedOnboardingContract : ClubProfileContract() {
     @Test
+    fun `reissuing a historical claimed invitation binds the direct replacement to the same recipient`() =
+        runBlocking<Unit> {
+            val issued = fixture.issue()
+            val claimed = fixture.claim(issued)
+            fixture.migrate()
+            assertEquals(
+                "claimed",
+                fixture.repository
+                    .read(
+                        fixture.alice,
+                        OnboardingRead.INVITATION_STATUS,
+                        issued.id("id"),
+                    ).string("status"),
+            )
+            val replacement = fixture.mutate(fixture.owner, OnboardingMutation.INVITATION_REISSUE, claimed)
+            assertEquals("direct", replacement.string("acceptanceFlow"))
+            expect("not_found") { fixture.claim(replacement, fixture.bob) }
+            assertEquals("accepted", fixture.claim(replacement).string("status"))
+            assertEquals(1, fixture.count("client_memberships"))
+        }
+
+    @Test
+    fun `changing the configured platform owner fences direct and historical grants by their issuer`() =
+        runBlocking<Unit> {
+            val historical = fixture.claim(fixture.issue())
+            fixture.migrate()
+            val direct = fixture.issueDirect()
+            val rotated = JdbcClientOnboardingRepository(fixture.source, fixture.bob.telegramUserId, fixture.clock)
+            expect("not_found") {
+                rotated.mutate(
+                    fixture.alice,
+                    OnboardingMutation.INVITATION_CLAIM,
+                    direct.id("id"),
+                    buildJsonObject {
+                        put("expectedVersion", direct.getValue("version"))
+                        put("token", direct.getValue("token"))
+                    },
+                    "rotated-direct",
+                )
+            }
+            expect("not_found") {
+                rotated.mutate(
+                    fixture.bob,
+                    OnboardingMutation.INVITATION_CONFIRM,
+                    historical.id("id"),
+                    buildJsonObject { put("expectedVersion", historical.getValue("version")) },
+                    "rotated-confirmation",
+                )
+            }
+            assertEquals(0, fixture.count("client_memberships"))
+        }
+
+    @Test
     fun `new invitation accepts in one mutation without comparison code or platform confirmation`() =
         runBlocking<Unit> {
             val invitation = fixture.issueDirect()

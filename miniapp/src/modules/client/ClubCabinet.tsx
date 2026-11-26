@@ -297,6 +297,9 @@ function Cabinet({
     },
   );
   const businessRole = profile?.businessRole;
+  const networkCanConfigure =
+    businessRole === 'NETWORK_MANAGER' &&
+    profile?.permissions.includes('client.club.profile.write');
   const owner = !businessRole && preparation?.canManage;
   const callbacks = {
     openProfile: () => safeOpen('profile'),
@@ -392,7 +395,7 @@ function Cabinet({
                       onClick={() => safeOpen('settings')}
                     >
                       {businessRole === 'BUSINESS_OWNER' ||
-                      businessRole === 'NETWORK_MANAGER'
+                      (businessRole === 'NETWORK_MANAGER' && !networkCanConfigure)
                         ? 'Сохранённые настройки'
                         : owner
                           ? 'Открыть настройки клуба'
@@ -423,6 +426,7 @@ function Cabinet({
                       )}
                   </div>
                   {(businessRole === 'CLUB_MANAGER' ||
+                    networkCanConfigure ||
                     (!businessRole && preparation && !owner)) && (
                     <section aria-label="Задачи по конфигурации">
                       <h2>Настройка клуба</h2>

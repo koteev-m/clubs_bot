@@ -22,6 +22,7 @@ import com.example.bot.data.client.onboarding.OnboardingRead
 import com.example.bot.data.client.onboarding.OnboardingSql
 import com.example.bot.data.client.onboarding.digest
 import com.example.bot.data.client.onboarding.id
+import com.example.bot.data.client.onboarding.string
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -253,21 +254,7 @@ internal class PlatformRoleRevokeFixture(
                 },
                 base.commandKey(),
             )
-        val fresh = repository.read(actor(OWNER), OnboardingRead.CLUB_TEAM_GET, CLUB)
-        repository.mutate(
-            actor(OWNER),
-            OnboardingMutation.CLUB_TEAM_UPDATE,
-            CLUB,
-            buildJsonObject {
-                put("action", "confirm")
-                put("expectedVersion", fresh.getValue("version"))
-                put("invitationId", invitation.toString())
-                put("expectedInvitationVersion", claimed.getValue("version"))
-                put("verificationCode", claimed.getValue("verificationCode"))
-                put("confirmed", true)
-            },
-            base.commandKey(),
-        )
+        check(claimed.string("status") == "accepted")
     }
 
     fun legacyChangeBody(): JsonObject =

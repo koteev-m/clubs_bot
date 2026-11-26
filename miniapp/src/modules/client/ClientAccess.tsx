@@ -1,3 +1,4 @@
+import { invitationRole, invitationScope } from './InvitationDelivery';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useInitData } from '../auth/hooks/useInitData';
 import NewClub, { blankNewVenue } from './NewClub';
@@ -12,8 +13,6 @@ import ClubFinance from './ClubFinance';
 import ClubModules from './ClubModules';
 import ClubTeam from './ClubTeam';
 import ClubManagers from './ClubManagers';
-import { businessRoleNames } from './onboarding.types';
-import { roleNames } from './team.types';
 import { scrubClientLaunchUrl, type InvitationKind } from './clientEntry';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
@@ -47,7 +46,8 @@ type Screen =
   | { type: 'finance'; id: string }
   | { type: 'modules'; id: string }
   | { type: 'team'; id: string }
-  | { type: 'managers'; id: string }
+  | { type: 'managers'; id: string; invitationId?: string }
+  | { type: 'invite-manager'; id: string }
   | { type: 'booking-rules'; id: string }
   | { type: 'booking-preview'; id: string }
   | { type: 'layout'; id: string; hallId?: string }
@@ -77,7 +77,13 @@ function savedScreen(): Screen {
   if (params.get('screen') === 'finance') return { type: 'finance', id };
   if (params.get('screen') === 'manager-invitation')
     return { type: 'manager-invitation', id };
-  if (params.get('screen') === 'managers') return { type: 'managers', id };
+  if (params.get('screen') === 'invite-manager') return { type: 'invite-manager', id };
+  if (params.get('screen') === 'managers') {
+    const invitationId = params.get('invitation');
+    return invitationId && /^[1-9]\d*$/.test(invitationId)
+      ? { type: 'managers', id, invitationId }
+      : { type: 'managers', id };
+  }
   if (params.get('screen') === 'team') return { type: 'team', id };
   if (params.get('screen') === 'modules') return { type: 'modules', id };
   if (params.get('screen') === 'calendar') return { type: 'calendar', id };
@@ -97,9 +103,38 @@ function screenKey(screen: Screen): string {
   return [
     screen.type,
     'id' in screen ? screen.id : '',
-    screen.type === 'layout' ? screen.hallId : '',
+    screen.type === 'layout' ? screen.hallId : screen.type === 'managers' ? screen.invitationId : '',
   ].join(':');
 }
+
+function screenUrl(next: Screen) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('mode', 'client');
+  url.searchParams.delete('screen');
+  url.searchParams.delete('resource');
+  url.searchParams.delete('hall');
+  url.searchParams.delete('invitation');
+  if (next.type === 'layout' && next.hallId)
+    url.searchParams.set('hall', next.hallId);
+  if (next.type !== 'home') {
+    url.searchParams.set(
+      'screen',
+      next.type === 'space'
+        ? 'client-space'
+        : next.type === 'new'
+          ? 'new-club'
+          : next.type,
+    );
+    if (next.id) url.searchParams.set('resource', next.id);
+    if (next.type === 'managers' && next.invitationId)
+      url.searchParams.set('invitation', next.invitationId);
+  }
+  return url;
+}
+
+const settingsSections = new Set<Screen['type']>([
+  'profile', 'booking-rules', 'booking-preview', 'layout', 'calendar', 'finance', 'modules',
+]);
 
 export default function ClientAccess({
   initialToken,
@@ -173,6 +208,8 @@ function ClientWorkspace({
   if (draftClient) drafts.current.set(draftClient, { fields: draft, previous });
   const pendingClient = useRef('');
   pendingClient.current = createClub.blocked ? draftClient : '';
+  const createSaving = useRef(false);
+  createSaving.current = createClub.saving;
   const dirty = useRef(false);
   const offerInitialShortcut = useRef(screen.type === 'home');
   const approvedBack = useRef<number | null>(null);
@@ -197,36 +234,27 @@ function ClientWorkspace({
         next.id !== draftClient
       )
         next = { type: 'new', id: draftClient };
-      const url = new URL(window.location.href);
-      url.searchParams.set('mode', 'client');
-      url.searchParams.delete('screen');
-      url.searchParams.delete('resource');
-      url.searchParams.delete('hall');
-      if (next.type === 'layout' && next.hallId)
-        url.searchParams.set('hall', next.hallId);
-      if (next.type !== 'home') {
-        url.searchParams.set(
-          'screen',
-          next.type === 'space'
-            ? 'client-space'
-            : next.type === 'new'
-              ? 'new-club'
-              : next.type,
-        );
-        if (next.id) url.searchParams.set('resource', next.id);
-      }
       offerInitialShortcut.current = false;
-      const previousKey = replace
-        ? window.history.state?.clientPrevious
-        : screenKey(savedScreen());
+      const currentKey = screenKey(savedScreen());
+      if (!replace && currentKey === screenKey(next)) return;
+      const trail: string[] = window.history.state?.clientTrail ?? [];
+      const nextTrail = replace ? trail : [...trail, currentKey];
+      // Shortcuts can bypass the settings hub. Give it one real entry so
+      // browser Forward also opens the section the user just left.
+      if (!replace && 'id' in next && next.id && settingsSections.has(next.type) &&
+          !(next.type === 'layout' && next.hallId)) {
+        const settings: Screen = { type: 'settings', id: next.id };
+        if (!nextTrail.includes(screenKey(settings))) {
+          window.history.pushState({
+            onboarding: true, clientPosition: ++position.current, clientTrail: [...nextTrail],
+          }, '', screenUrl(settings));
+          nextTrail.push(screenKey(settings));
+        }
+      }
       if (!replace) position.current += 1;
-      const state = {
-        onboarding: true,
-        clientPosition: position.current,
-        clientPrevious: previousKey,
-      };
-      if (replace) window.history.replaceState(state, '', url);
-      else window.history.pushState(state, '', url);
+      const state = { onboarding: true, clientPosition: position.current, clientTrail: nextTrail };
+      if (replace) window.history.replaceState(state, '', screenUrl(next));
+      else window.history.pushState(state, '', screenUrl(next));
       if (
         next.type === 'new' &&
         (next.id !== draftClient ||
@@ -254,37 +282,12 @@ function ClientWorkspace({
   );
   const goBack = (parent: Screen) => {
     if (approvedBack.current !== null) return;
-    const current = savedScreen();
-    const previous = String(window.history.state?.clientPrevious ?? '').split(
-      ':',
-    );
-    // Configuration sections can be opened from the hub or readiness review.
-    // Restore only a known parent in this same club, never a URL-supplied tenant.
-    if (
-      position.current > 0 &&
-      'id' in current &&
-      'id' in parent &&
-      current.id === parent.id &&
-      current.type !== 'club' &&
-      [
-        'club',
-        'settings',
-        'readiness',
-        'profile',
-        'preparation-choice',
-      ].includes(previous[0]) &&
-      previous[1] === current.id &&
-      previous[2] === ''
-    ) {
-      parent = { type: previous[0], id: current.id } as Screen;
-    }
-    if (
-      position.current > 0 &&
-      window.history.state?.clientPrevious === screenKey(parent)
-    ) {
-      // The screen already approved departure, including its unsaved draft.
-      approvedBack.current = position.current - 1;
-      window.history.back();
+    const trail: string[] = window.history.state?.clientTrail ?? [];
+    const index = trail.lastIndexOf(screenKey(parent));
+    if (index >= 0) {
+      const distance = trail.length - index;
+      approvedBack.current = position.current - distance;
+      window.history.go(-distance);
     } else {
       // Deep links may start with no in-app parent entry.
       navigate(parent, true);
@@ -307,7 +310,7 @@ function ClientWorkspace({
       if (nextPosition === position.current) return;
       const approved = approvedBack.current === nextPosition;
       approvedBack.current = null;
-      if (!approved && sectionPending.current) {
+      if (!approved && (sectionPending.current || createSaving.current)) {
         window.history.go(position.current - nextPosition);
         return;
       }
@@ -343,8 +346,15 @@ function ClientWorkspace({
   const home = useCallback(() => {
     setToken(null);
     onTokenConsumed?.();
-    navigate({ type: 'home' });
+    navigate({ type: 'home' }, true);
     offerInitialShortcut.current = true;
+  }, [navigate, onTokenConsumed]);
+  const openAccepted = useCallback((invitation: Invitation) => {
+    setToken(null);
+    onTokenConsumed?.();
+    if (invitation.clubId && (invitation.clubs?.length ?? 1) === 1)
+      navigate({ type: 'club', id: invitation.clubId }, true);
+    else navigate({ type: 'space', id: invitation.clientId }, true);
   }, [navigate, onTokenConsumed]);
   if (screen.type === 'invitation' || screen.type === 'manager-invitation')
     return (
@@ -357,6 +367,7 @@ function ClientWorkspace({
         token={token}
         id={screen.id}
         home={home}
+        openAccepted={openAccepted}
         resolved={(id) => navigate({ type: screen.type, id }, true)}
         claimed={() => {
           setToken(null);
@@ -383,13 +394,13 @@ function ClientWorkspace({
         onChange={setDraft}
         previous={previous}
         command={createClub}
-        back={() => navigate({ type: 'space', id: screen.id })}
+        back={() => goBack({ type: 'space', id: screen.id })}
         saved={(club) => {
           drafts.current.delete(screen.id);
           setDraft(blankNewVenue);
           setDraftClient('');
           setPrevious(undefined);
-          navigate({ type: 'club', id: club.id });
+          navigate({ type: 'club', id: club.id }, true);
         }}
       />
     );
@@ -399,18 +410,36 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={home}
+        back={(clientId) => goBack(clientId ? { type: 'space', id: clientId } : { type: 'home' })}
         navigate={navigate}
         reportDirty={reportDirty}
       />
     );
+  if (screen.type === 'managers' || screen.type === 'invite-manager') {
+    const inviting = screen.type === 'invite-manager';
+    const receiptId = screen.type === 'managers' ? screen.invitationId : undefined;
+    return (
+      <ClubManagers
+        key={(inviting || receiptId ? 'manager-invite:' : 'managers:') + screen.id}
+        credential={credential}
+        id={screen.id}
+        inviting={inviting}
+        receiptId={receiptId}
+        issued={(invitationId) => navigate({ type: 'managers', id: screen.id, invitationId }, true)}
+        openInvite={() => navigate({ type: 'invite-manager', id: screen.id })}
+        back={() => goBack({ type: inviting || receiptId ? 'managers' : 'club', id: screen.id })}
+        reportDirty={reportDirty}
+        reportPending={reportSectionPending}
+      />
+    );
+  }
   if (screen.type === 'booking-preview')
     return (
       <GuestBookingPreview
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={() => goBack({ type: 'club', id: screen.id })}
+        back={() => goBack({ type: 'settings', id: screen.id })}
         reportDirty={reportDirty}
       />
     );
@@ -420,7 +449,7 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={() => goBack({ type: 'club', id: screen.id })}
+        back={() => goBack({ type: 'settings', id: screen.id })}
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
       />
@@ -428,13 +457,10 @@ function ClientWorkspace({
   if (
     screen.type === 'finance' ||
     screen.type === 'modules' ||
-    screen.type === 'team' ||
-    screen.type === 'managers'
+    screen.type === 'team'
   ) {
     const Component =
-      screen.type === 'managers'
-        ? ClubManagers
-        : screen.type === 'team'
+      screen.type === 'team'
           ? ClubTeam
           : screen.type === 'finance'
             ? ClubFinance
@@ -444,7 +470,7 @@ function ClientWorkspace({
         key={screen.type + ':' + screen.id}
         credential={credential}
         id={screen.id}
-        back={() => goBack({ type: 'club', id: screen.id })}
+        back={() => goBack({ type: screen.type === 'team' ? 'club' : 'settings', id: screen.id })}
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
       />
@@ -456,7 +482,7 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={() => goBack({ type: 'club', id: screen.id })}
+        back={() => goBack({ type: 'settings', id: screen.id })}
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
       />
@@ -472,7 +498,7 @@ function ClientWorkspace({
           goBack(
             screen.hallId
               ? { type: 'layout', id: screen.id }
-              : { type: 'club', id: screen.id },
+              : { type: 'settings', id: screen.id },
           )
         }
         openHall={(hallId) =>
@@ -525,9 +551,7 @@ function ClientWorkspace({
         credential={credential}
         id={screen.id}
         home={(clientId) =>
-          goBack(
-            clientId ? { type: 'settings', id: screen.id } : { type: 'home' },
-          )
+          goBack(clientId ? { type: 'settings', id: screen.id } : { type: 'home' })
         }
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
@@ -592,8 +616,7 @@ function ClientHome({
         <section className="po-card po-empty">
           <h2>Нет доступных клиентских пространств</h2>
           <p>
-            Откройте приглашение или обратитесь к отправителю для
-            подтверждения доступа.
+            Откройте ссылку на приглашение, чтобы получить доступ.
           </p>
         </section>
       )}
@@ -626,6 +649,7 @@ function InvitationScreen({
   manager,
   id,
   home,
+  openAccepted,
   resolved,
   claimed,
   command,
@@ -636,6 +660,7 @@ function InvitationScreen({
   manager: boolean;
   id?: string;
   home: () => void;
+  openAccepted: (invitation: Invitation) => void;
   resolved: (id: string) => void;
   claimed: () => void;
   command: ReturnType<typeof useCommand<Invitation>>;
@@ -698,9 +723,9 @@ function InvitationScreen({
     if (remote.data && id !== remote.data.id) resolved(remote.data.id);
   }, [id, remote.data, resolved]);
   useEffect(() => {
-    if (current?.status === 'accepted' && current.acceptanceMode === 'direct')
-      home();
-  }, [current, home]);
+    if (current?.status === 'accepted' && (current.acceptanceFlow === 'direct' || current.acceptanceMode === 'direct'))
+      openAccepted(current);
+  }, [current, openAccepted]);
   const refresh = () => {
     setCurrent(undefined);
     remote.refresh();
@@ -717,15 +742,16 @@ function InvitationScreen({
     }
     latest.current = result;
     setCurrent(result);
-    claimed();
-    if (result.status === 'accepted' && result.acceptanceMode === 'direct')
-      home();
+    if (result.status === 'accepted' && (result.acceptanceFlow === 'direct' || result.acceptanceMode === 'direct'))
+      openAccepted(result);
+    else claimed();
     return true;
   };
   const invitation = current;
   const staff = invitation?.acceptanceMode === 'staff';
+  const direct = invitation?.acceptanceFlow === 'direct' || invitation?.acceptanceMode === 'direct';
   const renew =
-    manager &&
+    !direct && manager &&
     invitation?.status === 'claimed' &&
     invitation.availableActions.includes('claim');
   const claim = () => {
@@ -755,39 +781,21 @@ function InvitationScreen({
       {invitation && (
         <>
           <section className="po-card ob-card">
-            <h2>
-              {invitation.clientName}
-              {staff || manager ? ` · ${invitation.clubName}` : ''}
-            </h2>
+            <h2>{invitation.clientName}</h2>
             <p>{invitationLabels[invitation.status]}</p>
-            {manager &&
-              (invitation.role === 'NETWORK_MANAGER' ||
-                invitation.role === 'CLUB_MANAGER') && (
-                <p>
-                  {businessRoleNames[invitation.role]} · {invitation.clubName}
-                </p>
-              )}
-            {staff && invitation.role && invitation.role in roleNames && (
-              <p>
-                Роль: {roleNames[invitation.role as keyof typeof roleNames]}.
-                Только этот клуб. Операционные права не выдаются.
-              </p>
-            )}
+            <p>Роль: {invitationRole(invitation)}</p>
+            <p>Заведения: {invitationScope(invitation)}</p>
             <p className="po-muted">
               Принять до{' '}
               {new Date(invitation.expiresAt).toLocaleString('ru-RU')}
             </p>
           </section>
-          {invitation.status === 'issued' && token && (
+          {invitation.status === 'issued' && invitation.availableActions.includes('claim') && token && (
             <>
               <p>
-                {manager
-                  ? 'Подтвердите свой Telegram-аккаунт и передайте отправителю код для назначения в этот клуб.'
-                  : staff
-                    ? 'Подтвердите свой Telegram-аккаунт. Доступ появится только после отдельного подтверждения владельцем клуба.'
-                    : invitation.acceptanceMode === 'direct'
-                      ? 'Примите приглашение, чтобы открыть свой кабинет.'
-                      : 'Это прежнее приглашение: после принятия потребуется подтверждение владельца платформы.'}
+                {direct
+                  ? 'Примите приглашение, чтобы открыть свой кабинет.'
+                  : 'Это прежнее приглашение. После принятия потребуется подтверждение отправителя.'}
               </p>
               <button
                 className="po-primary"
@@ -796,11 +804,7 @@ function InvitationScreen({
                 }
                 onClick={claim}
               >
-                {command.saving
-                  ? 'Принимаем…'
-                  : staff || manager
-                    ? 'Подтвердить Telegram-аккаунт'
-                    : 'Принять приглашение'}
+                {command.saving ? 'Принимаем…' : 'Принять приглашение'}
               </button>
             </>
           )}
@@ -853,7 +857,7 @@ function InvitationScreen({
             </section>
           )}
           {invitation.status === 'accepted' && (
-            <button className="po-primary" onClick={home}>
+            <button className="po-primary" onClick={() => openAccepted(invitation)}>
               Открыть кабинет
             </button>
           )}
@@ -1043,7 +1047,7 @@ function ClientApplication({
 }: {
   credential: string;
   id: string;
-  back: () => void;
+  back: (clientId?: string) => void;
   navigate: (screen: Screen) => void;
   reportDirty: (dirty: boolean) => void;
 }) {
@@ -1052,7 +1056,7 @@ function ClientApplication({
     '/api/client/applications/' + id,
   );
   return (
-    <Shell title="Сохранённая заявка" back={back}>
+    <Shell title="Сохранённая заявка" back={() => back(remote.data?.clientId)}>
       <RemoteState {...remote} />
       {remote.data && (
         <>

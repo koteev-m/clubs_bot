@@ -204,48 +204,13 @@ test('upgraded clubs keep independent setup and preparation access, while creati
   expect(parameter).toMatch(/^ci_[A-Za-z0-9_-]{43}$/);
   let employee = await identity(request, 'staff', parameter);
   await open(staff, employee, '/app');
-  await staff
-    .getByRole('button', {
-      name: 'Подтвердить Telegram-аккаунт',
-      exact: true,
-    })
-    .click();
-  await expect(
-    staff.getByRole('heading', {
-      name: 'Ожидаем подтверждение владельца клуба',
-      exact: true,
-    }),
-  ).toBeVisible();
-  const code = (await staff.locator('.ob-code').textContent())!;
-  expect(
-    (
-      await request.get(`/api/client/clubs/${club.id}/profile`, {
-        headers: { 'X-Telegram-Init-Data': employee },
-      })
-    ).status(),
-  ).toBe(404);
-  await owner
-    .getByRole('button', {
-      name: 'Открыть команду и подтверждение',
-      exact: true,
-    })
-    .click();
-  await owner.getByRole('button', { name: /Проверить кандидата №/ }).click();
-  await owner.getByLabel('Код из исходного личного чата').fill(code);
-  await owner
-    .getByRole('checkbox', {
-      name: 'Сверил Telegram-аккаунт и код в исходном личном чате',
-    })
-    .check();
-  await owner
-    .getByRole('button', {
-      name: 'Подтвердить изменение доступа',
-      exact: true,
-    })
-    .click();
-  await expect(
-    owner.getByRole('region', { name: 'Подтверждение изменения доступа' }),
-  ).toHaveCount(0);
+  const acceptStaff = staff.getByRole('button', { name: 'Принять приглашение', exact: true });
+  await expect(acceptStaff).toBeVisible();
+  expect((await request.get(`/api/client/clubs/${club.id}/profile`, {
+    headers: { 'X-Telegram-Init-Data': employee },
+  })).status()).toBe(404);
+  await acceptStaff.click();
+  await expect(staff).not.toHaveURL(/screen=invitation/);
   employee = await identity(request, 'staff');
   await open(
     staff,
@@ -634,6 +599,7 @@ test('verified business owner assigns a network manager who assigns and revokes 
     await sender
       .getByRole('button', { name: 'Управляющие', exact: true })
       .click();
+    await sender.getByRole('button', { name: 'Пригласить управляющего', exact: true }).click();
     await sender.getByLabel('Имя получателя').fill(persona);
     await sender.getByLabel('Роль управляющего').selectOption(role);
     await sender.getByRole('button', { name: 'Создать приглашение' }).click();
@@ -644,39 +610,17 @@ test('verified business owner assigns a network manager who assigns and revokes 
     expect(start).toMatch(/^cm_[A-Za-z0-9_-]{43}$/);
     const credential = await identity(request, persona, start);
     await open(participant, credential, '/app');
-    await participant
-      .getByRole('button', { name: 'Подтвердить Telegram-аккаунт' })
-      .click();
-    await expect(
-      participant.getByRole('heading', {
-        name: 'Ожидаем подтверждения назначения',
-      }),
-    ).toBeVisible();
-    const code = await participant.locator('.ob-code').innerText();
-    expect(
-      (
-        await request.get(profileUrl, {
-          headers: { 'X-Telegram-Init-Data': credential },
-        })
-      ).status(),
-    ).toBe(404);
-    await sender.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await sender
-      .getByRole('article')
-      .filter({ hasText: persona })
-      .getByRole('button', { name: 'Подтвердить назначение' })
-      .click();
-    await sender.getByLabel('Код из Telegram получателя').fill(code);
-    await sender
-      .getByRole('button', { name: 'Назначить управляющего', exact: true })
-      .click();
-    await expect(sender.getByText('Сохранено', { exact: true })).toBeVisible();
-    await participant.getByRole('button', { name: 'Обновить статус' }).click();
-    await expect(
-      participant.getByRole('button', { name: 'Открыть кабинет' }),
-    ).toBeVisible();
+    const accept = participant.getByRole('button', { name: 'Принять приглашение', exact: true });
+    await expect(accept).toBeVisible();
+    expect((await request.get(profileUrl, {
+      headers: { 'X-Telegram-Init-Data': credential },
+    })).status()).toBe(404);
+    await accept.click();
+    await expect(participant).not.toHaveURL(/screen=manager-invitation/);
+    await expect(participant.locator('.ob-code')).toHaveCount(0);
+    await sender.getByRole('button', { name: 'Назад', exact: true }).click();
+    await expect(sender.getByRole('heading', { name: 'Управляющие', exact: true })).toBeVisible();
     const fresh = await identity(request, persona);
-    await participant.getByRole('button', { name: 'Открыть кабинет' }).click();
     await open(participant, fresh, clubUrl);
     return fresh;
   };
@@ -690,6 +634,13 @@ test('verified business owner assigns a network manager who assigns and revokes 
   await expect(
     network.getByText('Управляющий сети', { exact: true }),
   ).toBeVisible();
+  await network.getByRole('button', { name: /Профиль Название/ }).click();
+  await network.getByLabel('Описание клуба').fill('Сохранено управляющим сети');
+  await network.getByRole('button', { name: 'Сохранить профиль' }).click();
+  await expect(network.getByText('Сохранено', { exact: true })).toBeVisible();
+  expect((await api(request, owner, profileUrl)).description).toBe('Сохранено управляющим сети');
+  await network.getByRole('button', { name: 'Настройки клуба', exact: true }).click();
+  await network.getByRole('button', { name: 'Назад к клубу', exact: true }).click();
   const managerId = await participate(
     network,
     manager,

@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ClientAccess from './ClientAccess';
 vi.mock('../../app/providers/TelegramProvider', () => ({
@@ -38,7 +44,7 @@ it.each(['expired', 'revoked'])(
     render(<ClientAccess initialToken={'s'.repeat(43)} />);
     await screen.findByRole('heading', { name: 'Приглашение в команду' });
     expect(
-      screen.queryByRole('button', { name: 'Подтвердить Telegram-аккаунт' }),
+      screen.queryByRole('button', { name: 'Принять приглашение' }),
     ).toBeNull();
     expect(
       await screen.findByText(
@@ -134,8 +140,78 @@ it('renews an expired manager code only after the bound recipient confirms again
   fireEvent.click(renew);
   expect(await screen.findByText('621078')).toBeTruthy();
   expect(calls).toHaveLength(1);
-  expect(JSON.parse(calls[0].body as string)).toEqual({ expectedVersion: '2' });
+  expect(JSON.parse(calls[0].body as string)).toEqual({
+    expectedVersion: '2',
+  });
   expect(
     screen.queryByRole('button', { name: 'Обновить подтверждение' }),
   ).toBeNull();
 });
+
+it.each(['staff', 'manager'] as const)(
+  'previews a direct %s link and opens the cabinet only after explicit acceptance',
+  async (kind) => {
+    const token = 'a'.repeat(43);
+    const invitation = {
+      id: '13',
+      clubId: '7',
+      version: '1',
+      status: 'issued',
+      acceptanceFlow: 'direct',
+      acceptanceMode: kind,
+      role: kind === 'manager' ? 'NETWORK_MANAGER' : 'ENTRY_MANAGER',
+      clientId: '20',
+      clientName: 'Организация',
+      clubName: 'Север',
+      clubs:
+        kind === 'manager'
+          ? [
+              { id: '7', name: 'Север' },
+              { id: '8', name: 'Юг' },
+            ]
+          : undefined,
+      expiresAt: '2026-12-01T00:00:00Z',
+      availableActions: ['claim'],
+    };
+    const claims: object[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
+      if (String(path).endsWith('/claim')) {
+        claims.push(JSON.parse(String(options?.body)));
+        return Response.json({
+          ...invitation,
+          status: 'accepted',
+          version: '2',
+          availableActions: [],
+        });
+      }
+      if (!String(path).endsWith('/resolve'))
+        return Response.json({ code: 'service_unavailable' }, { status: 503 });
+      return Response.json(invitation);
+    });
+    render(
+      <ClientAccess
+        initialToken={token}
+        invitationKind={kind === 'manager' ? 'manager' : 'client'}
+      />,
+    );
+    await screen.findByRole('heading', { name: 'Организация' });
+    expect(
+      screen.getByText(
+        kind === 'manager' ? 'Заведения: Север, Юг' : 'Заведения: Север',
+      ),
+    ).toBeTruthy();
+    expect(claims).toHaveLength(0);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Принять приглашение' }),
+    );
+    await waitFor(() =>
+      expect(location.search).toContain(
+        kind === 'manager'
+          ? 'screen=client-space&resource=20'
+          : 'screen=club&resource=7',
+      ),
+    );
+    expect(claims).toEqual([{ token, expectedVersion: '1' }]);
+    expect(document.querySelector('.ob-code')).toBeNull();
+  },
+);

@@ -1,7 +1,7 @@
 import type { ConfigurationView } from './configuration.hooks';
 export const preparationLabels = {
   unassigned: 'Ответственный не назначен',
-  invitation_pending: 'Приглашение ожидает принятия или подтверждения',
+  invitation_pending: 'Ожидаем ответа на приглашение',
   in_progress: 'Подготовка в работе',
   submitted: 'Отправлено на проверку',
   accepted: 'Принято владельцем',
@@ -18,7 +18,7 @@ export type PreparationView = ConfigurationView & {
     owner: boolean;
     active: boolean;
   };
-  invitation: null | { id: string; status: string; recipientLabel: string };
+  invitation: null | { id: string; status: string; recipientLabel: string; expiresAt?: string };
   reason: string | null;
   canManage: boolean;
   canSubmit: boolean;

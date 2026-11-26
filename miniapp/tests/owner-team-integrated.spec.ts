@@ -54,24 +54,6 @@ async function open(
       }),
   );
 }
-async function confirm(owner: Page, code: string) {
-  await owner.getByRole('button', { name: /Проверить кандидата №/ }).click();
-  await owner.getByLabel('Код из исходного личного чата').fill(code);
-  await owner
-    .getByRole('checkbox', {
-      name: 'Сверил Telegram-аккаунт и код в исходном личном чате',
-    })
-    .check();
-  await owner
-    .getByRole('button', {
-      name: 'Подтвердить изменение доступа',
-      exact: true,
-    })
-    .click();
-  await expect(
-    owner.getByRole('region', { name: 'Подтверждение изменения доступа' }),
-  ).toHaveCount(0);
-}
 async function invite(owner: Page, label: string) {
   await owner.getByLabel('Подпись получателя').fill(label);
   await owner
@@ -183,33 +165,13 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   const parameter = await invite(owner, 'Synthetic employee');
   let employeeCredential = await identity(request, 'staff', parameter);
   await open(employee, employeeCredential);
-  await employee
-    .getByRole('button', {
-      name: 'Подтвердить Telegram-аккаунт',
-      exact: true,
-    })
-    .click();
-  await expect(
-    employee.getByRole('heading', {
-      name: 'Ожидаем подтверждение владельца клуба',
-    }),
-  ).toBeVisible();
-  const code = (await employee.locator('.ob-code').textContent())!;
-  expect(
-    (
-      await request.get(`/api/client/clubs/${club.id}/profile`, {
-        headers: { 'X-Telegram-Init-Data': employeeCredential },
-      })
-    ).status(),
-  ).toBe(404);
-  await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await confirm(owner, code);
-  await employee
-    .getByRole('button', { name: 'Обновить статус', exact: true })
-    .click();
-  await employee
-    .getByRole('button', { name: 'Открыть кабинет', exact: true })
-    .click();
+  const accept = employee.getByRole('button', { name: 'Принять приглашение', exact: true });
+  await expect(accept).toBeVisible();
+  expect((await request.get(`/api/client/clubs/${club.id}/profile`, {
+    headers: { 'X-Telegram-Init-Data': employeeCredential },
+  })).status()).toBe(404);
+  await accept.click();
+  await expect(employee.locator('.ob-code')).toHaveCount(0);
   await selectEmployeeClub(employee, name, club.name);
   await employee
     .getByRole('button', { name: 'Перейти к настройкам', exact: true })
@@ -239,6 +201,7 @@ test('owner team packaged journey binds the employee and scopes role changes dis
       })
     ).status(),
   ).toBe(404);
+  await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
   const team = await api(
     request,
     ownerCredential,
@@ -357,15 +320,8 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   });
   employeeCredential = await identity(request, 'staff', replacement);
   await open(employee, employeeCredential);
-  await employee
-    .getByRole('button', {
-      name: 'Подтвердить Telegram-аккаунт',
-      exact: true,
-    })
-    .click();
-  const newCode = (await employee.locator('.ob-code').textContent())!;
-  await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await confirm(owner, newCode);
+  await employee.getByRole('button', { name: 'Принять приглашение', exact: true }).click();
+  await selectEmployeeClub(employee, name, club.name);
   const restored = await api(
     request,
     employeeCredential,

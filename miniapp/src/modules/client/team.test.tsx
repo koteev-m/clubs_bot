@@ -72,6 +72,9 @@ it('keeps one-time links in memory and repeats an unknown issue with its origina
             ...base,
             version: '2',
             createdInvitationId: '7',
+            invitations: [{ id: '7', clientId: '20', clubId: '100', version: '1', recipientLabel: 'Colleague',
+              role: 'ENTRY_MANAGER', acceptanceMode: 'staff', acceptanceFlow: 'direct',
+              status: 'issued', expiresAt: '2026-11-30T00:00:00Z', availableActions: ['revoke_invitation'] }],
             invitationLink:
               'https://t.me/synthetic_bot?startapp=ci_' + 's'.repeat(43),
           });
@@ -181,4 +184,20 @@ it('fences a late issue after team denial and reauthorization', async () => {
   );
   expect(screen.queryByLabelText('Ссылка приглашения')).toBeNull();
   expect(screen.queryByText('Сохранено')).toBeNull();
+});
+
+it('keeps a role-only staff invitation draft when the sender cancels Back', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => response(base));
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const back = vi.fn();
+  render(<ClubTeam {...props} back={back} />);
+  const role = await screen.findByLabelText('Роль нового сотрудника') as HTMLSelectElement;
+  fireEvent.change(role, { target: { value: 'MANAGER' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Назад к клубу' }));
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(role.value).toBe('MANAGER');
+  expect(back).not.toHaveBeenCalled();
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Назад к клубу' }));
+  expect(back).toHaveBeenCalledOnce();
 });
