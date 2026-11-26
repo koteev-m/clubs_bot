@@ -38,7 +38,7 @@ Task order by mode:
 - `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate` → resolved production dependency graph + `app-bot` runtime distribution → `test -PrunIT=true` → `secret-scan`.
 - `lint` mode: `detektGate` + changed-files `ktlint`.
 - `secret-scan` mode: локальный gitleaks через Docker (тот же образ, что в GitHub Actions). Если Docker недоступен — шаг завершается с понятной ошибкой.
-- `scripts/selfcheck-quality-gates.sh` без аргументов: полный локальный regression selfcheck для shell-обвязки quality gates, включая strict release-state suite и полный corrected-stage suite. Старый режим `--ci-delegated-release-state` делегирует только release-state и по-прежнему полностью выполняет corrected-stage. Lint использует узкий режим `--ci-delegated-release-state-and-corrected-stage`: structural validation, inventory и regression contracts сохраняются; выполнение suites передаётся обязательным workflow jobs.
+- `scripts/selfcheck-quality-gates.sh` без аргументов выполняет весь локальный regression selfcheck, включая strict release-state и corrected-stage. Режим `--ci-delegated-release-state` передаёт отдельному заданию только release-state. В Lint режим `--ci-delegated-release-state-and-corrected-stage` проверяет структуру, состав и контракты обоих наборов. На полном маршруте CI выполняет их в отдельных заданиях.
 
 ## PR quality gates (blocking)
 
@@ -46,8 +46,9 @@ GitHub требует статусы `lint` и `release-state`. Для PR CI п�
 
 - **Документация** проходит проверку diff, Gitleaks по исходникам и истории, Trivy по файлам и структурную проверку релиза. Gitleaks использует закреплённый контейнер.
 - **Mini App** проходит typecheck, Vitest, сборку Vite и проверку ресурсов. Изменения клиентских платежей, авторизации и общего HTTP-транспорта также проходят backend-проверки. Для упакованных ресурсов CI проверяет образ и запускает контейнерный smoke.
-- **Backend** проходит сборку с H2, линтеры, покрытие, проверки платежей и логирования, проверку графа зависимостей и отдельный профиль с PostgreSQL.
-- **CI, инфраструктура, общие зависимости и критические контракты** проходят полный набор, включая четыре corrected-stage shard и строгую release-state suite. Для смешанных правок CI объединяет проверки. Неизвестный путь включает полный набор.
+- **Backend** проходит сборку с H2, линтеры, покрытие, проверки платежей и логирования, проверку графа зависимостей и PostgreSQL. У трёх параллельных PostgreSQL-заданий отдельные базы. Одно выполняет тесты приложения с PostgreSQL-конфигурацией Flyway и тесты остальных модулей. Два других делят интеграционные тесты `core-data`. Каждое задание требует свежий XML с выполненным тестом своей группы.
+- **SQL-миграции** в канонических каталогах Flyway проходят проверки H2, PostgreSQL, совместимости схемы и запуска собранного образа. Изменения входов платёжного и миграционного selfcheck, включая обе версии `V056__atomic_booking_refunds.sql`, дополнительно запускают проверку регрессий самих quality gates.
+- **CI, инфраструктура, общие зависимости и неизвестные пути** включают полный набор, в том числе четыре задания corrected-stage и строгую release-state suite. Для смешанных правок CI объединяет проверки затронутых областей. При удалении и переименовании учитывается и прежний путь.
 - `lint` проверяет результаты применимых workers. `release-state` требует успеха Gitleaks и применимого анализа безопасности. Строгая release-suite проверяет точную ревизию с отдельной очередью по SHA. Обязательный worker со статусом cancelled, failure или skipped блокирует слияние.
 - **Coverage** входит в общий H2-запуск и публикует отчёты JaCoCo.
   Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments contour is at least **60%**.
@@ -59,7 +60,7 @@ GitHub требует статусы `lint` и `release-state`. Для PR CI п�
 
 No personal API key is required for this architecture. Main-only dependency submission uses GitHub's built-in token, while Trivy remains pinned to the repository's approved action and binary versions. Do not add new vulnerability suppressions to make a finding green; upgrade the dependency or document a narrowly scoped, time-bounded exception through the normal security review.
 
-На 2026-11-21 правила ветки `main` требуют `lint` и `release-state` от GitHub Actions и актуальную базу PR.
+На 2026-11-26 правила ветки `main` требуют `lint` и `release-state` от GitHub Actions и актуальную базу PR.
 
 ### Required GitHub repository settings
 

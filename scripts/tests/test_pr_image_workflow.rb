@@ -80,6 +80,11 @@ class PrImageWorkflowTest < Minitest::Test
     rejects
   end
 
+  def test_pr_must_not_export_into_publisher_cache
+    step("Build PR image (no push)")["with"]["cache-to"] = "type=gha,mode=max,scope=buildkit"
+    rejects
+  end
+
   def test_build_must_load_image
     step("Build PR image (no push)")["with"]["load"] = false
     rejects

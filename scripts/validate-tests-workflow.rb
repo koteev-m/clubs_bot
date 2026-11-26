@@ -5,11 +5,32 @@ module TestsWorkflow
   GRADLE_OPTS = "-Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=60000"
   PG_RUN = <<~'SH'
     started=$(python3 -c 'import time; print(time.time_ns())')
-    ./gradlew test -PrunIT=true :core-data:test --rerun --dependency-verification=strict --no-configuration-cache --console=plain --stacktrace
-    suite=com.example.bot.data.migration.FlywayPostgresSmokeTest
-    python3 scripts/validate-payment-hardening.py --verify-junit-xml \
-      "core-data/build/test-results/test/TEST-${suite}.xml" "$suite" "$started" \
-      'postgres migrations run with jsonb defaults' 'postgres atomic refund migration preserves legacy actions'
+    module=core-data
+    check_xml=--verify-junit-xml
+    tasks=(:core-data:test --rerun "-PciPostgresShard=$PG_SHARD")
+    case "$PG_SHARD" in
+      application)
+        # Keep the alternate Flyway profile for app-bot and include all other/new JVM modules.
+        tasks=(test --rerun -x :core-data:test)
+        module=app-bot
+        suite=com.example.bot.tools.BootstrapValidatePostgresIT
+        cases=('PostgreSQL 16 validation preserves full dump on positive and negative evidence')
+        ;;
+      data-client)
+        check_xml=--verify-junit-case
+        suite=com.example.bot.data.client.onboarding.BookingCutoverFencePostgresIT
+        cases=('protected seating excludes direct legacy HOLD and createBooked')
+        ;;
+      data-other)
+        suite=com.example.bot.data.migration.FlywayPostgresSmokeTest
+        cases=('postgres migrations run with jsonb defaults' 'postgres atomic refund migration preserves legacy actions')
+        ;;
+      *) echo 'Unknown PostgreSQL test shard' >&2; exit 1 ;;
+    esac
+    ./gradlew "${tasks[@]}" -PrunIT=true --dependency-verification=strict --no-configuration-cache --console=plain --stacktrace
+    python3 scripts/validate-payment-hardening.py "$check_xml" \
+      "$module/build/test-results/test/TEST-${suite}.xml" "$suite" "$started" "${cases[@]}"
+    python3 -I -S -B scripts/verify-postgres-skips.py "$PG_SHARD" "$started"
   SH
   REQUIRED_RUN = <<~'SH'
     python3 - <<'PYTHON'
@@ -37,7 +58,7 @@ module TestsWorkflow
     workers = jobs.values_at(*WORKERS)
     workers.each do |job|
       keys = %w[env runs-on steps timeout-minutes]
-      keys << "services" if job.equal?(jobs["integration-tests"])
+      keys.concat(%w[services strategy]) if job.equal?(jobs["integration-tests"])
       policy.validate_exact_value(job.keys.sort, keys.sort, "#{PATH}: worker controls")
       policy.validate_exact_value(job["env"], {"GRADLE_OPTS" => GRADLE_OPTS}, "#{PATH}: Gradle options")
       policy.validate_exact_value(job["timeout-minutes"], 45, "#{PATH}: worker timeout")
@@ -54,6 +75,9 @@ module TestsWorkflow
       "Guard: no dynamic versions in version catalogs", "Validate Gradle Wrapper", "Set up JDK 21",
       "Gradle cache & setup", "Env versions", "Guard: no project-level repositories",
     ], "#{PATH}: setup and dependency guards")
+    policy.validate_exact_value(jobs["integration-tests"]["strategy"], {
+      "fail-fast" => false, "matrix" => {"shard" => %w[application data-client data-other]},
+    }, "#{PATH}: PostgreSQL shard coverage")
     pg = jobs["integration-tests"].fetch("steps")
     policy.validate_exact_value(pg.take(setup.length), setup, "#{PATH}: PostgreSQL setup")
     h2_env = {"CI" => "true", "TELEGRAM_BOT_TOKEN" => "111111:TEST_BOT_TOKEN",
@@ -72,9 +96,11 @@ module TestsWorkflow
       ["Wait for Postgres (5432)", "Run PostgreSQL integration profile", "Upload integration test reports"],
       "#{PATH}: PostgreSQL checks")
     policy.validate_exact_value(pg[-2], {
-      "name" => "Run PostgreSQL integration profile", "env" => {"CI" => "true"},
+      "name" => "Run PostgreSQL integration profile", "env" => {"CI" => "true", "PG_SHARD" => "${{ matrix.shard }}"},
       "run" => PG_RUN,
     }, "#{PATH}: PostgreSQL profile")
+    policy.validate_exact_value(pg.last.dig("with", "name"), "integration-test-reports-${{ matrix.shard }}",
+      "#{PATH}: distinct PostgreSQL shard reports")
     policy.validate_exact_value(jobs["tests-required"], {
       "if" => "always()", "needs" => WORKERS, "runs-on" => "ubuntu-latest", "timeout-minutes" => 5,
       "steps" => [{"name" => "Require H2 and PostgreSQL checks to succeed",

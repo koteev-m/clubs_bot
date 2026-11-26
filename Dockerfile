@@ -5,24 +5,17 @@
 FROM docker.io/library/eclipse-temurin:21.0.11_10-jdk-noble@sha256:a871f3e3caddad75608fd4531ed8bbca5cc42a27dc1da3ea3a2e554772b0ee15 AS builder
 WORKDIR /app
 
-# прогрев gradle (депенденси-кеш)
+# Keep the verified wrapper distribution in an ordinary BuildKit layer. A GHA
+# cache hit on RUN does not restore the contents of a mutable cache mount.
 COPY gradlew ./
-COPY gradle ./gradle
-COPY settings.gradle.kts build.gradle.kts ./
-COPY app-bot/build.gradle.kts app-bot/build.gradle.kts
-COPY core-domain/build.gradle.kts core-domain/build.gradle.kts
-COPY core-data/build.gradle.kts core-data/build.gradle.kts
-COPY core-security/build.gradle.kts core-security/build.gradle.kts
-COPY core-telemetry/build.gradle.kts core-telemetry/build.gradle.kts
+COPY gradle/wrapper ./gradle/wrapper
+RUN chmod +x ./gradlew && ./gradlew --version
 
-RUN --mount=type=cache,target=/root/.gradle \
-    chmod +x ./gradlew && ./gradlew --no-daemon -v
-
-# сборка дистрибутива (без тестов) с кешом gradle
 COPY . .
-RUN --mount=type=cache,target=/root/.gradle \
+ARG TARGETARCH
+RUN --mount=type=cache,id=gradle-caches-${TARGETARCH},target=/root/.gradle/caches \
     bash scripts/validate-miniapp-dist.sh miniapp/dist && \
-    ./gradlew --no-daemon :app-bot:installDist -x test
+    scripts/retry-command.sh --maven-429 ./gradlew --no-daemon :app-bot:installDist -x test --dependency-verification=strict --no-configuration-cache --console=plain
 
 # ---------- runtime stage ----------
 # runtime: docker.io/library/eclipse-temurin:21.0.11_10-jre-noble

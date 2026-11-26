@@ -7,6 +7,15 @@
 *.iml
 out/
 
+# PR image checks write revision-specific evidence before the Buildx step.
+image-evidence/
+
+# Repository documentation is outside the installDist inputs.
+*.md
+docs/
+miniapp/README.md
+miniapp/docs/
+
 # Gradle / build
 .gradle
 .kotlin

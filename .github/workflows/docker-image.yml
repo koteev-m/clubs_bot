@@ -54,7 +54,9 @@ jobs:
           load: true
           platforms: linux/${{ matrix.arch }}
           labels: org.opencontainers.image.revision=${{ env.CANDIDATE_SHA }}
-          cache-from: type=gha,scope=pr-image-${{ matrix.arch }}
+          cache-from: |
+            type=gha,scope=pr-image-${{ matrix.arch }}
+            type=gha,scope=buildkit
           cache-to: type=gha,mode=max,scope=pr-image-${{ matrix.arch }}
           provenance: false
 

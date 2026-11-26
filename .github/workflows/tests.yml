@@ -156,14 +156,13 @@ jobs:
 
       - &setup-gradle
         name: Gradle cache & setup
-        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
           cache-disabled: false
           gradle-version: wrapper
-          cache-read-only: false
-          cache-key-prefix: >
-            ${{ runner.os }}-gradle-
-            ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          cache-provider: basic
+          # The basic provider shares one immutable key across workers. Prime it with the unit/build graph.
+          cache-read-only: ${{ github.job != 'unit-tests' || github.event_name != 'push' || github.ref != 'refs/heads/main' }}
 
       - &env-versions
         name: Env versions
@@ -208,6 +207,10 @@ jobs:
           if-no-files-found: ignore
 
   integration-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [application, data-client, data-other]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -249,20 +252,42 @@ jobs:
       - name: Run PostgreSQL integration profile
         env:
           CI: "true"
-        # Docker-dependent JUnit tests can be skipped by assumptions. Require fresh PG migration results.
+          PG_SHARD: ${{ matrix.shard }}
+        # Test tasks must execute, even when compilation is cached. Each runner owns its database.
         run: |
           started=$(python3 -c 'import time; print(time.time_ns())')
-          ./gradlew test -PrunIT=true :core-data:test --rerun --dependency-verification=strict --no-configuration-cache --console=plain --stacktrace
-          suite=com.example.bot.data.migration.FlywayPostgresSmokeTest
-          python3 scripts/validate-payment-hardening.py --verify-junit-xml \
-            "core-data/build/test-results/test/TEST-${suite}.xml" "$suite" "$started" \
-            'postgres migrations run with jsonb defaults' 'postgres atomic refund migration preserves legacy actions'
+          module=core-data
+          check_xml=--verify-junit-xml
+          tasks=(:core-data:test --rerun "-PciPostgresShard=$PG_SHARD")
+          case "$PG_SHARD" in
+            application)
+              # Keep the alternate Flyway profile for app-bot and include all other/new JVM modules.
+              tasks=(test --rerun -x :core-data:test)
+              module=app-bot
+              suite=com.example.bot.tools.BootstrapValidatePostgresIT
+              cases=('PostgreSQL 16 validation preserves full dump on positive and negative evidence')
+              ;;
+            data-client)
+              check_xml=--verify-junit-case
+              suite=com.example.bot.data.client.onboarding.BookingCutoverFencePostgresIT
+              cases=('protected seating excludes direct legacy HOLD and createBooked')
+              ;;
+            data-other)
+              suite=com.example.bot.data.migration.FlywayPostgresSmokeTest
+              cases=('postgres migrations run with jsonb defaults' 'postgres atomic refund migration preserves legacy actions')
+              ;;
+            *) echo 'Unknown PostgreSQL test shard' >&2; exit 1 ;;
+          esac
+          ./gradlew "${tasks[@]}" -PrunIT=true --dependency-verification=strict --no-configuration-cache --console=plain --stacktrace
+          python3 scripts/validate-payment-hardening.py "$check_xml" \
+            "$module/build/test-results/test/TEST-${suite}.xml" "$suite" "$started" "${cases[@]}"
+          python3 -I -S -B scripts/verify-postgres-skips.py "$PG_SHARD" "$started"
 
       - name: Upload integration test reports
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: integration-test-reports
+          name: integration-test-reports-${{ matrix.shard }}
           path: "**/build/reports/tests/**"
           if-no-files-found: ignore
 
