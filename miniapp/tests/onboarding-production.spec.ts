@@ -634,6 +634,7 @@ test('owner invitation draft and pending intent survive Back Forward without ret
   await expect(page.getByText('Создаём приглашение…')).toBeVisible();
   expect(await page.locator('.po-main').evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
   releaseReplay();
+  await expect(page).toHaveURL(/screen=invitation&resource=10(?:[&#]|$)/);
   await expect(
     page.getByRole('heading', { name: 'Ссылка не получена' }),
   ).toBeVisible();

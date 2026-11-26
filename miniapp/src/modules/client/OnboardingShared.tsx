@@ -61,8 +61,8 @@ export function Shell({
   }, [webApp]);
   const latestBack = useRef(back);
   useLayoutEffect(() => {
-    latestBack.current = back;
-  }, [back]);
+    latestBack.current = backDisabled ? undefined : back;
+  }, [back, backDisabled]);
   const hasBack = Boolean(back);
   useEffect(() => {
     const button = webApp.BackButton;

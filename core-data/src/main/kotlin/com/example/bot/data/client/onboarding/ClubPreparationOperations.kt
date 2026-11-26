@@ -21,7 +21,7 @@ internal class ClubPreparationOperations(
         val submit = !managedClub && submits(clientId, clubId, row)
         val invitation =
             row?.get("invitation_id")?.toLong()?.let {
-                sql.row("SELECT * FROM client_invitations WHERE id=? AND purpose='staff'", it)
+                sql.row("${sql.clientInvitationSelect} WHERE id=? AND purpose='staff'", it)
             }
         return buildJsonObject {
             put("clubId", clubId.toString())
@@ -44,6 +44,7 @@ internal class ClubPreparationOperations(
                         put("id", it["id"])
                         put("status", invitationStatus(it))
                         put("recipientLabel", it["recipient_label"])
+                        put("expiresAt", it.instant("expires_at").toString())
                     }
                 } ?: JsonNull,
             )
@@ -97,7 +98,7 @@ internal class ClubPreparationOperations(
         return get(clubId)
     }
 
-    /** Called only after the unchanged staff confirmation has issued the entire package in this transaction. */
+    /** Called only after staff acceptance has issued the entire package in this transaction. */
     fun confirmed(invitation: DbRow) {
         val clubId = invitation.long("club_id")
         val row = state(clubId) ?: return

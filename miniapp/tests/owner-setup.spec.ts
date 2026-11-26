@@ -609,7 +609,7 @@ test('owner Back uses browser parents, protects a draft, and exposes native clos
   await expect(openHall).toBeVisible();
   await nativeBack();
   await expect(
-    page.getByRole('heading', { name: 'Проверка готовности', exact: true }),
+    page.getByRole('heading', { name: 'Настройки клуба', exact: true }),
   ).toBeVisible();
   await page
     .getByRole('button', { name: 'Назад к клубу', exact: true })
@@ -653,14 +653,14 @@ test('owner Back uses browser parents, protects a draft, and exposes native clos
     const entries = await page.evaluate(() => history.length);
     await page.getByRole('button', { name: backLabel, exact: true }).click();
     await expect(
-      page.getByRole('heading', { name: 'Проверка готовности', exact: true }),
+      page.getByRole('heading', { name: 'Настройки клуба', exact: true }),
     ).toBeVisible();
     expect(await page.evaluate(() => history.length)).toBe(entries);
     await page.goForward();
     await expect(section).toBeVisible();
     await page.goBack();
     await expect(
-      page.getByRole('heading', { name: 'Проверка готовности', exact: true }),
+      page.getByRole('heading', { name: 'Настройки клуба', exact: true }),
     ).toBeVisible();
     await page
       .getByRole('button', { name: 'Назад к клубу', exact: true })
@@ -687,7 +687,7 @@ test('owner Back uses browser parents, protects a draft, and exposes native clos
     await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
     const entries = await page.evaluate(() => history.length);
     await nativeBack();
-    await expect(profileBack).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Настройки клуба', exact: true })).toBeVisible();
     expect(await page.evaluate(() => history.length)).toBe(entries);
   }
 });
@@ -843,12 +843,15 @@ test('on a narrow mobile screen rename stays in Welcome and survives reload and 
     page.getByRole('heading', { name: 'Welcome — вход', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Назад', exact: true }).tap();
-  await expect(
-    setup.getByText('Welcome — вход · Схема не загружена'),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Настройки клуба', exact: true })).toBeVisible();
   await page.goForward();
   await expect(
     page.getByRole('heading', { name: 'Welcome — вход', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Назад', exact: true }).tap();
+  await page.getByRole('button', { name: 'Подробная проверка готовности' }).tap();
+  await expect(
+    setup.getByText('Welcome — вход · Схема не загружена'),
   ).toBeVisible();
   expect(patches).toHaveLength(1);
 });

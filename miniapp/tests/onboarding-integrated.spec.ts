@@ -112,7 +112,8 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
   );
   await owner.getByRole("button", { name: "Создать ссылку" }).click();
   const issued = await (await issueResponse).json();
-  const link = new URL(await owner.locator(".ob-link").innerText());
+  await expect(owner).toHaveURL(new RegExp("screen=invitation&resource=" + issued.id + "(?:[&#]|$)"));
+  const link = new URL(await owner.getByLabel("Ссылка приглашения").inputValue());
   const launch = link.searchParams.get("startapp")!;
   expect(launch).toMatch(/^ci_[A-Za-z0-9_-]{43}$/);
   await open(recipient, "/app", await identity(request, "recipient", launch));
@@ -384,6 +385,7 @@ test("lost committed invitation response replays one client and requires explici
   expect(replay.clientId).toBe(committed!.clientId);
   expect(replay.invitationLink).toBeUndefined();
   expect(replay.token).toBeUndefined();
+  await expect(owner).toHaveURL(new RegExp("screen=invitation&resource=" + replay.id + "(?:[&#]|$)"));
   await expect(
     owner.getByRole("heading", { name: "Ссылка не получена" }),
   ).toBeVisible();
@@ -391,7 +393,7 @@ test("lost committed invitation response replays one client and requires explici
     owner.getByRole("heading", { name: "Приглашение создано" }),
   ).toHaveCount(0);
   await expect(
-    owner.getByRole("button", { name: "Копировать ссылку" }),
+    owner.getByRole("button", { name: "Скопировать ссылку" }),
   ).toHaveCount(0);
   await owner.getByRole("button", { name: "Открыть приглашение" }).click();
   const oldLaunch = new URL(committed!.invitationLink).searchParams.get(
@@ -408,7 +410,7 @@ test("lost committed invitation response replays one client and requires explici
   await expect(
     owner.getByRole("heading", { name: "Приглашение создано" }),
   ).toBeVisible();
-  const newLink = new URL(await owner.locator(".ob-link").innerText());
+  const newLink = new URL(await owner.getByLabel("Ссылка приглашения").inputValue());
   expect(newLink.origin).toBe("https://t.me");
   expect(newLink.pathname).toBe("/synthetic_bot");
   const newLaunch = newLink.searchParams.get("startapp")!;
@@ -736,6 +738,10 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
       };
       telegram.Telegram.WebView.receiveEvent("back_button_pressed");
     });
+  const revisitReadiness = async () => {
+    await expect(page.getByRole("heading", { name: "Настройки клуба", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Подробная проверка готовности" }).click();
+  };
   await page.getByLabel("Название", { exact: true }).fill("Несохранённое");
   page.once("dialog", (dialog) => dialog.dismiss());
   await nativeBack();
@@ -748,6 +754,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
     page.getByRole("button", { name: "Открыть зал" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await revisitReadiness();
   await expect(
     page.getByRole("heading", {
       name: "Проверка готовности",
@@ -816,6 +823,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   expect(night.nightId).toMatch(/^[1-9][0-9]*$/);
   await page.getByRole("button", { name: "Назад", exact: true }).click();
   await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await revisitReadiness();
   const availability = page.waitForResponse((response) =>
     new URL(response.url()).pathname.includes(
       `/booking-preview/nights/${night.nightId}/halls/`,
@@ -838,6 +846,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   await page.getByRole("button", { name: /#1 · У окна.*Недоступен/ }).click();
   await expect(page.getByText("Стол отключён для продаж.")).toBeVisible();
   await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await revisitReadiness();
   await page
     .getByRole("button", { name: "Залы и столы", exact: true })
     .click();
@@ -854,6 +863,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   expect(zoneSelection).toBe(before.halls[0].tables[0].zoneId);
   await nativeBack();
   await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await revisitReadiness();
   await setup
     .getByRole("button", { name: "Финансовые настройки", exact: true })
     .click();
@@ -935,6 +945,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
     articles.getByText(/Входит в общую выручку.*Показывается отдельно/),
   ).toBeVisible();
   await nativeBack();
+  await revisitReadiness();
   await setup
     .getByRole("button", { name: "Финансовые настройки", exact: true })
     .click();
@@ -951,6 +962,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   await expect(articles.getByLabel("Показывать отдельно")).toBeChecked();
   await articles.getByRole("button", { name: "Отменить изменения" }).click();
   await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await revisitReadiness();
   await setup
     .getByRole("button", { name: "Настройки модулей", exact: true })
     .click();
@@ -972,6 +984,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
     page.getByText(/Нет настройки включения музыки для клуба/),
   ).toBeVisible();
   await nativeBack();
+  await revisitReadiness();
   await setup
     .getByRole("button", { name: "Настройки модулей", exact: true })
     .click();
@@ -979,8 +992,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
     page.getByLabel("Ранний приход · минут после начала ночи"),
   ).toHaveValue("180");
   await page
-    .getByRole("button", { name: "Назад к клубу", exact: true })
+    .getByRole("button", { name: "Назад к настройкам", exact: true })
     .click();
+  await revisitReadiness();
   await expect(
     setup.getByText(/типов браслетов 1, категорий 1, статей 1/),
   ).toBeVisible();

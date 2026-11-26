@@ -21,6 +21,60 @@ abstract class LegacyStaffAdoptionContract : ClientManagerRoutesFixture() {
     protected abstract fun legacyDatabase(block: (DataSource) -> Unit)
 
     @Test
+    fun `supported team invitations accept once and retain provable revocation after business adoption`() =
+        legacyDatabase { source ->
+            withApp(source) {
+                val (club, other) = business(source, confirmed = false)
+                upgradeClubFixture(source)
+                val issued = legacyInvite(club, "MANAGER")
+                val resolve = "$C/invitations/resolve"
+                val token = issued.string("token")
+                val preview = ok(resolve, FOREIGN, obj("token" to token))
+                assertEquals("direct", preview.string("acceptanceFlow"))
+                assertEquals("issued", preview.string("status"))
+                assertEquals(HttpStatusCode.NotFound, requestAs("$C/clubs/$club/profile", FOREIGN).status)
+                val accepted =
+                    ok(
+                        "$C/invitations/${preview.string("id")}/claim",
+                        FOREIGN,
+                        obj(
+                            "expectedVersion" to "1",
+                            "token" to token,
+                        ),
+                    )
+                assertEquals("accepted", accepted.string("status"))
+                assertEquals(JsonNull, accepted.getValue("verificationCode"))
+                ok("$C/clubs/$club/profile", FOREIGN)
+                assertEquals(HttpStatusCode.NotFound, requestAs("$C/clubs/$other/profile", FOREIGN).status)
+                assertEquals(HttpStatusCode.NotFound, requestAs(resolve, SECOND_MANAGER, obj("token" to token)).status)
+                val second = legacyInvite(club, "MANAGER")
+                val owner = source.scalar("SELECT id FROM users WHERE telegram_user_id=$RECIPIENT")
+                source.executeFixture(
+                    "UPDATE client_club_grants SET is_active=FALSE WHERE user_id=$owner AND club_id=$club " +
+                        "AND permission_code='client.club.team.manage'",
+                )
+                val secondId = second.string("createdInvitationId")
+                val secondBody = obj("expectedVersion" to "1", "token" to second.string("token"))
+                assertEquals(
+                    HttpStatusCode.NotFound,
+                    requestAs("$C/invitations/$secondId/claim", SECOND_MANAGER, secondBody).status,
+                )
+                adopt(source, club)
+                val path = "$C/clubs/$club/managers"
+                val roster = ok(path, RECIPIENT)
+                val old =
+                    roster
+                        .getValue("legacyAssignments")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                assertEquals(JsonPrimitive(true), old["canRevoke"])
+                ok(path, RECIPIENT, revokeSource(roster, old, "revoke_legacy_assignment"))
+                assertEquals(HttpStatusCode.NotFound, requestAs("$C/clubs/$club/profile", FOREIGN).status)
+            }
+        }
+
+    @Test
     fun `review adopted club revokes exactly one legacy staff source across simultaneous commands`() =
         legacyDatabase { source ->
             withApp(source) {
@@ -53,8 +107,8 @@ abstract class LegacyStaffAdoptionContract : ClientManagerRoutesFixture() {
                 for (write in legacyStaffClubCommands) {
                     ok("$C/clubs/$a/${write.path}", FOREIGN, write.body, write.method, write.key)
                 }
-                val network =
-                    confirm(path, RECIPIENT, claim(invite(path, RECIPIENT, "NETWORK_MANAGER"), SECOND_MANAGER))
+                claim(invite(path, RECIPIENT, "NETWORK_MANAGER"), SECOND_MANAGER)
+                val network = ok(path, RECIPIENT)
                 assertEquals(HttpStatusCode.NotFound, requestAs("$C/clubs/$a/team", RECIPIENT).status)
                 val row =
                     network

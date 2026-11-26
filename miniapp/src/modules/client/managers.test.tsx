@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -87,7 +88,7 @@ it('rechecks the roster after an operation is refused and keeps independently al
       fetch.mock.calls.filter(([, options]) => options?.method === 'GET'),
     ).toHaveLength(2),
   );
-  await screen.findByRole('heading', { name: 'Пригласить управляющего' });
+  await screen.findByRole('button', { name: 'Пригласить управляющего' });
   expect(
     screen.queryByRole('button', { name: 'Отозвать назначение' }),
   ).toBeNull();
@@ -114,7 +115,9 @@ it('revokes only the selected historical club assignment and preserves the indep
     });
   });
   render(<ClientAccess initialToken={null} />);
-  const row = (await screen.findByText(source.displayName)).closest('article')!;
+  const row = (await screen.findByText(source.displayName)).closest(
+    'article',
+  )!;
   fireEvent.click(within(row).getByRole('button', { name: /Отозвать/ }));
   fireEvent.change(screen.getByLabelText('Причина отзыва'), {
     target: { value: 'Завершил работу' },
@@ -136,4 +139,70 @@ it('revokes only the selected historical club assignment and preserves the indep
     expect(screen.queryByText(source.displayName)).toBeNull(),
   );
   expect(screen.getByText(assignment.displayName)).toBeTruthy();
+});
+
+it('guards a role-only invitation draft until the sender discards it', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+    Response.json({
+      ...roster,
+      roles: ['CLUB_MANAGER', 'NETWORK_MANAGER'],
+    }),
+  );
+  const discard = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  render(<ClientAccess initialToken={null} />);
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Пригласить управляющего' }),
+  );
+  fireEvent.change(await screen.findByLabelText('Роль управляющего'), {
+    target: { value: 'NETWORK_MANAGER' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+  expect(discard).toHaveBeenCalledOnce();
+  expect(
+    (screen.getByLabelText('Роль управляющего') as HTMLSelectElement).value,
+  ).toBe('NETWORK_MANAGER');
+  discard.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+  expect(
+    await screen.findByRole('heading', { name: 'Управляющие' }),
+  ).toBeTruthy();
+});
+
+it('replaces the sent manager form and opens its receipt on browser Forward without issuing another link', async () => {
+  const link = 'https://t.me/TestBot?startapp=cm_' + 'a'.repeat(43);
+  const invitation = { id: '18', clientId: roster.clientId, clubId: roster.clubId,
+    role: 'CLUB_MANAGER', acceptanceMode: 'manager', status: 'issued',
+    recipientLabel: 'Анна', availableActions: ['revoke'], expiresAt: '2026-12-01T12:00:00Z' };
+  let writes = 0;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options) => {
+    if (options?.method === 'POST') writes++;
+    return Response.json(writes ? { ...roster, version: '8', invitations: [invitation],
+      createdInvitationId: '18', invitationLink: link } : roster);
+  });
+  render(<ClientAccess initialToken={null} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Пригласить управляющего' }));
+  fireEvent.change(await screen.findByLabelText('Имя получателя'), { target: { value: 'Анна' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Создать приглашение' }));
+  await screen.findByDisplayValue(link);
+  expect(location.search).toContain('screen=managers&resource=42&invitation=18');
+  fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+  await screen.findByRole('heading', { name: 'Управляющие' });
+  act(() => history.forward());
+  await screen.findByRole('heading', { name: 'Приглашение управляющего' });
+  expect(location.search).toContain('invitation=18');
+  expect(screen.queryByLabelText('Имя получателя')).toBeNull();
+  expect(screen.queryByDisplayValue(link)).toBeNull();
+  expect(writes).toBe(1);
+});
+
+it('returns from a directly opened receipt to the roster and then the club', async () => {
+  history.replaceState({}, '', '/app?mode=client&screen=managers&resource=42&invitation=18');
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json(roster));
+  render(<ClientAccess initialToken={null} />);
+  await screen.findByText(/Ссылка больше недоступна/);
+  fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+  await screen.findByRole('heading', { name: 'Управляющие' });
+  expect(location.search).toBe('?mode=client&screen=managers&resource=42');
+  fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+  expect(location.search).toBe('?mode=client&screen=club&resource=42');
 });

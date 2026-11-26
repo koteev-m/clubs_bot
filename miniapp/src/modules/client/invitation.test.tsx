@@ -83,9 +83,10 @@ describe('owner invitation recovery', () => {
     fill();
     submit();
     await screen.findByRole('heading', { name: 'Приглашение создано' });
-    expect(screen.getByText(link)).toBeTruthy();
-    expect(screen.getByText(/Ссылка действует семь суток — до/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Копировать ссылку' }));
+    expect(location.search).toContain('screen=invitation&resource=10');
+    expect(screen.getByDisplayValue(link)).toBeTruthy();
+    expect(screen.getByText(/Принять до/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Скопировать ссылку' }));
     await screen.findByText('Ссылка скопирована');
     expect(writeText).toHaveBeenCalledWith(link);
     expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({
@@ -113,7 +114,7 @@ describe('owner invitation recovery', () => {
       fill();
       submit();
       fireEvent.click(
-        await screen.findByRole('button', { name: 'Копировать ссылку' }),
+        await screen.findByRole('button', { name: 'Скопировать ссылку' }),
       );
       await screen.findByText(/Не удалось скопировать/);
       expect(screen.queryByText('Ссылка скопирована')).toBeNull();
@@ -138,7 +139,7 @@ describe('owner invitation recovery', () => {
         screen.queryByRole('heading', { name: 'Приглашение создано' }),
       ).toBeNull();
       expect(
-        screen.queryByRole('button', { name: 'Копировать ссылку' }),
+        screen.queryByRole('button', { name: 'Скопировать ссылку' }),
       ).toBeNull();
       expect(
         screen.getByRole('button', { name: 'Открыть приглашение' }),
@@ -233,6 +234,26 @@ describe('owner invitation recovery', () => {
     ).toBe('');
   });
 
+  it('starts a blank invitation after leaving a completed issue and explicitly inviting another client from overview', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((path) => reply(
+      String(path).endsWith('/invitations') ? invitation : {
+        id: '20', name: 'MIX Group', members: [], clubs: [], invitations: [], items: [],
+      },
+    ));
+    render(<PlatformOnboarding credential="owner" />);
+    fill();
+    submit();
+    await screen.findByDisplayValue(link);
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+    await screen.findByRole('heading', { name: 'MIX Group' });
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Обзор' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Пригласить клиента' }));
+    expect((screen.getByLabelText('Имя получателя') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByDisplayValue(link)).toBeNull();
+    expect(location.search).toContain('screen=invite');
+  });
+
   it('discards late issue result after account switch', async () => {
     let resolve!: (response: Response) => void;
     vi.spyOn(globalThis, 'fetch').mockImplementation(
@@ -246,7 +267,7 @@ describe('owner invitation recovery', () => {
     submit();
     view.rerender(<PlatformOnboarding credential="owner-b" />);
     await act(async () => resolve(await reply(invitation)));
-    expect(screen.queryByText(link)).toBeNull();
+    expect(screen.queryByDisplayValue(link)).toBeNull();
     expect(
       (screen.getByLabelText('Имя получателя') as HTMLInputElement).value,
     ).toBe('');
@@ -268,9 +289,9 @@ describe('owner invitation recovery', () => {
     );
     await screen.findByRole('heading', { name: 'Приглашение клиента' });
     go('invite');
-    expect(screen.queryByText(link)).toBeNull();
+    expect(screen.queryByDisplayValue(link)).toBeNull();
     expect(
-      screen.queryByRole('button', { name: 'Копировать ссылку' }),
+      screen.queryByRole('button', { name: 'Скопировать ссылку' }),
     ).toBeNull();
     fireEvent.click(
       screen.getByRole('button', { name: 'Пригласить другого клиента' }),
@@ -302,7 +323,7 @@ describe('owner invitation recovery', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Проверить результат' }),
     );
-    await waitFor(() => expect(screen.getByText(link)).toBeTruthy());
+    await waitFor(() => expect(screen.getByDisplayValue(link)).toBeTruthy());
     expect(fetch.mock.calls[0][1]?.headers).toEqual(
       fetch.mock.calls[1][1]?.headers,
     );

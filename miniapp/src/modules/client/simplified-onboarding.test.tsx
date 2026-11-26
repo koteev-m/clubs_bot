@@ -240,6 +240,26 @@ describe('simplified onboarding', () => {
     ).toBe(false);
   });
 
+  it('waits for a running creation before replacing the completed form in history', async () => {
+    let resolve!: (response: Response) => void;
+    mockApi(() => new Promise<Response>((done) => { resolve = done; }));
+    render(<ClientAccess initialToken={null} />);
+    await fill();
+    fireEvent.click(screen.getByRole('button', { name: 'Создать заведение' }));
+    expect((screen.getByRole('button', { name: 'Назад' }) as HTMLButtonElement).disabled).toBe(true);
+    const moves = vi.spyOn(history, 'go');
+    act(() => history.back());
+    await waitFor(() => expect(moves).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(location.search).toContain('screen=new-club'));
+    await act(async () => resolve(await reply(profile)));
+    await screen.findByText('Владелец бизнеса', { exact: true });
+    act(() => history.back());
+    await screen.findByText('Можно добавить: 1');
+    act(() => history.forward());
+    await screen.findByText('Владелец бизнеса', { exact: true });
+    expect(screen.queryByLabelText('Название заведения')).toBeNull();
+  });
+
   it('retains the same pending intent through Back Forward and foreground; retry cannot double-create', async () => {
     let count = 0;
     const fetch = mockApi(() =>

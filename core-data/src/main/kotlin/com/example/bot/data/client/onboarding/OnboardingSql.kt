@@ -71,10 +71,63 @@ internal class OnboardingSql(
         }
     }
 
+    // Historical fixtures and old pending commands retain their original issuance protocol.
+    val directServiceInvitations: Boolean by lazy {
+        val present =
+            row(
+                "SELECT 1 AS present FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=CURRENT_SCHEMA " +
+                    "AND LOWER(TABLE_NAME)='client_manager_invitations' AND LOWER(COLUMN_NAME)='acceptance_policy'",
+            ) != null
+        if (!present &&
+            rows("SELECT version FROM flyway_schema_history WHERE success=TRUE AND version IS NOT NULL")
+                .any {
+                    (it["version"]?.substringBefore('.')?.toIntOrNull() ?: Int.MAX_VALUE) >=
+                        DIRECT_INVITATIONS_VERSION
+                }
+        ) {
+            fail("invalid_transition")
+        }
+        present
+    }
+
+    // PostgreSQL retains prepared statements per physical connection. The SELECT text and result
+    // types must stay paired across an in-place migration on that connection.
+    val clientInvitationSelect: String by lazy {
+        val extra =
+            if (directServiceInvitations) {
+                ",acceptance_policy,purpose,club_id,staff_role,inviter_user_id,bound_user_id"
+            } else {
+                // V062–V081 fixtures have different optional fields. Select only known, existing names.
+                val available =
+                    rows(
+                        "SELECT LOWER(COLUMN_NAME) AS name FROM INFORMATION_SCHEMA.COLUMNS " +
+                            "WHERE TABLE_SCHEMA=CURRENT_SCHEMA AND LOWER(TABLE_NAME)='client_invitations'",
+                    ).map { it["name"] }.toSet()
+                val optional = listOf("acceptance_policy", "purpose", "club_id", "staff_role", "inviter_user_id")
+                optional.filter(available::contains).joinToString("") { ",$it" }
+            }
+        "SELECT id,client_id,recipient_label,token_hash,status,expires_at,claimant_user_id,verification_code,version" +
+            "$extra FROM client_invitations"
+    }
+
+    val managerInvitationSelect: String by lazy {
+        val extra = if (directServiceInvitations) ",parent_invitation_id,acceptance_policy" else ""
+        "SELECT id,client_id,club_id,role_code,policy_version,policy_hash,inviter_user_id,issuer_ref," +
+            "recipient_label,token_hash,claimant_user_id,verification_code,claim_valid_until,source_id,status," +
+            "version,expires_at$extra FROM client_manager_invitations"
+    }
+
+    val networkSettingsAmendmentPresent: Boolean by lazy {
+        row(
+            "SELECT 1 AS present FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=CURRENT_SCHEMA " +
+                "AND LOWER(TABLE_NAME)='client_role_assignments' AND LOWER(COLUMN_NAME)='network_settings_policy_hash'",
+        ) != null
+    }
+
     var usedTargetIdentity = false
 
     // A consumed invitation and its proof must still be live after any blocking database write.
-    var managerInvitationDeadline: Instant? = null
+    var invitationDeadline: Instant? = null
 
     fun rows(
         sql: String,
@@ -364,6 +417,8 @@ internal class OnboardingSession(
 }
 
 private const val IDENTITY_DISPLAY_LIMIT = 255
+
+private const val DIRECT_INVITATIONS_VERSION = 82
 
 private const val H2_LOCK_TIMEOUT = 50200
 

@@ -11,7 +11,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.security.SecureRandom
-import java.time.Duration
 import java.time.Instant
 
 internal const val MANAGER_AUTH_SECONDS = 300L
@@ -34,6 +33,7 @@ internal class ClubManagers(
     private val actor get() = session.userId ?: fail("not_found")
     private val sources = ManagerAssignmentWriter(session)
     private val legacy = LegacyStaffAssignments(session)
+    private val scopes = ManagerInvitationScopes(session)
 
     private fun context(club: Long): Long {
         if (!sql.managerSchemaPresent) fail("not_found")
@@ -75,9 +75,10 @@ internal class ClubManagers(
             put("version", current["version"])
             put("canWrite", true)
             put("roles", strings(allowed))
+            put("assignableClubs", scopes.choices(client, club, StaffRole.NETWORK_MANAGER in roles))
             val invitations =
                 sql.rows(
-                    "SELECT * FROM client_manager_invitations WHERE client_id=? AND club_id=? ORDER BY id DESC",
+                    "${sql.managerInvitationSelect} WHERE client_id=? AND club_id=? ORDER BY id DESC",
                     client,
                     club,
                 )
@@ -135,12 +136,20 @@ internal class ClubManagers(
                 body.only(listOf("action", "expectedVersion", "invitationId", "expectedInvitationVersion", "confirmed"))
                 val row = forAction(client, club, body, issuer, roles)
                 if (row["status"] !in PENDING) fail("invalid_transition")
-                sql.update(
-                    "UPDATE client_manager_invitations SET status='revoked',verification_code=NULL," +
-                        "version=version+1 WHERE id=?",
-                    row.long("id"),
-                )
-                session.audit("client.manager.invitation.revoke", client, row.long("id"), row.long("version") + 1)
+                for (scope in scopes.rows(row)) {
+                    sql.update(
+                        "UPDATE client_manager_invitations SET status='revoked',verification_code=NULL," +
+                            "version=version+1 WHERE id=?",
+                        scope.long("id"),
+                    )
+                    if (scope.long("club_id") != club) bump(scope.long("club_id"))
+                    session.audit(
+                        "client.manager.invitation.revoke",
+                        client,
+                        scope.long("id"),
+                        scope.long("version") + 1,
+                    )
+                }
             }
             else -> fail("validation_error")
         }
@@ -155,30 +164,40 @@ internal class ClubManagers(
         issuer: String,
         roles: Set<StaffRole>,
     ): MutationResult {
-        body.only(listOf("action", "expectedVersion", "recipientLabel", "role"))
+        body.only(listOf("action", "expectedVersion", "recipientLabel", "role", "clubIds"))
         val role = roles.singleOrNull { it.name == body.string("role") } ?: fail("forbidden")
-        val policy = managerPolicy(role)
         val label = body.text("recipientLabel", MAX_LABEL, required = true)
+        val clubs = scopes.selected(body, club, role)
         val token = randomToken()
-        val id =
-            sql.insert(
-                "INSERT INTO client_manager_invitations(client_id,club_id,role_code,policy_version," +
-                    "policy_hash,inviter_user_id,issuer_ref," +
-                    "recipient_label,token_hash,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                client,
-                club,
-                role.name,
-                policy.version,
-                policy.reference.hash,
-                actor,
-                issuer,
-                label,
-                digest(token),
-                session.now,
-                session.now.plus(Duration.ofDays(INVITATION_DAYS)),
-            )
-        bump(club)
-        session.audit("client.manager.invitation.issue", client, id, 1)
+        val expiresAt = session.now.plusSeconds(INVITATION_SECONDS)
+        var rootId: Long? = null
+        for (scope in clubs) {
+            val ref = if (scope == club) issuer else session.businessOwnerRef(client, scope) ?: fail("forbidden")
+            val policy = managerPolicy(role)
+            val id =
+                sql.insert(
+                    "INSERT INTO client_manager_invitations(client_id,club_id,role_code,policy_version," +
+                        "policy_hash,inviter_user_id,issuer_ref,recipient_label,token_hash,created_at,expires_at," +
+                        "parent_invitation_id,acceptance_policy) " +
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'recipient_acceptance')",
+                    client,
+                    scope,
+                    role.name,
+                    policy.version,
+                    policy.reference.hash,
+                    actor,
+                    ref,
+                    label,
+                    digest(if (rootId == null) token else randomToken()),
+                    session.now,
+                    expiresAt,
+                    rootId,
+                )
+            if (rootId == null) rootId = id
+            bump(scope)
+            session.audit("client.manager.invitation.issue", client, id, 1)
+        }
+        val id = checkNotNull(rootId)
         return MutationResult(
             "manager_issue",
             id,
@@ -213,7 +232,7 @@ internal class ClubManagers(
     ): JsonObject {
         val client = context(invitation(id).long("club_id"))
         val row = invitation(id)
-        if (row.long("client_id") != client) fail("not_found")
+        if (row.long("client_id") != client || row["parent_invitation_id"] != null) fail("not_found")
         if (row["claimant_user_id"] != null) {
             if (row["claimant_user_id"] != session.userId?.toString()) fail("not_found")
         } else if (!preview) {
@@ -224,8 +243,10 @@ internal class ClubManagers(
         ) {
             fail("not_found")
         }
-        session.userId?.let { sources.requireRecipient(row, it) }
-        if (row["status"] in PENDING && !currentIssuer(row)) fail("not_found")
+        for (scope in scopes.rows(row)) {
+            session.userId?.let { sources.requireRecipient(scope, it) }
+            if (scope["status"] in PENDING && !currentIssuer(scope)) fail("not_found")
+        }
         if (row["status"] == "accepted" && !sources.active(row)) fail("not_found")
         return view(row, readOnly = false, issuerView = false)
     }
@@ -233,7 +254,8 @@ internal class ClubManagers(
     fun claim(
         id: Long,
         body: JsonObject,
-    ): MutationResult {
+        requestHash: String,
+    ): JsonObject {
         body.only(listOf("token", "expectedVersion"))
         val club = invitation(id).long("club_id")
         val client = context(club)
@@ -242,8 +264,18 @@ internal class ClubManagers(
         if (row["status"] != "issued" && row["claimant_user_id"] != actor.toString()) fail("not_found")
         recipient(id, preview = true)
         if (effective(row) !in setOf("issued", "claimed")) fail("invalid_transition")
-        sql.managerInvitationDeadline = row.instant("expires_at")
+        sql.invitationDeadline = row.instant("expires_at")
         session.version(row, body)
+        if (row["acceptance_policy"] == "recipient_acceptance") {
+            if (row["status"] != "issued") fail("invalid_transition")
+            reserveReceipt("manager_claim", id, client, requestHash)
+            for (scope in scopes.rows(row)) {
+                if (effective(scope) != "issued") fail("invalid_transition")
+                sources.accept(scope, checkNotNull(scope["issuer_ref"]), actor)
+                bump(scope.long("club_id"))
+            }
+            return status(id)
+        }
         if (row["status"] == "issued" || !freshClaim(row)) {
             val code = SecureRandom().nextInt(CODE_RANGE).toString().padStart(CODE_LENGTH, '0')
             sql.update(
@@ -257,7 +289,8 @@ internal class ClubManagers(
             bump(club)
             session.audit("client.manager.invitation.claim", client, id, row.long("version") + 1)
         }
-        return MutationResult("manager_claim", id, client, status(id))
+        reserveReceipt("manager_claim", id, client, requestHash)
+        return status(id)
     }
 
     fun confirm(
@@ -286,22 +319,32 @@ internal class ClubManagers(
             fail("invalid_transition")
         }
         sources.requireRecipient(row, row.long("claimant_user_id"))
-        sql.managerInvitationDeadline = minOf(row.instant("claim_valid_until"), row.instant("expires_at"))
-        // Reserve the real confirmation receipt before the V077 source's FK. All three records commit together.
+        sql.invitationDeadline = minOf(row.instant("claim_valid_until"), row.instant("expires_at"))
+        reserveReceipt("manager_roster", club, client, requestHash)
+        sources.accept(row, issuer, row.long("claimant_user_id"))
+        bump(club)
+        return roster(club)
+    }
+
+    // The assignment's FK points to the real command. All scopes, audits and the receipt commit together.
+    private fun reserveReceipt(
+        type: String,
+        id: Long,
+        client: Long,
+        requestHash: String,
+    ) {
         sql.update(
             "INSERT INTO client_commands(actor_user_id,connection_key,key_hash,request_hash," +
-                "result_type,result_id,client_id,created_at) VALUES (?,?,?,?,'manager_roster',?,?,?)",
+                "result_type,result_id,client_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
             actor,
             session.actor.connectionKey,
             session.correlation,
             requestHash,
-            club,
+            type,
+            id,
             client,
             session.now,
         )
-        sources.accept(row, issuer)
-        bump(club)
-        return roster(club)
     }
 
     private fun forAction(
@@ -341,6 +384,19 @@ internal class ClubManagers(
             put("clientName", session.client(row.long("client_id"))["display_name"])
             put("clubName", clubRow(row.long("club_id"))["name"])
             put("acceptanceMode", "manager")
+            put("acceptanceFlow", if (row["acceptance_policy"] == "recipient_acceptance") "direct" else "confirmation")
+            put(
+                "clubs",
+                scopes.names(row) { scope ->
+                    when {
+                        issuerView ->
+                            scope["club_id"] == row["club_id"] ||
+                                session.businessOwnerRef(scope.long("client_id"), scope.long("club_id")) != null
+                        state == "accepted" -> sources.active(scope)
+                        else -> true
+                    }
+                },
+            )
             put("role", row["role_code"])
             put("status", state)
             put("version", row["version"])
@@ -378,7 +434,12 @@ internal class ClubManagers(
         val client = row.long("client_id")
         val club = row.long("club_id")
         val issuer = row.long("inviter_user_id")
-        val ref = row["issuer_ref"] ?: return false
+        if (sql.row("SELECT id FROM users WHERE id=? AND telegram_user_id=?", issuer, session.ownerId) !=
+            null
+        ) {
+            return false
+        }
+        val ref = checkNotNull(row["issuer_ref"])
         return session.businessOwnerRef(client, club, issuer) == ref ||
             (row["role_code"] == StaffRole.CLUB_MANAGER.name && networkSourceCurrent(client, club, issuer, ref))
     }
@@ -418,8 +479,7 @@ internal class ClubManagers(
             checkNotNull(row["status"])
         }
 
-    private fun invitation(id: Long) =
-        sql.row("SELECT * FROM client_manager_invitations WHERE id=?", id) ?: fail("not_found")
+    private fun invitation(id: Long) = sql.row("${sql.managerInvitationSelect} WHERE id=?", id) ?: fail("not_found")
 
     private fun clubRow(id: Long) =
         sql.row(
@@ -437,7 +497,7 @@ internal class ClubManagers(
 
     companion object {
         private const val MAX_LABEL = 255
-        private const val INVITATION_DAYS = 7L
+        private const val INVITATION_SECONDS = 7L * 24 * 60 * 60
         private const val CODE_RANGE = 1_000_000
         private const val CODE_LENGTH = 6
         private val TOKEN = Regex("[A-Za-z0-9_-]{43}")

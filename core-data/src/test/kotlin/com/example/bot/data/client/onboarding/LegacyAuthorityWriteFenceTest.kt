@@ -401,18 +401,26 @@ internal abstract class LegacyAuthorityWriteFenceContract {
         fixture: OnboardingFixture,
         club: JsonObject,
     ): JsonObject =
-        fixture.repository.mutate(
-            fixture.alice,
-            OnboardingMutation.CLUB_TEAM_UPDATE,
-            club.id("id"),
-            buildJsonObject {
-                put("action", "invite")
-                put("expectedVersion", team(fixture, club).getValue("version"))
-                put("recipientLabel", "Synthetic guard recipient")
-                put("role", "CLUB_ADMIN")
-            },
-            UUID.randomUUID().toString(),
-        )
+        fixture.repository
+            .mutate(
+                fixture.alice,
+                OnboardingMutation.CLUB_TEAM_UPDATE,
+                club.id("id"),
+                buildJsonObject {
+                    put("action", "invite")
+                    put("expectedVersion", team(fixture, club).getValue("version"))
+                    put("recipientLabel", "Synthetic guard recipient")
+                    put("role", "CLUB_ADMIN")
+                },
+                UUID.randomUUID().toString(),
+            ).also { issued ->
+                // Exercise the original two-party protocol even after the schema upgrade.
+                fixture.execute(
+                    "UPDATE client_invitations SET acceptance_policy='owner_confirmation' WHERE id=${issued.id(
+                        "createdInvitationId",
+                    )}",
+                )
+            }
 
     private suspend fun claim(
         fixture: OnboardingFixture,

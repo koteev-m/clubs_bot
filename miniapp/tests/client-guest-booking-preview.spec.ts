@@ -219,6 +219,7 @@ test('opens the owner preview with one read-only snapshot on map, list and card'
   // metadata read finishes, so this tests the preview's lost-plan handling.
   const readyLayout = page.waitForResponse((response) => response.url().endsWith('/layout') && response.ok());
   await page.getByRole('button', { name: 'Назад' }).click();
+  await page.getByRole('button', { name: 'Подробная проверка готовности' }).click();
   await readyLayout;
   denyPlan = true;
   await open();

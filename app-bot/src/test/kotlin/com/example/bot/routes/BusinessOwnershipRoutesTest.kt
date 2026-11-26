@@ -252,7 +252,7 @@ open class BusinessOwnershipRoutesTest : ClientOnboardingRoutesTestBase(legacyCl
         }
 
     @Test
-    fun `manual attachment opens saved club data and only a confirmed manager updates its profile`() =
+    fun `manual attachment opens saved club data and only an appointed manager updates its profile`() =
         database { source ->
             withApp(source) {
                 val clientId = enroll()
@@ -302,25 +302,14 @@ open class BusinessOwnershipRoutesTest : ClientOnboardingRoutesTestBase(legacyCl
                         ),
                     )
                 val invitationId = invitation.string("createdInvitationId")
-                val claimed =
+                val accepted =
                     ok(
                         "$C/manager-invitations/$invitationId/claim",
                         FOREIGN,
                         obj("expectedVersion" to "1", "token" to invitation.string("token")),
                     )
-                ok(
-                    roster,
-                    RECIPIENT,
-                    JsonObject(
-                        obj(
-                            "expectedVersion" to ok(roster, RECIPIENT).string("version"),
-                            "action" to "confirm",
-                            "invitationId" to invitationId,
-                            "expectedInvitationVersion" to claimed.string("version"),
-                            "verificationCode" to claimed.string("verificationCode"),
-                        ) + ("confirmed" to JsonPrimitive(true)),
-                    ),
-                )
+                assertEquals("accepted", accepted.string("status"))
+                assertEquals(kotlinx.serialization.json.JsonNull, accepted["verificationCode"])
                 val saved = ok(profile, FOREIGN, patch, HttpMethod.Patch, key = "historic-profile")
                 assertEquals("Updated historic club", saved.string("name"))
                 assertEquals("Saved description", saved.string("description"))

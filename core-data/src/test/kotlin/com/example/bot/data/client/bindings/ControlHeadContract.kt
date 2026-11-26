@@ -31,6 +31,8 @@ internal abstract class ControlHeadContract {
             assertEquals("0", db.scalar("SELECT COUNT(*) FROM target_maintenance_publications"))
             assertEquals(1, db.migrate("80"))
             assertEquals(1, db.migrate("81"))
+            assertEquals(1, db.migrate("82"))
+            assertEquals(1, db.migrate("83"))
             assertEquals("0", db.scalar("SELECT COUNT(*) FROM client_business_owners"))
             assertEquals("0", db.scalar("SELECT COUNT(*) FROM client_manager_invitations"))
             assertEquals("0", db.scalar("SELECT COUNT(*) FROM client_manager_invitation_fences"))

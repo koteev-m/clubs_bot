@@ -9,7 +9,7 @@ import com.example.bot.data.client.assignments.StaffRole
 import com.example.bot.data.client.assignments.StaffScope
 import com.example.bot.data.client.assignments.activeManagerSourcesSql
 import com.example.bot.data.client.assignments.admissionVersion
-import com.example.bot.data.client.assignments.managerPolicy
+import com.example.bot.data.client.assignments.pinnedManagerPolicy
 import com.example.bot.data.client.assignments.scope
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -29,7 +29,8 @@ internal class ManagerAssignmentWriter(
         club: Long,
     ): List<DbRow> =
         sql.rows(
-            "SELECT a.*,u.display_name,u.username,u.telegram_user_id FROM client_role_assignments a " +
+            "SELECT a.id,a.client_id,a.club_id,a.user_id,a.role_code,a.version,a.admission_epoch," +
+                "u.display_name,u.username,u.telegram_user_id FROM client_role_assignments a " +
                 "JOIN client_manager_invitations i ON i.source_id=a.id AND i.client_id=a.client_id AND " +
                 "i.club_id=a.club_id " +
                 "AND i.role_code=a.role_code AND i.claimant_user_id=a.user_id AND i.status='accepted' " +
@@ -89,17 +90,12 @@ internal class ManagerAssignmentWriter(
     fun accept(
         row: DbRow,
         issuer: String,
+        user: Long,
     ) {
         val client = row.long("client_id")
         val club = row.long("club_id")
-        val user = row.long("claimant_user_id")
         val role = StaffRole.valueOf(checkNotNull(row["role_code"]))
-        val policy = managerPolicy(role)
-        if (row["policy_hash"] != policy.reference.hash ||
-            row.long("policy_version") != policy.version
-        ) {
-            fail("invalid_transition")
-        }
+        val policy = pinnedManagerPolicy(row)
         val scope = StaffScope(client, club, user)
         val fence = admission(client, club, user)
         val oldMember = membership(client, user)
@@ -141,7 +137,10 @@ internal class ManagerAssignmentWriter(
             fail("invalid_transition")
         }
         val id = UUID.randomUUID()
-        val audit = auditId(scope, "client.manager.confirm", id, "Manager invitation confirmed", row.long("id"))
+        val direct = row["acceptance_policy"] == "recipient_acceptance"
+        val reason = if (direct) "Manager invitation accepted" else "Manager invitation confirmed"
+        val action = if (direct) "client.manager.accept" else "client.manager.confirm"
+        val audit = auditId(scope, action, id, reason, row.long("id"))
         val writer = writer(snapshot, audit, issuer)
         writer.issue(
             AssignmentCommand.IssueRole(
@@ -150,14 +149,15 @@ internal class ManagerAssignmentWriter(
                 id,
                 role,
                 policy.reference,
-                reason = "Manager invitation confirmed",
+                reason = reason,
                 confirmed = true,
             ),
         )
         sql.update(
-            "UPDATE client_manager_invitations SET status='accepted',source_id=?," +
+            "UPDATE client_manager_invitations SET status='accepted',source_id=?,claimant_user_id=?," +
                 "verification_code=NULL,version=version+1 WHERE id=?",
             id,
+            user,
             row.long("id"),
         )
     }

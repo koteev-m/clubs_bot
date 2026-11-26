@@ -7,6 +7,8 @@ export type BusinessRole = keyof typeof businessRoleNames;
 export type ManagerRole = Exclude<BusinessRole, 'BUSINESS_OWNER'>;
 
 export interface Invitation {
+  acceptanceFlow?: 'direct' | 'confirmation';
+  clubs?: Club[];
   acceptanceMode?: 'direct' | 'legacy' | 'staff' | 'manager';
   clubId?: string;
   clubName?: string;

@@ -154,15 +154,11 @@ test('distinct owner sections keep navigation inside mobile viewport through scr
   await expect(page.getByLabel('Список организаций')).toBeVisible();
   await expect(page).toHaveURL(/screen=clients/);
   await page.goBack();
-  await expect(page).toHaveURL(/screen=clubs/);
+  await expect(page.getByRole('heading', { name: 'Управление платформой', exact: true })).toBeVisible();
   await page.goForward();
   await expect(page).toHaveURL(/screen=clients/);
   await telegramEvent(page, 'back_button_pressed');
-  await expect(page).toHaveURL(/screen=clubs/);
-  await page.getByRole('button', { name: 'Назад', exact: true }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Управление платформой', exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Управление платформой', exact: true })).toBeVisible();
 });
 
 test('archive is reversible, filtered and explains revoked access', async ({
@@ -343,12 +339,12 @@ for (const [prefix, rawPrefix] of [['ci_', 'cm_'], ['cm_', 'ci_']]) {
       expect(req.postDataJSON().token).toBe(raw);
       return route.fulfill({json:{
         id:'21', clientId:'20', clientName:'Тест клиента', clubId:'100', clubName:'Тест клуба', role:'CLUB_MANAGER',
-        acceptanceMode: prefix === 'ci_' ? 'direct' : 'manager', version:'1', status:'issued',
+        acceptanceMode: prefix === 'ci_' ? 'direct' : 'manager', acceptanceFlow: 'direct', version:'1', status:'issued',
         expiresAt:'2026-12-01T00:00:00Z', availableActions:['claim'],
       }});
     });
     await page.goto('/app?startapp=' + prefix + raw + telegramHash);
-    await page.getByRole('button', {name: prefix === 'ci_' ? 'Принять приглашение' : 'Подтвердить Telegram-аккаунт'}).click();
+    await page.getByRole('button', {name: 'Принять приглашение'}).click();
     await expect.poll(() => paths.includes(base + '/21/claim')).toBe(true);
     expect(paths.every((path) => path.startsWith(base + '/'))).toBe(true);
     expect(page.url()).not.toContain(raw);
@@ -376,7 +372,66 @@ test('manager keeps roster access on mobile when a single revocation is forbidde
   await page.getByLabel('Причина отзыва').fill('Проверено');
   await page.getByRole('button', {name:'Подтвердить отзыв'}).click();
   await expect(page.getByText('Это действие недоступно.', {exact:false})).toBeVisible();
-  await expect(page.getByRole('heading', {name:'Пригласить управляющего'})).toBeVisible();
+  await expect(page.getByRole('button', {name:'Пригласить управляющего'})).toBeVisible();
   await expect(page.getByRole('button', {name:'Отозвать назначение'})).toHaveCount(0);
   expect(writes).toBe(1);
+});
+
+test('iOS WebView invitation uses selected input copy and the Telegram share dialog', async ({ page }) => {
+  const link = 'https://t.me/synthetic_bot?startapp=cm_' + 'a'.repeat(43);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    document.addEventListener('copy', () => {
+      const input = document.activeElement;
+      if (input instanceof HTMLInputElement)
+        document.body.dataset.copied = input.value.slice(input.selectionStart!, input.selectionEnd!);
+    });
+    Object.defineProperty(window, 'TelegramWebviewProxy', {
+      value: { postEvent(name: string, data: string) {
+        if (name === 'web_app_open_tg_link') document.body.dataset.shared = JSON.parse(data).path_full;
+      } },
+    });
+  });
+  const roster = {
+    clubId: '100', clientId: '20', version: '1', name: 'Север', canWrite: true,
+    roles: ['NETWORK_MANAGER', 'CLUB_MANAGER'], assignments: [], invitations: [],
+    assignableClubs: [{ id: '100', name: 'Север' }, { id: '101', name: 'Юг' }],
+  };
+  await page.route('**/api/client/clubs/100/managers', (route) => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: roster });
+    expect(route.request().postDataJSON()).toMatchObject({
+      recipientLabel: 'Анна', role: 'NETWORK_MANAGER', clubIds: ['100', '101'],
+    });
+    return route.fulfill({ json: { ...roster, version: '2', createdInvitationId: '9', invitationLink: link,
+      invitations: [{ id: '9', version: '1', clientId: '20', clubId: '100', clubName: 'Север',
+        recipientLabel: 'Анна', role: 'NETWORK_MANAGER', acceptanceMode: 'manager', acceptanceFlow: 'direct',
+        status: 'issued', availableActions: ['revoke'], expiresAt: '2026-12-01T00:00:00Z', clubs: roster.assignableClubs }],
+    } });
+  });
+  await page.goto('/app?mode=client&screen=managers&resource=100' + telegramHash);
+  await page.getByRole('button', { name: 'Пригласить управляющего', exact: true }).click();
+  await page.getByLabel('Имя получателя').fill('Анна');
+  await page.getByLabel('Роль управляющего').selectOption('NETWORK_MANAGER');
+  await page.getByRole('checkbox', { name: 'Юг' }).check();
+  await page.getByRole('button', { name: 'Создать приглашение', exact: true }).click();
+  const receipt = page.getByRole('region', { name: 'Новое приглашение' });
+  await expect(receipt.getByText('Получатель: Анна')).toBeVisible();
+  await expect(receipt.getByText('Заведения: Север, Юг')).toBeVisible();
+  await receipt.getByRole('button', { name: 'Скопировать ссылку' }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-copied', link);
+  await expect(receipt.getByRole('status')).toHaveText('Ссылка скопирована');
+  await page.evaluate(() => Object.defineProperty(document, 'execCommand', { value: () => false }));
+  await receipt.getByRole('button', { name: 'Скопировать ссылку' }).click();
+  await expect(receipt.getByRole('status')).toHaveText(/Не удалось скопировать/);
+  await expect(receipt.getByText('Ссылка скопирована', { exact: true })).toHaveCount(0);
+  const selection = await receipt.getByLabel('Ссылка для управляющего').evaluate((element: HTMLInputElement) =>
+    element.value.slice(element.selectionStart!, element.selectionEnd!),
+  );
+  expect(selection).toBe(link);
+  await receipt.getByRole('button', { name: 'Отправить в Telegram' }).click();
+  const sharePath = await page.locator('body').getAttribute('data-shared');
+  const share = new URL(sharePath!, 'https://t.me');
+  expect(share.pathname).toBe('/share/url');
+  expect(share.searchParams.get('url')).toBe(link);
+  expect(page.url()).not.toContain('startapp');
 });

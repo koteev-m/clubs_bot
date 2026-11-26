@@ -96,7 +96,7 @@ function ModuleSettings({
       back={() => {
         if (!command.blocked && leave()) back();
       }}
-      backLabel="Назад к клубу"
+      backLabel="Назад к настройкам"
     >
       <RemoteState
         loading={remote.loading}

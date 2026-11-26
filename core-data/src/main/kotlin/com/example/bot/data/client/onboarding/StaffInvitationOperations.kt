@@ -31,11 +31,12 @@ internal class StaffInvitationOperations(
                 "INSERT INTO client_invitations(client_id,recipient_label,token_hash,status,open_marker,expires_at," +
                     "acceptance_policy,purpose,club_id,staff_role,inviter_user_id," +
                     "invitation_scope,created_at,updated_at) " +
-                    "VALUES (?,?,?,'issued',1,?,'owner_confirmation','staff',?,?,?,?,?,?)",
+                    "VALUES (?,?,?,'issued',1,?,?,'staff',?,?,?,?,?,?)",
                 clientId,
                 label,
                 hash,
                 session.now.plus(Duration.ofDays(INVITATION_DAYS)),
+                if (sql.directServiceInvitations) "recipient_acceptance" else "owner_confirmation",
                 clubId,
                 role,
                 session.userId,
@@ -116,6 +117,20 @@ internal class StaffInvitationOperations(
         session.version(row, body)
         val userId = checkNotNull(session.userId)
         access.protectTarget(row.long("client_id"), row.long("club_id"), userId)
+        if (row["acceptance_policy"] == "recipient_acceptance") {
+            requireCurrentInviter(row)
+            accept(row, userId)
+        } else {
+            claimForConfirmation(row, userId)
+        }
+        access.bump(row.long("club_id"))
+        return result(invitation(row.long("id")))
+    }
+
+    private fun claimForConfirmation(
+        row: DbRow,
+        userId: Long,
+    ) {
         val code = (CODE_MINIMUM + SecureRandom().nextInt(CODE_RANGE)).toString()
         sql.update(
             "UPDATE client_invitations SET claimant_user_id=?,status='claimed',verification_code=?," +
@@ -126,7 +141,6 @@ internal class StaffInvitationOperations(
             session.now,
             row.long("id"),
         )
-        access.bump(row.long("club_id"))
         access.audit(
             "client.staff.invitation.claim",
             row.long("client_id"),
@@ -135,7 +149,6 @@ internal class StaffInvitationOperations(
             row.long("version") + 1,
             buildJsonObject { put("candidateUserId", userId.toString()) },
         )
-        return result(invitation(row.long("id")))
     }
 
     fun ownerAction(
@@ -160,7 +173,9 @@ internal class StaffInvitationOperations(
             if (body["confirmed"]?.toString() != "true") fail("validation_error")
             if (effective(row) != "claimed") fail("invalid_transition")
             if (body.string("verificationCode") != row["verification_code"]) fail("validation_error")
-            confirm(row)
+            access.packageAllowed(clientId, clubId, row["staff_role"])
+            requireCurrentInviter(row)
+            accept(row, row.long("claimant_user_id"))
         } else {
             if (row["status"] !in setOf("issued", "claimed")) fail("invalid_transition")
             sql.update(
@@ -183,13 +198,29 @@ internal class StaffInvitationOperations(
         return MutationResult("club_team", clubId, clientId, ClubTeamOperations(session).get(clubId))
     }
 
-    private fun confirm(row: DbRow) {
+    private fun requireCurrentInviter(row: DbRow) {
         val clientId = row.long("client_id")
         val clubId = row.long("club_id")
-        val userId = row.long("claimant_user_id")
+        val issuer = row.long("inviter_user_id")
+        session.member(clientId, issuer, manage = false)
+        if (session.businessClub(clientId, clubId) || access.creator(clubId) != issuer) fail("not_found")
+        val required = staffPackage(row["staff_role"]) + MANAGE_TEAM
+        if (sql.blocksLegacyClubAuthorityWrite(clientId, clubId, issuer) ||
+            !access.permissions(clientId, clubId, issuer).containsAll(required)
+        ) {
+            fail("not_found")
+        }
+    }
+
+    private fun accept(
+        row: DbRow,
+        userId: Long,
+    ) {
+        sql.invitationDeadline = row.instant("expires_at")
+        val clientId = row.long("client_id")
+        val clubId = row.long("club_id")
         session.requireLegacyClubAuthorityWrite(clientId, clubId, userId)
         access.protectTarget(clientId, clubId, userId)
-        access.packageAllowed(clientId, clubId, row["staff_role"])
         val member = sql.row("SELECT * FROM client_memberships WHERE client_id=? AND user_id=?", clientId, userId)
         if (member != null && !member.active()) fail("invalid_transition")
         val previous =
@@ -250,25 +281,29 @@ internal class StaffInvitationOperations(
         }
         sql.update(
             "UPDATE client_invitations SET status='accepted',open_marker=NULL,verification_code=NULL," +
-                "accepted_at=?,updated_at=?,version=version+1 WHERE id=?",
+                "claimant_user_id=?,claimed_at=COALESCE(claimed_at,?),accepted_at=?,updated_at=?," +
+                "version=version+1 WHERE id=?",
+            userId,
+            session.now,
             session.now,
             session.now,
             row.long("id"),
         )
         access.audit(
-            "client.staff.invitation.confirm",
+            if (row["status"] == "issued") "client.staff.invitation.accept" else "client.staff.invitation.confirm",
             clientId,
             clubId,
             row.long("id"),
             row.long("version") + 1,
             buildJsonObject {
                 put("candidateUserId", userId.toString())
+                put("inviterUserId", row["inviter_user_id"])
                 put("role", row["staff_role"])
                 put("before", strings(before))
                 put("after", strings(access.permissions(clientId, clubId, userId)))
             },
         )
-        ClubPreparationOperations(session).confirmed(row)
+        ClubPreparationOperations(session).confirmed(invitation(row.long("id")))
     }
 
     fun view(
@@ -288,6 +323,7 @@ internal class StaffInvitationOperations(
             put("clubName", sql.row("SELECT name FROM clubs WHERE id=?", row.long("club_id"))?.get("name"))
             put("recipientLabel", if (owner) row["recipient_label"] else "")
             put("acceptanceMode", "staff")
+            put("acceptanceFlow", if (row["acceptance_policy"] == "recipient_acceptance") "direct" else "confirmation")
             put("role", row["staff_role"])
             put("permissions", strings(staffPackage(row["staff_role"])))
             put("status", state)
@@ -324,7 +360,7 @@ internal class StaffInvitationOperations(
         MutationResult("invitation", row.long("id"), row.long("client_id"), recipient(row, preview = false))
 
     private fun invitation(id: Long): DbRow =
-        sql.row("SELECT * FROM client_invitations WHERE id=? AND purpose='staff'", id) ?: fail("not_found")
+        sql.row("${sql.clientInvitationSelect} WHERE id=? AND purpose='staff'", id) ?: fail("not_found")
 
     private fun assignment(row: DbRow): DbRow =
         sql.row(

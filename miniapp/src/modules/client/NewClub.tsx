@@ -93,13 +93,13 @@ export default function NewClub({
   }, [credential, value.countryCode, query, value.cityId]);
   if (context.loading || context.error)
     return (
-      <Shell title="Создать заведение" back={back}>
+      <Shell title="Создать заведение" back={back} backDisabled={command.saving}>
         <RemoteState {...context} />
       </Shell>
     );
   if (context.data?.canCreate !== true)
     return (
-      <Shell title="Создать заведение" back={back}>
+      <Shell title="Создать заведение" back={back} backDisabled={command.saving}>
         <p>Для создания нового заведения владелец платформы должен подтвердить владельца бизнеса.</p>
       </Shell>
     );
@@ -108,6 +108,7 @@ export default function NewClub({
       title="Создать заведение"
       subtitle="Заведение сохранится непубличным. Подключение бота и бронирование не включаются автоматически."
       back={back}
+      backDisabled={command.saving}
     >
       {previous && (
         <p className="po-notice">

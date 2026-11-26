@@ -23,6 +23,20 @@ wired support modes are not a cutover to the broader React role shells.
 
 Start the Mini App with payload `mode=guest` or `mode=entry` to switch modes.
 
+## Кабинеты и приглашения
+
+Рабочие маршруты платформы и клиента используют данные Telegram, подпись которых проверяет сервер. Новая ссылка открывает предварительный просмотр. Роль
+принимается кнопкой «Принять приглашение». Проверка владельца бизнеса выполняется
+отдельно. Правила старых ссылок и назначения будущих ролей описаны в
+[контракте](../docs/product/PRODUCT_SPEC.md#service-invitations).
+
+Карточка отправителя использует Clipboard API. При отказе она выделяет значение
+поля, пробует команду копирования и при необходимости оставляет ссылку для ручного
+копирования. Кнопка Telegram открывает выбор чата через `openTelegramLink`
+и URL-кодированные параметры `https://t.me/share/url`. [Telegram Sharing Button](https://core.telegram.org/widgets/share) · [Telegram Mini Apps](https://core.telegram.org/bots/webapps#initializing-mini-apps)
+
+Ниже сохранены исторические инструкции для прототипа и первой версии платформенного кабинета.
+
 ## Local platform owner preview (CLB-196)
 
 From this worktree's `miniapp/` directory, with dependencies installed from the lockfile:

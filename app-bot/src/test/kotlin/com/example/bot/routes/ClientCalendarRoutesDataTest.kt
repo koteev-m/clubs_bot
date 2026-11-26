@@ -272,6 +272,8 @@ open class ClientCalendarRoutesDataTest : ClientOnboardingRoutesTestBase(legacyC
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "78"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "79"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect, "80"))
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "81"))
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "82"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect))
             withApp(source, CLOCK) {
                 val path = "$C/clubs/8801/calendar"

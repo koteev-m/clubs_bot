@@ -39,7 +39,7 @@ internal class ClubTeamOperations(
                 JsonArray(
                     sql
                         .rows(
-                            "SELECT * FROM client_invitations WHERE client_id=? AND club_id=? AND " +
+                            "${sql.clientInvitationSelect} WHERE client_id=? AND club_id=? AND " +
                                 "purpose='staff' ORDER BY id DESC",
                             clientId,
                             clubId,
@@ -66,7 +66,7 @@ internal class ClubTeamOperations(
 
     fun receipt(invitationId: Long): JsonObject {
         val row =
-            sql.row("SELECT * FROM client_invitations WHERE id=? AND purpose='staff'", invitationId)
+            sql.row("${sql.clientInvitationSelect} WHERE id=? AND purpose='staff'", invitationId)
                 ?: fail("not_found")
         return JsonObject(
             get(row.long("club_id")) + buildJsonObject { put("createdInvitationId", invitationId.toString()) },

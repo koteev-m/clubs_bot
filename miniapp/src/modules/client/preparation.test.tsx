@@ -170,7 +170,7 @@ it('delegates through a full package invitation and reports pending instead of o
       return reply({
         ...saved,
         createdInvitationId: '8',
-        invitationLink: 'https://t.me/synthetic_bot?startapp=ci_synthetic',
+        invitationLink: 'https://t.me/synthetic_bot?startapp=ci_' + 's'.repeat(43),
       });
     },
   );
@@ -189,7 +189,7 @@ it('delegates through a full package invitation and reports pending instead of o
   );
   await screen.findByLabelText('Ссылка ответственного');
   expect(
-    screen.getByText('Приглашение ожидает принятия или подтверждения'),
+    screen.getByText('Ожидаем ответа на приглашение'),
   ).toBeTruthy();
   expect(
     screen.getByText(
@@ -394,7 +394,7 @@ it('removes the one-time invitation link when current invitation authority is lo
       return reply({
         ...saved,
         createdInvitationId: '8',
-        invitationLink: 'https://t.me/synthetic_bot?startapp=ci_synthetic',
+        invitationLink: 'https://t.me/synthetic_bot?startapp=ci_' + 's'.repeat(43),
       });
     },
   );

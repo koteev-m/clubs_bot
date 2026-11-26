@@ -1,3 +1,4 @@
+import InvitationDelivery, { invitationRole } from './InvitationDelivery';
 import { useEffect, useState } from 'react';
 import { useClubConfiguration } from './configuration.hooks';
 import {
@@ -67,7 +68,7 @@ function TeamEditor({
   const [link, setLink] = useState<string>();
   const [linkId, setLinkId] = useState<string>();
   const [missingLinkId, setMissingLinkId] = useState<string>();
-  const [linkMessage, setLinkMessage] = useState('');
+  const issuedInvitation = view?.invitations.find((item) => item.id === linkId);
   useEffect(() => {
     if (
       link &&
@@ -79,11 +80,10 @@ function TeamEditor({
     ) {
       setLink(undefined);
       setLinkId(undefined);
-      setLinkMessage('');
     }
   }, [link, linkId, view]);
   const leave = useUnsavedChanges(
-    Boolean(label || intent || command.unknown),
+    Boolean(label || role !== 'ENTRY_MANAGER' || intent || command.unknown),
     reportDirty,
   );
   const blocked = state.blocked;
@@ -94,9 +94,9 @@ function TeamEditor({
   useEffect(() => {
     if (state.denied) {
       setLabel('');
+      setRole('ENTRY_MANAGER');
       setIntent(undefined);
       setLink(undefined);
-      setLinkMessage('');
     }
   }, [state.denied]);
   const selected = view?.roles.find((item) => item.code === role);
@@ -212,69 +212,10 @@ function TeamEditor({
             CLUB_ADMIN не даёт управление командой, денежные операции или
             владение.
           </p>
-          {link && (
-            <section
-              className="po-card ob-card"
-              aria-label="Новое приглашение"
-            >
-              <h2>Приглашение создано</h2>
-              <p>
-                Передайте ссылку сотруднику в личном чате. После принятия
-                проверьте аккаунт и код. Ссылка показывается только сейчас.
-              </p>
-              <Field label="Ссылка приглашения">
-                <input
-                  readOnly
-                  value={link}
-                  onFocus={(event) => event.currentTarget.select()}
-                />
-              </Field>
-              <button
-                type="button"
-                className="ob-button"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(link);
-                    setLinkMessage('Ссылка скопирована');
-                  } catch {
-                    setLinkMessage(
-                      'Выделите ссылку и скопируйте её вручную.',
-                    );
-                  }
-                }}
-              >
-                Скопировать ссылку
-              </button>
-              {typeof navigator.share === 'function' && (
-                <button
-                  type="button"
-                  className="ob-button"
-                  onClick={async () => {
-                    try {
-                      await navigator.share({
-                        title: 'Приглашение в команду клуба',
-                        url: link,
-                      });
-                    } catch {
-                      setLinkMessage('Ссылку можно скопировать вручную.');
-                    }
-                  }}
-                >
-                  Поделиться приглашением
-                </button>
-              )}
-              <button
-                type="button"
-                className="ob-button"
-                onClick={() => {
-                  setLink(undefined);
-                  setLinkMessage('');
-                }}
-              >
-                Скрыть ссылку
-              </button>
-              {linkMessage && <p role="status">{linkMessage}</p>}
-            </section>
+          {link && issuedInvitation?.status === 'issued' && (
+            <InvitationDelivery key={linkId} link={link} prefix="ci"
+              recipient={issuedInvitation.recipientLabel} role={invitationRole(issuedInvitation)}
+              scope={view.name} expiresAt={issuedInvitation.expiresAt} hide={() => setLink(undefined)} />
           )}
           {missingLinkId && !link && (
             <p className="po-notice">
@@ -304,6 +245,7 @@ function TeamEditor({
                   },
                   (result) => {
                     setLabel('');
+                    setRole('ENTRY_MANAGER');
                     setLink(result.invitationLink);
                     setLinkId(result.createdInvitationId);
                     setMissingLinkId(
@@ -311,7 +253,6 @@ function TeamEditor({
                         ? undefined
                         : result.createdInvitationId,
                     );
-                    setLinkMessage('');
                   },
                 );
               }}
