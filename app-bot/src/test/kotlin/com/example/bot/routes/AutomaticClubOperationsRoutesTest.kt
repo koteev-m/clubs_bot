@@ -5,6 +5,7 @@ import com.example.bot.data.privacy.JdbcLegacyClubAccess
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.testing.ApplicationTestBuilder
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -67,18 +68,34 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                         .jsonArray
                         .last()
                         .jsonObject
-                ok(
-                    "$base/halls/${secondHall.string("id")}/tables",
-                    SECOND_MANAGER,
-                    JsonObject(
-                        obj("label" to "Lounge table", "expectedVersion" to secondHall.string("layoutRevision")) +
-                            ("tableNumber" to JsonPrimitive(2)) + ("capacity" to JsonPrimitive(4)),
-                    ),
-                )
+                val loungeLayout =
+                    ok(
+                        "$base/halls/${secondHall.string("id")}/tables",
+                        SECOND_MANAGER,
+                        JsonObject(
+                            obj("label" to "Lounge table", "expectedVersion" to secondHall.string("layoutRevision")) +
+                                ("tableNumber" to JsonPrimitive(2)) + ("capacity" to JsonPrimitive(4)),
+                        ),
+                    )
                 val calendar = ok("$base/calendar", SECOND_MANAGER)
                 val zone = ZoneId.of(calendar.string("timezone"))
-                val start = clock.instant().plusSeconds(125).truncatedTo(ChronoUnit.MINUTES)
-                val end = start.plusSeconds(6 * 3600)
+                val start = clock.instant().plusSeconds(75).truncatedTo(ChronoUnit.MINUTES)
+                val end = start.plusSeconds(120)
+                val rulesPath = "$base/booking-rules"
+                ok(
+                    rulesPath,
+                    SECOND_MANAGER,
+                    JsonObject(
+                        obj("expectedVersion" to ok(rulesPath, SECOND_MANAGER).string("version")) +
+                            mapOf(
+                                "cutoffMinutes" to JsonPrimitive(0),
+                                "arrivalMinutes" to JsonPrimitive(0),
+                                "holdMinutes" to JsonNull,
+                                "retentionMinutes" to JsonPrimitive(1),
+                            ),
+                    ),
+                    HttpMethod.Patch,
+                )
                 ok("$base/calendar", SECOND_MANAGER, calendarChange(calendar, start, end, zone), HttpMethod.Patch)
                 val profile = ok("$base/profile", SECOND_MANAGER)
                 val zoneChange =
@@ -94,7 +111,7 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                     source.scalar(
                         "SELECT event_id FROM client_working_night_events WHERE club_id=$club",
                     )
-                val editedEnd = end.plusSeconds(900)
+                val editedEnd = end.plusSeconds(60)
                 val editedCalendar = ok("$base/calendar", SECOND_MANAGER)
                 ok(
                     "$base/calendar",
@@ -138,6 +155,15 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                                 ("guests" to JsonPrimitive(2)),
                         ),
                     )
+                val loungeTable =
+                    loungeLayout["halls"]!!
+                        .jsonArray
+                        .last()
+                        .jsonObject["tables"]!!
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                        .string("id")
                 val savedCalendar = ok("$base/calendar", SECOND_MANAGER)
                 val editBookedNight =
                     requestAs(
@@ -164,6 +190,14 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                     )
                 assertEquals(HttpStatusCode.Conflict, requestAs(operations, THIRD_MANAGER, deposit).status)
                 clock.time = start.plusSeconds(1)
+                exerciseMoveAndCancellation(
+                    operations,
+                    night,
+                    table,
+                    loungeTable,
+                    reservation.string("bookingId"),
+                    start,
+                )
                 assertEquals("false", ok(operations, THIRD_MANAGER).string("future"))
                 assertEquals("0", source.scalar("SELECT COUNT(*) FROM shift_reports"))
                 val key = UUID.randomUUID().toString()
@@ -199,8 +233,115 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                 assertTrue(again.string("sessionId") != sessionId)
                 assertEquals("1500500", source.scalar("SELECT SUM(amount_minor) FROM table_deposit_operations"))
                 assertEquals("0", source.scalar("SELECT COUNT(*) FROM checkins"))
+                clock.time = editedEnd.plusSeconds(1)
+                val history = ok("$operations/nights/$night", THIRD_MANAGER)
+                assertEquals("true", history.string("historical"))
+                assertTrue(history["bookings"]!!.jsonArray.isEmpty())
+                assertFalse(
+                    history["permissions"]!!.jsonArray.contains(JsonPrimitive("client.club.operations.booking.write")),
+                )
+                val receipts = history["tableMoney"]!!.jsonArray.map { it.jsonObject }
+                assertEquals(setOf("500", "1500000"), receipts.map { it.string("amountMinor") }.toSet())
+                assertEquals(setOf("INITIAL", "TOPUP"), receipts.map { it.string("kind") }.toSet())
             }
         }
+
+    private suspend fun ApplicationTestBuilder.exerciseMoveAndCancellation(
+        operations: String,
+        night: String,
+        sourceTable: String,
+        destination: String,
+        booking: String,
+        start: Instant,
+    ) {
+        val path = "$operations/nights/$night"
+
+        suspend fun readBooking(id: String): JsonObject =
+            ok(path, THIRD_MANAGER)["bookings"]!!
+                .jsonArray
+                .map { it.jsonObject }
+                .single { it.string("id") == id }
+
+        fun base(
+            id: String,
+            table: String,
+            version: String,
+        ) = obj(
+            "nightId" to night,
+            "tableId" to table,
+            "bookingId" to id,
+            "expectedUpdatedAt" to version,
+        )
+        val second =
+            ok(
+                operations,
+                THIRD_MANAGER,
+                JsonObject(
+                    obj(
+                        "action" to "create_booking",
+                        "nightId" to night,
+                        "tableId" to destination,
+                        "guestName" to "Blocker",
+                    ) +
+                        ("guests" to JsonPrimitive(2)),
+                ),
+            ).string("bookingId")
+        ok(
+            operations,
+            THIRD_MANAGER,
+            JsonObject(
+                base(booking, sourceTable, readBooking(booking).string("updatedAt")) +
+                    obj("action" to "extend_wait", "waitUntil" to start.plusSeconds(10).toString()),
+            ),
+        )
+        val before = readBooking(booking)
+        val command =
+            base(booking, sourceTable, before.string("updatedAt")) +
+                obj(
+                    "action" to "move_booking",
+                    "destinationTableId" to destination,
+                    "arrivalBy" to start.plusSeconds(30).toString(),
+                )
+        assertEquals(HttpStatusCode.Conflict, requestAs(operations, THIRD_MANAGER, JsonObject(command)).status)
+        assertEquals(before, readBooking(booking))
+        ok(
+            operations,
+            THIRD_MANAGER,
+            JsonObject(
+                base(second, destination, readBooking(second).string("updatedAt")) +
+                    obj("action" to "cancel_booking", "reason" to "Не придёт"),
+            ),
+        )
+        assertEquals("CANCELLED", readBooking(second).string("status"))
+        assertEquals("Не придёт", readBooking(second).string("cancellationReason"))
+        ok(operations, THIRD_MANAGER, JsonObject(command))
+        val moved = readBooking(booking)
+        assertEquals(destination, moved.string("tableId"))
+        assertEquals(start.plusSeconds(30).toString(), moved.string("arrivalBy"))
+        assertEquals(before.string("source"), moved.string("source"))
+        assertTrue(Instant.parse(moved.string("waitUntil")) >= Instant.parse(moved.string("arrivalBy")))
+        val newArrival = start.plusSeconds(61).toString()
+        ok(
+            operations,
+            THIRD_MANAGER,
+            JsonObject(
+                base(booking, destination, moved.string("updatedAt")) +
+                    obj("action" to "move_booking", "arrivalBy" to newArrival),
+            ),
+        )
+        val movedTime = readBooking(booking)
+        assertEquals(destination, movedTime.string("tableId"))
+        assertEquals(newArrival, movedTime.string("arrivalBy"))
+        ok(
+            operations,
+            THIRD_MANAGER,
+            JsonObject(
+                base(booking, destination, movedTime.string("updatedAt")) +
+                    obj("action" to "move_booking", "destinationTableId" to sourceTable),
+            ),
+        )
+        assertEquals(newArrival, readBooking(booking).string("arrivalBy"))
+    }
 
     private suspend fun assertGuestSeparation(
         source: DataSource,

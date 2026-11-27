@@ -2,6 +2,8 @@ package com.example.bot.data.client.onboarding
 
 import com.example.bot.policy.CabinetBookingRules
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.time.DateTimeException
 import java.time.Instant
 import java.util.UUID
@@ -89,24 +91,8 @@ internal class ClubDeskReservations(
                     club,
                 )
             }
-            "move_booking" -> {
-                body.only(fields + "destinationTableId")
-                val destination = state.table(body.id("destinationTableId"))
-                if (destination.capacity < booking.long("guests_count") ||
-                    destination == table
-                ) {
-                    fail("validation_error")
-                }
-                state.requireAvailable(destination)
-                sql.update(
-                    "UPDATE bookings SET table_id=?,table_number=?,updated_at=? WHERE id=? AND club_id=?",
-                    destination.bookingId,
-                    destination.number,
-                    now,
-                    id,
-                    club,
-                )
-            }
+            "move_booking" -> return move(table, body, id, booking, fields)
+
             "cancel_booking" -> {
                 body.only(fields + "reason")
                 status(id, "CANCELLED", body.text("reason", DESK_NOTE_LENGTH, required = true))
@@ -134,12 +120,55 @@ internal class ClubDeskReservations(
         return DeskResult(bookingId = id)
     }
 
+    private fun move(
+        table: DeskTable,
+        body: JsonObject,
+        id: UUID,
+        booking: DbRow,
+        fields: Set<String>,
+    ): DeskResult {
+        body.only(fields + setOf("destinationTableId", "arrivalBy"))
+        val destination = if (body["destinationTableId"] == null) table else state.table(body.id("destinationTableId"))
+        val originalArrival = booking["arrival_by"]?.let { booking.instant("arrival_by") }
+        val newArrival = if (body["arrivalBy"] == null) originalArrival else arrival(body) ?: fail("validation_error")
+        if (destination == table && originalArrival == newArrival) fail("validation_error")
+        if (destination != table) {
+            if (destination.capacity < booking.long("guests_count")) fail("validation_error")
+            state.requireAvailable(destination)
+        }
+        sql.update(
+            "UPDATE bookings SET table_id=?,table_number=?,arrival_by=?,updated_at=? WHERE id=? AND club_id=?",
+            destination.bookingId,
+            destination.number,
+            newArrival,
+            now,
+            id,
+            club,
+        )
+        return DeskResult(
+            bookingId = id,
+            auditDetails =
+                buildJsonObject {
+                    put("fromTableId", table.physicalId.toString())
+                    put("toTableId", destination.physicalId.toString())
+                    put("fromArrivalBy", originalArrival?.toString())
+                    put("toArrivalBy", newArrival?.toString())
+                },
+        )
+    }
+
     fun deadline(booking: DbRow): Instant? {
-        if (booking["staff_wait_until"] != null) return booking.instant("staff_wait_until")
-        return booking["arrival_by"]?.let {
-            val config = sql.row("SELECT retention_minutes FROM client_club_booking_rules WHERE club_id=?", club)
-            val minutes = config?.long("retention_minutes") ?: CabinetBookingRules().retentionMinutes.toLong()
-            minOf(night.end, booking.instant("arrival_by").plusSeconds(minutes * 60))
+        val extended = booking["staff_wait_until"]?.let { booking.instant("staff_wait_until") }
+        val regular =
+            booking["arrival_by"]?.let {
+                val config = sql.row("SELECT retention_minutes FROM client_club_booking_rules WHERE club_id=?", club)
+                val minutes = config?.long("retention_minutes") ?: CabinetBookingRules().retentionMinutes.toLong()
+                minOf(night.end, booking.instant("arrival_by").plusSeconds(minutes * 60))
+            }
+        return when {
+            extended == null -> regular
+            regular == null -> extended
+            else -> maxOf(extended, regular)
         }
     }
 

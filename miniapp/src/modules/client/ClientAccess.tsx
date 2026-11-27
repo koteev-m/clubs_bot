@@ -5,6 +5,7 @@ import NewClub, { blankNewVenue } from './NewClub';
 import { authorityLost } from './onboarding.api';
 import ClubProfile from './ClubProfile';
 import ClubCabinet from './ClubCabinet';
+import type { WorkspaceLocation } from './ClubNightWorkspaceViews';
 import ClubDepositSettings from './ClubDepositSettings';
 import ClubFinancialReportAccess from './ClubFinancialReportAccess';
 import ClubOperatingReports from './ClubOperatingReports';
@@ -221,6 +222,7 @@ function ClientWorkspace({
   const createSaving = useRef(false);
   createSaving.current = createClub.saving;
   const dirty = useRef(false);
+  const workspaceMemory = useRef(new Map<string, WorkspaceLocation>());
   const offerInitialShortcut = useRef(screen.type === 'home');
   const approvedBack = useRef<number | null>(null);
   const sectionPending = useRef(false);
@@ -580,6 +582,8 @@ function ClientWorkspace({
         }
         open={(type) => navigate({ type, id: screen.id! })}
         leaveClub={() => goBack({ type: 'home' })}
+        openClub={(id) => navigate({ type: 'club', id })}
+        workspaceMemory={workspaceMemory.current}
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
       />
@@ -630,21 +634,19 @@ function ClientHome({
     credential,
     '/api/client/context',
   );
+  const operatingClubs = remote.data?.clients.flatMap((client) => client.clubs ?? []) ?? [];
+  const directClub = operatingClubs.length === 1 ? operatingClubs[0].id : undefined;
   useEffect(() => {
-    if (
-      offerShortcut &&
-      savedScreen().type === 'home' &&
-      remote.data?.clients.length === 1
-    ) {
+    if (!offerShortcut || savedScreen().type !== 'home') return;
+    if (directClub) {
+      navigate({ type: 'club', id: directClub }, true);
+    } else if (!operatingClubs.length && remote.data?.clients.length === 1) {
       const client = remote.data.clients[0];
-      navigate(
-        client.clubs?.length === 1
-          ? { type: 'club', id: client.clubs[0].id }
-          : { type: 'space', id: client.id },
-        true,
-      );
+      navigate(client.clubs?.length === 1
+        ? { type: 'club', id: client.clubs[0].id }
+        : { type: 'space', id: client.id }, true);
     }
-  }, [remote.data, navigate, offerShortcut]);
+  }, [remote.data, directClub, operatingClubs.length, navigate, offerShortcut]);
   return (
     <Shell
       title="Мои заведения"
@@ -658,6 +660,15 @@ function ClientHome({
           <p>
             Откройте ссылку на приглашение, чтобы получить доступ.
           </p>
+        </section>
+      )}
+      {operatingClubs.length > 0 && (
+        <section aria-label="Доступные клубы" className="cm-actions">
+          {operatingClubs.map((club) => (
+            <button key={club.id} className="ob-button" onClick={() => navigate({ type: 'club', id: club.id })}>
+              {club.name}
+            </button>
+          ))}
         </section>
       )}
       {remote.data?.clients.map((client) => (

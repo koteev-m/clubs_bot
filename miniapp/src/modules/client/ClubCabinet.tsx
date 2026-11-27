@@ -7,6 +7,7 @@ import type { ClientLayout } from './layout.api';
 import { PreparationView } from './preparation.types';
 import ClubPreparation from './ClubPreparation';
 import ClubNightDesk from './ClubNightDesk';
+import type { WorkspaceLocation } from './ClubNightWorkspaceViews';
 import ClubSetup from './ClubSetup';
 import BusinessOverview from './BusinessOverview';
 import { RemoteState, Shell } from './OnboardingShared';
@@ -38,6 +39,8 @@ type Props = {
   mode?: 'overview' | 'settings' | 'readiness' | 'choice';
   back: (clientId?: string) => void;
   leaveClub?: () => void;
+  openClub?: (id: string) => void;
+  workspaceMemory?: Map<string, WorkspaceLocation>;
   open: (section: Section) => void;
   reportDirty: (value: boolean) => void;
   reportPending: (value: boolean) => void;
@@ -316,7 +319,11 @@ export default function ClubCabinet(props: Props) {
 }
 function CabinetContext(props: Props) {
   const [denial, setDenial] = useState<{ error: unknown }>();
-  const denied = useCallback((error: unknown) => setDenial({ error }), []);
+  const { id, workspaceMemory } = props;
+  const denied = useCallback((error: unknown) => {
+    workspaceMemory?.delete(id);
+    setDenial({ error });
+  }, [id, workspaceMemory]);
   const [scope, setScope] = useState(() =>
     createClubRequestScope(props.credential, props.id, denied),
   );
@@ -351,6 +358,9 @@ function Cabinet({
   id,
   mode = 'overview',
   back,
+  leaveClub,
+  openClub,
+  workspaceMemory,
   open,
   reportDirty,
   reportPending,
@@ -429,6 +439,27 @@ function Cabinet({
     openBookingRules: () => safeOpen('booking-rules'),
     openBookingPreview: () => safeOpen('booking-preview'),
   };
+  const deskBack = useRef<() => boolean>();
+  if (profile && (mode === 'overview' || mode === 'choice') && permits('read')) {
+    const menu = [
+      ...(clubManager || floorSettings ? [{ label: 'Настройки клуба', run: () => safeOpen('settings') }] : []),
+      ...(permits('team.manage') ? [{ label: 'Команда клуба', run: () => safeOpen('managers') }] : []),
+      ...(permits('analytics.read') ? [{ label: 'Операционные показатели', run: () => safeOpen('operational-reports') }] : []),
+      { label: 'Другие кабинеты', run: () => { if (canLeave()) (leaveClub ?? back)(); } },
+    ];
+    return (
+      <Shell compact title={profile.name} backDisabled={pending} back={() => {
+        if (!deskBack.current?.() && canLeave()) (leaveClub ?? back)();
+      }}>
+        <ClubNightDesk credential={credential} profile={profile} reportDirty={trackDirty}
+          reportPending={trackPending} reportBack={(handler) => { deskBack.current = handler; }}
+          openClub={openClub ? (clubId) => { if (canLeave()) openClub(clubId); } : undefined}
+          menu={menu} workspaceMemory={workspaceMemory}
+          financialReport={permits('financial_reports.read')
+            ? <BusinessOverview credential={credential} profile={profile} financialOnly /> : undefined} />
+      </Shell>
+    );
+  }
   return (
     <Shell
       title={
@@ -511,7 +542,6 @@ function Cabinet({
                       profile={profile}
                       reportDirty={trackDirty}
                       reportPending={trackPending}
-                      openSettings={clubManager || floorSettings ? () => safeOpen('settings') : undefined}
                     />
                   )}
                   <div className="cm-actions">

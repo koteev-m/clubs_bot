@@ -121,7 +121,12 @@ function amount(form: HTMLElement, value: string) {
     target: { value },
   });
 }
+async function openTable() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Столы' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Стол 1' }));
+}
 async function openSeat() {
+  await openTable();
   fireEvent.click(
     await screen.findByRole('button', { name: 'Посадить · Стол 1' }),
   );
@@ -209,7 +214,7 @@ it('splits mixed tender independently of allocation and preserves the exact lost
   fireEvent.change(within(form).getByLabelText('Шары'), {
     target: { value: '3000' },
   });
-  expect(within(form).getByText(/Картой 10\s000,00/)).toBeTruthy();
+  expect(within(form).getByText(/10\s000,00 ₽/)).toBeTruthy();
   expect(within(form).getByText(/12\s000,00/)).toBeTruthy();
   submitDeposit(form);
   expect(await screen.findByText(/Неизвестно, сохранена ли исходная запись/)).toBeTruthy();
@@ -240,6 +245,7 @@ it('offers an independent card top-up with all money in the main category', asyn
   const writes = vi.fn((command: Command) => response(receipt(command)));
   useServer(() => current, writes);
   mount();
+  await openTable();
   fireEvent.click(
     await screen.findByRole('button', { name: 'Доплата · Стол 1' }),
   );
@@ -421,6 +427,7 @@ it('sends manual booking and booking schedule changes for the exact nightly tabl
   const writes = vi.fn((command: Command) => response(receipt(command)));
   useServer(() => current, writes);
   mount();
+  await openTable();
   fireEvent.click(
     await screen.findByRole('button', { name: 'Забронировать · Стол 1' }),
   );
@@ -565,4 +572,51 @@ it('asks for newly received money when a linked legacy deposit has a zero balanc
     }),
     expect.any(String),
   );
+});
+
+it('hides finances without the server table-money permission', async () => {
+  const current = view();
+  current.permissions = current.permissions.filter((permission) => permission !== permissions.payments);
+  useServer(() => current, vi.fn());
+  mount();
+  await screen.findByRole('heading', { name: 'Смена' });
+  expect(screen.queryByRole('button', { name: 'Финансы' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Брони' })).toBeTruthy();
+});
+
+it('cancels a reservation with a quick reason and opens a new walk-in on the freed table', async () => {
+  const current = view();
+  current.halls[0].tables[0] = { ...free, status: 'reserved', bookingId: 'book' };
+  current.bookings = [{ id: 'book', tableId: '1', status: 'BOOKED',
+    guestName: 'Старый гость', guests: 2, updatedAt: '2026-11-27T18:20:30Z' }];
+  const writes = vi.fn((body: Command) => {
+    if (body.action === 'cancel_booking') {
+      current.bookings[0].status = 'CANCELLED';
+      current.halls[0].tables[0] = free;
+    }
+    return response(receipt(body));
+  });
+  useServer(() => current, writes);
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: /Старый гость/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Отменить бронь' }));
+  const cancellation = screen.getByRole('form', { name: 'Отменить бронь' });
+  fireEvent.change(within(cancellation).getByLabelText('Причина отмены'), { target: { value: 'Не придёт' } });
+  fireEvent.click(within(cancellation).getByRole('button', { name: 'Отменить бронь' }));
+  expect(writes.mock.calls[0][0]).toMatchObject({ action: 'cancel_booking', bookingId: 'book', reason: 'Не придёт' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Посадить других гостей' }));
+  const form = screen.getByRole('form', { name: 'Посадка гостей' });
+  expect(within(form).getByText(/Стол 1/)).toBeTruthy();
+  expect(within(form).queryByText('Старый гость')).toBeNull();
+});
+
+it('drops a remembered card when the server returns a closed work night', async () => {
+  const closed = { ...view(), night: null, blocked: 'no_current_night' };
+  const memory = new Map([['42', { tab: 'shift' as const, night: '', nights: {},
+    search: '', filter: '', bookingId: 'obsolete-booking', tableMap: false }]]);
+  useServer(() => closed, vi.fn());
+  render(<ClubNightDesk profile={profile} credential="synthetic" workspaceMemory={memory} />);
+  expect(await screen.findByRole('heading', { name: 'Смена' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Все брони' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'Карточка брони' })).toBeNull();
 });

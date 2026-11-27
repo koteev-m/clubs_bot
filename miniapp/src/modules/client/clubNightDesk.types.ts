@@ -45,6 +45,9 @@ export type Table = {
   sessionId: string | null;
   lastSessionId: string | null;
   bookingId: string | null;
+  seatedGuests?: number;
+  x?: number;
+  y?: number;
   payments?: Payment[];
   salesStopped?: boolean;
 };
@@ -86,6 +89,15 @@ export type Desk = {
   night: Night | null;
   upcomingNights?: Night[];
   future?: boolean;
+  historical?: boolean;
+  recentNights?: Night[];
+  tableMoney?: (Payment & {
+    tableId: string;
+    tableNumber: number;
+    recordedAt: string;
+    kind: 'INITIAL' | 'TOPUP';
+    allocations: { name: string; amountMinor: string }[];
+  })[];
   blocked?: string;
   halls: Hall[];
   bookings: Booking[];
