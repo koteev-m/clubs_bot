@@ -206,3 +206,47 @@ it('returns from a directly opened receipt to the roster and then the club', asy
   fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
   expect(location.search).toBe('?mode=client&screen=club&resource=42');
 });
+
+it('confirms only the selected configuration section and shows the package when inviting a manager', async () => {
+  const permission = 'client.club.night.create';
+  const writing = 'client.club.operations.deposit.record';
+  const writes: object[] = [];
+  const team = {
+    ...roster,
+    roles: ['FLOOR_MANAGER', 'ENTRANCE_MANAGER', 'FINANCE_MANAGER', 'PROMOTER'],
+    rolePermissions: { FLOOR_MANAGER: [writing] },
+    delegablePermissions: ['client.club.calendar.write', permission],
+  };
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options) => {
+    if (options?.method === 'POST')
+      writes.push(JSON.parse(String(options.body)));
+    return Response.json({
+      ...team,
+      version: writes.length ? '8' : '7',
+      assignments: [
+        {
+          ...assignment,
+          role: 'FLOOR_MANAGER',
+          delegations: writes.length ? [{ id: 'grant-1', version: '1', permission }] : [],
+        },
+      ],
+    });
+  });
+
+  render(<ClientAccess initialToken={null} />);
+  await screen.findByRole('heading', { name: 'Команда клуба' });
+  fireEvent.click(screen.getByRole('button', { name: /Выдать доступ.*Формирование операционной ночи/ }));
+  await screen.findByRole('button', { name: /Отозвать доступ.*Формирование операционной ночи/ });
+  expect(writes).toEqual([{
+    action: 'delegate',
+    expectedVersion: '7',
+    assignmentId: assignment.id,
+    expectedAssignmentVersion: assignment.version,
+    confirmed: true,
+    permission,
+  }]);
+  expect(screen.getByRole('button', { name: /Выдать доступ.*Календарь и расписание/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Пригласить сотрудника' }));
+  await screen.findByText('Запись полученного депозита');
+  expect((screen.getByLabelText('Роль сотрудника') as HTMLSelectElement).value).toBe('FLOOR_MANAGER');
+});

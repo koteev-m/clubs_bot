@@ -1,10 +1,12 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRemote } from './onboarding.hooks';
 import { authorityLost, OnboardingError } from './onboarding.api';
 import { businessRoleNames, ClubProfile } from './onboarding.types';
 import { CalendarView, validCalendarView } from './calendar';
+import type { ClientLayout } from './layout.api';
 import { PreparationView } from './preparation.types';
 import ClubPreparation from './ClubPreparation';
+import ClubNightDesk from './ClubNightDesk';
 import ClubSetup from './ClubSetup';
 import BusinessOverview from './BusinessOverview';
 import { RemoteState, Shell } from './OnboardingShared';
@@ -24,6 +26,9 @@ type Section =
   | 'team'
   | 'managers'
   | 'booking-preview'
+  | 'deposit-configuration'
+  | 'operational-reports'
+  | 'financial-report-access'
   | 'settings'
   | 'readiness'
   | 'club';
@@ -41,11 +46,14 @@ function NextNight({
   credential,
   profile,
   open,
+  showCurrent,
 }: {
   credential: string;
   profile: ClubProfile;
   open: () => void;
+  showCurrent: boolean;
 }) {
+  const [, setClockTick] = useState(0);
   const remote = useRemote<CalendarView>(
     credential,
     '/api/client/clubs/' + profile.id + '/calendar',
@@ -68,9 +76,24 @@ function NextNight({
       },
     },
   );
+  const now = Date.now();
   const next = remote.data?.nights
-    .filter((night) => Date.parse(night.closesAt) > Date.now())
+    .filter((night) => Date.parse(night.closesAt) > now)
     .sort((a, b) => Date.parse(a.opensAt) - Date.parse(b.opensAt))[0];
+  const current = next !== undefined && Date.parse(next.opensAt) <= now;
+  const boundary = next && Date.parse(current ? next.closesAt : next.opensAt);
+  useEffect(() => {
+    if (!showCurrent || boundary === undefined) return;
+    const timer = window.setTimeout(
+      () => setClockTick((tick) => tick + 1),
+      Math.min(Math.max(0, boundary - now), 60_000),
+    );
+    return () => window.clearTimeout(timer);
+  }, [boundary, now, showCurrent]);
+  const title =
+    showCurrent && current
+      ? 'Текущая ночь по расписанию'
+      : 'Ближайшая клубная ночь';
   const dateTime = (date: string) =>
     new Intl.DateTimeFormat('ru-RU', {
       weekday: 'long',
@@ -81,12 +104,12 @@ function NextNight({
       timeZone: profile.timezone,
     }).format(new Date(date));
   return (
-    <section className="po-card ob-card" aria-label="Ближайшая клубная ночь">
-      <h2>Ближайшая клубная ночь</h2>
+    <section className="po-card ob-card" aria-label={title}>
+      <h2>{title}</h2>
       {remote.loading ? (
         <p>Проверяем расписание…</p>
       ) : remote.error ? (
-        <p>Проверка недоступна.</p>
+        <RemoteState {...remote} />
       ) : next ? (
         <>
           <p className="cm-status">
@@ -114,6 +137,82 @@ function NextNight({
     </section>
   );
 }
+
+function HallOverview({
+  credential,
+  profile,
+  open,
+}: {
+  credential: string;
+  profile: ClubProfile;
+  open: () => void;
+}) {
+  const remote = useRemote<ClientLayout>(
+    credential,
+    '/api/client/clubs/' + profile.id + '/layout',
+    undefined,
+    {
+      onSuccess: (layout) => {
+        if (
+          layout.clubId !== profile.id ||
+          layout.clientId !== profile.clientId ||
+          !Array.isArray(layout.permissions) ||
+          !layout.permissions.includes('client.club.read') ||
+          !Array.isArray(layout.halls) ||
+          !layout.halls.every(
+            (hall) =>
+              typeof hall?.id === 'string' &&
+              typeof hall.name === 'string' &&
+              Array.isArray(hall.tables) &&
+              hall.tables.every(
+                (table) =>
+                  table?.hallId === hall.id &&
+                  Number.isSafeInteger(table.capacity) &&
+                  table.capacity > 0,
+              ),
+          )
+        )
+          throw new OnboardingError(503, 'invalid_response');
+      },
+    },
+  );
+  const halls = remote.data?.halls;
+  return (
+    <section className="po-card ob-card cm-halls" aria-label="Обзор залов">
+      <h2>Обзор залов</h2>
+      <RemoteState {...remote} />
+      {halls &&
+        (halls.length > 0 ? (
+          <ul>
+            {halls.map((hall) => (
+              <li key={hall.id}>
+                <strong>{hall.name}</strong>
+                <span>Столов в настройках: {hall.tables.length}</span>
+                <span>
+                  Мест за этими столами:{' '}
+                  {hall.tables.reduce(
+                    (total, table) => total + table.capacity,
+                    0,
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>Залы ещё не добавлены.</p>
+        ))}
+      <button type="button" className="ob-button" onClick={open}>
+        Открыть залы и столы
+      </button>
+    </section>
+  );
+}
+
+function hasLimitedFloorSettings(profile: ClubProfile) {
+  return profile.businessRole === 'FLOOR_MANAGER' &&
+    !profile.permissions.includes('client.club.operations.team.manage');
+}
+
 function Settings({
   profile,
   open,
@@ -155,6 +254,14 @@ function Settings({
       hint: 'Сохранённые условия для столов',
       write: can('booking_rules.write'),
     },
+    ...(can('operations.deposit_categories.write')
+      ? [{
+          key: 'deposit-configuration' as const,
+          title: 'Распределение депозита',
+          hint: 'Основная и дополнительные категории клуба',
+          write: true,
+        }]
+      : []),
     ...(can('finance.read')
       ? [
           {
@@ -176,9 +283,13 @@ function Settings({
         ]
       : []),
   ];
+  const visible = hasLimitedFloorSettings(profile)
+    ? sections.filter((section) => section.write || (section.key === 'calendar' && can('night.create')))
+    : sections;
+  if (visible.length === 0) return <p>Разделы настройки пока не делегированы.</p>;
   return (
     <nav className="cm-sections" aria-label="Разделы настройки">
-      {sections.map((section) => (
+      {visible.map((section) => (
         <button
           type="button"
           className="po-card ob-card cm-section"
@@ -297,6 +408,13 @@ function Cabinet({
     },
   );
   const businessRole = profile?.businessRole;
+  const clubManager = businessRole === 'CLUB_MANAGER';
+  const floorManager = businessRole === 'FLOOR_MANAGER';
+  const permits = (permission: string) => profile?.permissions.includes('client.club.operations.' + permission);
+  const floorSettings = profile?.permissions.some((permission) => [
+    'client.club.profile.write', 'client.club.layout.write', 'client.club.calendar.write',
+    'client.club.night.create', 'client.club.booking_rules.write',
+  ].includes(permission));
   const networkCanConfigure =
     businessRole === 'NETWORK_MANAGER' &&
     profile?.permissions.includes('client.club.profile.write');
@@ -387,20 +505,35 @@ function Cabinet({
               )}
               {(mode === 'overview' || businessRole) && (
                 <>
+                  {permits('read') && (
+                    <ClubNightDesk
+                      credential={credential}
+                      profile={profile}
+                      reportDirty={trackDirty}
+                      reportPending={trackPending}
+                      openSettings={clubManager || floorSettings ? () => safeOpen('settings') : undefined}
+                    />
+                  )}
                   <div className="cm-actions">
-                    <button
-                      type="button"
-                      className="ob-button"
-                      disabled={pending}
-                      onClick={() => safeOpen('settings')}
-                    >
-                      {businessRole === 'BUSINESS_OWNER' ||
-                      (businessRole === 'NETWORK_MANAGER' && !networkCanConfigure)
-                        ? 'Сохранённые настройки'
-                        : owner
-                          ? 'Открыть настройки клуба'
-                          : 'Перейти к настройкам'}
-                    </button>
+                    {permits('financial_reports.read') && (
+                    <BusinessOverview credential={credential} profile={profile} financialOnly />
+                  )}
+                  {!clubManager && (!floorManager || floorSettings) && (
+                      <button
+                        type="button"
+                        className="ob-button"
+                        disabled={pending}
+                        onClick={() => safeOpen('settings')}
+                      >
+                        {businessRole === 'BUSINESS_OWNER' ||
+                        (businessRole === 'NETWORK_MANAGER' &&
+                          !networkCanConfigure)
+                          ? 'Сохранённые настройки'
+                          : owner
+                            ? 'Открыть настройки клуба'
+                            : 'Перейти к настройкам'}
+                      </button>
+                    )}
                     {businessRole &&
                       profile.permissions.includes(
                         'client.staff.assign.club_manager',
@@ -413,6 +546,21 @@ function Cabinet({
                           Управляющие
                         </button>
                       )}
+                    {permits('team.manage') && (
+                      <button type="button" className="ob-button" disabled={pending} onClick={() => safeOpen('managers')}>
+                        Команда клуба
+                      </button>
+                    )}
+                    {permits('analytics.read') && (
+                      <button type="button" className="ob-button" disabled={pending} onClick={() => safeOpen('operational-reports')}>
+                        Операционные показатели
+                      </button>
+                    )}
+                    {businessRole === 'BUSINESS_OWNER' && (
+                      <button type="button" className="ob-button" onClick={() => safeOpen('financial-report-access')}>
+                        Допуск к финансовым итогам
+                      </button>
+                    )}
                     {profile.permissions.includes('client.club.team.manage') &&
                       owner && (
                         <button
@@ -425,15 +573,27 @@ function Cabinet({
                         </button>
                       )}
                   </div>
-                  {(businessRole === 'CLUB_MANAGER' ||
+                  {clubManager && (
+                    <>
+                      <NextNight
+                        key={profile.id + ':' + profile.timezone}
+                        credential={credential}
+                        profile={profile}
+                        open={callbacks.openCalendar}
+                        showCurrent={true}
+                      />
+                      <HallOverview
+                        credential={credential}
+                        profile={profile}
+                        open={callbacks.openLayout}
+                      />
+                    </>
+                  )}
+                  {(clubManager ||
                     networkCanConfigure ||
                     (!businessRole && preparation && !owner)) && (
-                    <section aria-label="Задачи по конфигурации">
+                    <section aria-label="Настройка клуба">
                       <h2>Настройка клуба</h2>
-                      <p className="po-muted">
-                        Открывайте разделы, проверяйте сохранённые значения и
-                        выполняйте доступные настройки.
-                      </p>
                       <Settings profile={profile} open={safeOpen} />
                     </section>
                   )}
@@ -443,13 +603,16 @@ function Cabinet({
                       profile={profile}
                     />
                   )}
-                  <NextNight
-                    key={profile.id + ':' + profile.timezone}
-                    credential={credential}
-                    profile={profile}
-                    open={callbacks.openCalendar}
-                  />
-                  <section className="po-card ob-card">
+                  {!clubManager && !floorManager && (
+                    <NextNight
+                      key={profile.id + ':' + profile.timezone}
+                      credential={credential}
+                      profile={profile}
+                      open={callbacks.openCalendar}
+                      showCurrent={false}
+                    />
+                  )}
+                  {!floorManager && <section className="po-card ob-card">
                     <h2>Готовность клуба</h2>
                     {!profile.description.trim() && (
                       <p>В профиле клуба пока нет описания.</p>
@@ -461,7 +624,7 @@ function Cabinet({
                     >
                       Открыть проверку готовности
                     </button>
-                  </section>
+                  </section>}
                 </>
               )}
             </>
@@ -473,16 +636,16 @@ function Cabinet({
                 разрешениям.
               </p>
               <Settings profile={profile} open={safeOpen} />
-              <button
+              {!floorManager && <button
                 type="button"
                 className="ob-button"
                 onClick={() => safeOpen('readiness')}
               >
                 Подробная проверка готовности
-              </button>
+              </button>}
             </>
           )}
-          {mode === 'readiness' && (
+          {mode === 'readiness' && !floorManager && (
             <ClubSetup
               key={profile.clientId + ':' + id + ':' + profile.timezone}
               credential={credential}

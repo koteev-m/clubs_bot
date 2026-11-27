@@ -114,6 +114,8 @@ export function errorMessage(error: unknown): string {
   const date = error.businessDate
     ? ' (' + error.businessDate.split('-').reverse().join('.') + ')'
     : '';
+  if (error.code === 'calendar_timezone_locked')
+    return 'Часовой пояс уже используется в операционных ночах клуба. Сохраните профиль с текущим часовым поясом.';
   if (error.code === 'calendar_night_dependencies')
     return (
       'Ночь' +

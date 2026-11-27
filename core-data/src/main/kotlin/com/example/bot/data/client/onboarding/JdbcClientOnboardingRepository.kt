@@ -43,6 +43,11 @@ class JdbcClientOnboardingRepository(
                             OnboardingRead.MANAGER_INVITATION_STATUS,
                             OnboardingRead.CLUB_PROFILE_GET,
                             OnboardingRead.CLUB_BUSINESS_OVERVIEW,
+                            OnboardingRead.CLUB_OPERATIONS_GET,
+                            OnboardingRead.CLUB_DEPOSIT_CONFIG_GET,
+                            OnboardingRead.CLUB_OPERATING_REPORTS,
+                            OnboardingRead.CLUB_FINANCIAL_REPORTS,
+                            OnboardingRead.CLUB_REPORT_ACCESS_GET,
                             OnboardingRead.CLUB_TEAM_GET,
                             OnboardingRead.CLUB_PREPARATION_GET,
                             OnboardingRead.INVITATION_RESOLVE,
@@ -116,6 +121,20 @@ class JdbcClientOnboardingRepository(
                     OnboardingRead.PLATFORM_CLUB_SEARCH -> clients.searchClubs(body)
                     OnboardingRead.PLATFORM_SUMMARY -> clients.platformSummary()
                     OnboardingRead.CLUB_BUSINESS_OVERVIEW -> BusinessOverview(session).get(required(resourceId))
+                    OnboardingRead.CLUB_OPERATIONS_GET -> ClubNightDesk(session, required(resourceId)).read(body)
+                    OnboardingRead.CLUB_DEPOSIT_CONFIG_GET ->
+                        ClubDepositConfiguration(session, required(resourceId)).get(includeInactive = true)
+                    OnboardingRead.CLUB_OPERATING_REPORTS ->
+                        ClubOperationalReports(
+                            session,
+                            required(resourceId),
+                        ).operations(body)
+                    OnboardingRead.CLUB_FINANCIAL_REPORTS ->
+                        ClubOperationalReports(
+                            session,
+                            required(resourceId),
+                        ).financial()
+                    OnboardingRead.CLUB_REPORT_ACCESS_GET -> ClubReportAccess(session, required(resourceId)).list()
                     OnboardingRead.PLATFORM_CLIENT_GET -> clients.get(required(resourceId))
                     OnboardingRead.PLATFORM_APPLICATION_SEARCH -> applications.search(null, platform = true, body)
                     OnboardingRead.PLATFORM_APPLICATION_GET -> applications.get(required(resourceId), platform = true)
@@ -146,6 +165,9 @@ class JdbcClientOnboardingRepository(
                         beforeCommit = {
                             if (memberMutation || operation in MANAGER_COMMANDS) mutationContext.ensureActive()
                             it.invitationDeadline?.let { until ->
+                                if (!clock.instant().isBefore(until)) fail("invalid_transition")
+                            }
+                            it.workingNightDeadline?.let { until ->
                                 if (!clock.instant().isBefore(until)) fail("invalid_transition")
                             }
                             if (it.usedTargetIdentity ||
@@ -197,6 +219,13 @@ class JdbcClientOnboardingRepository(
                             if (operation == OnboardingMutation.MANAGER_INVITATION_CLAIM) {
                                 return@transaction ClubManagers(session).claim(required(resourceId), body, requestHash)
                             }
+                            if (operation == OnboardingMutation.CLUB_MANAGERS_UPDATE &&
+                                body.string("action") == "delegate"
+                            ) {
+                                return@transaction ClubManagers(
+                                    session,
+                                ).delegate(required(resourceId), body, requestHash)
+                            }
                             val result = execute(session, operation, resourceId, body)
                             sql.update(
                                 "INSERT INTO client_commands(actor_user_id,connection_key," +
@@ -233,7 +262,9 @@ class JdbcClientOnboardingRepository(
         body.only(listOf("request", "key"))
         val request = body["request"] as? JsonObject ?: fail("validation_error")
         val key = body.string("key")?.takeIf { Regex("[A-Za-z0-9._:-]{8,128}").matches(it) } ?: fail("validation_error")
-        val clientId = session.requireClubGrant(clubId, WRITE_CALENDAR)
+        val calendar = ClubCalendarOperations(session)
+        val formation = calendarRequestFormsNights(request)
+        val clientId = calendar.commandAccess(clubId, formation)
         val userId = session.userId ?: fail("not_found")
         // The client lock establishes fresh authority first. Unlike mutations,
         // resolution never waits for the actor lock, so this order cannot cycle.
@@ -249,7 +280,7 @@ class JdbcClientOnboardingRepository(
             )
         if (existing != null) {
             val sameScope =
-                existing["result_type"] == "club_calendar" &&
+                existing["result_type"] in setOf("club_calendar", "club_night_formation") &&
                     existing.long("result_id") == clubId &&
                     existing.long("client_id") == clientId
             val expectedHash = commandRequestHash(OnboardingMutation.CLUB_CALENDAR_UPDATE, clubId, request)
@@ -258,7 +289,7 @@ class JdbcClientOnboardingRepository(
         return buildJsonObject {
             put("status", if (existing == null) "not_committed_at_snapshot" else "completed")
             // client_commands stores only the resource pointer, not historical JSON.
-            put("calendar", ClubCalendarOperations(session).get(clubId, write = true))
+            put("calendar", calendar.receipt(clubId, formation))
         }
     }
 
@@ -322,6 +353,13 @@ class JdbcClientOnboardingRepository(
                     session,
                 ).update(required(resourceId), body)
             OnboardingMutation.CLUB_MANAGERS_UPDATE -> ClubManagers(session).update(required(resourceId), body)
+            OnboardingMutation.CLUB_OPERATIONS_UPDATE -> ClubNightDesk(session, required(resourceId)).mutate(body)
+            OnboardingMutation.CLUB_DEPOSIT_CONFIG_UPDATE ->
+                ClubDepositConfiguration(
+                    session,
+                    required(resourceId),
+                ).write(body)
+            OnboardingMutation.CLUB_REPORT_ACCESS_UPDATE -> ClubReportAccess(session, required(resourceId)).change(body)
             OnboardingMutation.CLUB_TEAM_UPDATE -> ClubTeamOperations(session).update(required(resourceId), body)
             OnboardingMutation.CLUB_PROFILE_UPDATE ->
                 ClubOnboardingOperations(
@@ -346,13 +384,34 @@ class JdbcClientOnboardingRepository(
             "club_create" -> ClubOnboardingOperations(session).replayCreate(command.long("result_id"))
             "club_profile" -> ClubOnboardingOperations(session).get(command.long("result_id"), write = true)
             "club_booking_rules" -> ClubBookingRulesOperations(session).get(command.long("result_id"), write = true)
-            "club_calendar" -> ClubCalendarOperations(session).get(command.long("result_id"), write = true)
+            "club_calendar", "club_night_formation" ->
+                ClubCalendarOperations(session).receipt(
+                    command.long("result_id"),
+                    formation = command["result_type"] == "club_night_formation",
+                )
             "club_night_event_link" -> ClubNightEventLinks(session).receipt(command.long("result_id"))
             "club_module_settings" -> ClubModuleSettingsOperations(session).get(command.long("result_id"), write = true)
             "manager_claim" -> ClubManagers(session).status(command.long("result_id"))
             "manager_issue" -> ClubManagers(session).issueReceipt(command.long("result_id"))
             "manager_roster" -> ClubManagers(session).roster(command.long("result_id"))
             "staff_invitation" -> ClubTeamOperations(session).receipt(command.long("result_id"))
+            "club_operations" -> {
+                val id = command.long("result_id")
+                val client = command.long("client_id")
+                val record =
+                    session.sql.row(
+                        "SELECT club_id FROM client_table_operation_receipts WHERE client_id=? AND id=?",
+                        client,
+                        id,
+                    ) ?: fail("not_found")
+                ClubNightDesk(session, record.long("club_id")).receipt(client, id)
+            }
+            "club_deposit_config" ->
+                ClubDepositConfiguration(
+                    session,
+                    command.long("result_id"),
+                ).get(includeInactive = true)
+            "club_report_grant" -> ClubReportAccess(session, command.long("result_id")).list()
             "club_team" -> ClubTeamOperations(session).get(command.long("result_id"))
             "club_preparation", "prep_invite", "prep_submit" ->
                 ClubPreparationOperations(session).receipt(

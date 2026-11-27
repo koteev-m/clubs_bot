@@ -37,6 +37,10 @@ internal abstract class ControlHeadContract {
             assertEquals("0", db.scalar("SELECT COUNT(*) FROM client_manager_invitations"))
             assertEquals("0", db.scalar("SELECT COUNT(*) FROM client_manager_invitation_fences"))
             assertEquals(before, tables.associateWith { db.rows("SELECT * FROM $it ORDER BY 1") })
+            assertEquals(1, db.migrate("84"))
+            assertEquals(1, db.migrate("85"))
+            assertEquals(1, db.migrate("86"))
+            assertEquals(1, db.migrate("87"))
             assertEquals(0, db.migrate())
         }
     }

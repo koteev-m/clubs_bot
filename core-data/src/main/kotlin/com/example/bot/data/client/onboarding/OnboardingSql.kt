@@ -124,10 +124,26 @@ internal class OnboardingSql(
         ) != null
     }
 
+    val clubManagerOperationsAmendmentPresent: Boolean by lazy {
+        row(
+            "SELECT 1 AS present FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=CURRENT_SCHEMA " +
+                "AND LOWER(TABLE_NAME)='client_role_assignments' " +
+                "AND LOWER(COLUMN_NAME)='club_manager_operations_policy_hash'",
+        ) != null
+    }
+
+    val workingOperationsSchema: Boolean by lazy {
+        row(
+            "SELECT 1 AS present FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=CURRENT_SCHEMA " +
+                "AND LOWER(TABLE_NAME)='client_working_clubs'",
+        ) != null
+    }
+
     var usedTargetIdentity = false
 
     // A consumed invitation and its proof must still be live after any blocking database write.
     var invitationDeadline: Instant? = null
+    var workingNightDeadline: Instant? = null
 
     fun rows(
         sql: String,
@@ -246,7 +262,7 @@ internal class OnboardingSql(
     }
 
     fun audit(
-        actorId: Long,
+        actorId: Long?,
         action: String,
         clientId: Long,
         resourceId: Long,
@@ -384,6 +400,11 @@ internal class OnboardingSession(
                 if (sql.managerSchemaPresent) addAll(listOf(ASSIGN_CLUB_MANAGER, REVOKE_CLUB_MANAGER))
             }
             addAll(managerPermissions(clientId, clubId))
+            if (target &&
+                ClubReportAccess(this@OnboardingSession, clubId).granted(clientId)
+            ) {
+                add(READ_FINANCIAL_REPORTS)
+            }
         }
     }
 
@@ -398,7 +419,14 @@ internal class OnboardingSession(
     ): String? {
         if (businessOwnerRef(clientId, clubId) != null) return "BUSINESS_OWNER"
         val roles = managerRoleCodes(clientId, clubId)
-        return listOf("NETWORK_MANAGER", "CLUB_MANAGER").firstOrNull(roles::contains)
+        return listOf(
+            "CLUB_MANAGER",
+            "FLOOR_MANAGER",
+            "NETWORK_MANAGER",
+            "ENTRANCE_MANAGER",
+            "FINANCE_MANAGER",
+            "PROMOTER",
+        ).firstOrNull(roles::contains)
     }
 
     fun version(

@@ -122,4 +122,7 @@ data class ShiftReportBraceletInput(
 data class DepositHints(
     val sumDepositsForNight: Long,
     val allocationSummaryForNight: Map<String, Long>,
+    val receivedCashMinor: Long = 0,
+    val receivedCardMinor: Long = 0,
+    val unattributedTenderMinor: Long = sumDepositsForNight,
 )

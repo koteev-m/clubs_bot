@@ -21,6 +21,7 @@ internal class ClubBookingRulesOperations(
         write: Boolean = false,
     ): JsonObject {
         val clientId = session.requireClubGrant(clubId, WRITE_BOOKING_RULES.takeIf { write })
+        session.requireFloorSection(clientId, clubId, READ_FLOOR_BOOKING_RULES)
         return view(clubId, clientId, stored(clubId, clientId))
     }
 

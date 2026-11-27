@@ -32,17 +32,6 @@ internal class BusinessOverview(
                 clubId,
                 session.now,
             )
-        val reports =
-            session.sql.rows(
-                """
-                SELECT r.night_start_utc,r.closed_at,r.people_women,r.people_men,
-                    (SELECT COALESCE(SUM(e.amount_minor),0) FROM shift_report_revenue_entries e
-                        WHERE e.report_id=r.id AND e.include_in_total=TRUE) AS total_revenue
-                FROM shift_reports r WHERE r.club_id=? AND r.status='CLOSED' AND r.closed_at IS NOT NULL
-                ORDER BY r.night_start_utc DESC LIMIT 30
-                """.trimIndent(),
-                clubId,
-            )
         return buildJsonObject {
             put("clubId", clubId.toString())
             put(
@@ -58,21 +47,31 @@ internal class BusinessOverview(
                     },
                 ),
             )
-            put(
-                "reports",
-                JsonArray(
-                    reports.map {
-                        buildJsonObject {
-                            put("nightStart", it.instant("night_start_utc").toString())
-                            put("closedAt", it.instant("closed_at").toString())
-                            put("people", it.long("people_women") + it.long("people_men"))
-                            put("totalRevenueMinor", it.getValue("total_revenue"))
-                        }
-                    },
-                ),
-            )
+            put("reports", closedReports(clubId))
         }
     }
+
+    fun closedReports(clubId: Long): JsonArray =
+        JsonArray(
+            session.sql
+                .rows(
+                    """
+                    SELECT r.night_start_utc,r.closed_at,r.people_women,r.people_men,
+                        (SELECT COALESCE(SUM(e.amount_minor),0) FROM shift_report_revenue_entries e
+                            WHERE e.report_id=r.id AND e.include_in_total=TRUE) AS total_revenue
+                    FROM shift_reports r WHERE r.club_id=? AND r.status='CLOSED' AND r.closed_at IS NOT NULL
+                    ORDER BY r.night_start_utc DESC LIMIT 30
+                    """.trimIndent(),
+                    clubId,
+                ).map {
+                    buildJsonObject {
+                        put("nightStart", it.instant("night_start_utc").toString())
+                        put("closedAt", it.instant("closed_at").toString())
+                        put("people", it.long("people_women") + it.long("people_men"))
+                        put("totalRevenueMinor", it.getValue("total_revenue"))
+                    }
+                },
+        )
 
     // Candidate identity and counters must describe one statement snapshot even if a legacy
     // writer changes events concurrently. Recheck the row used to derive the local day bounds.

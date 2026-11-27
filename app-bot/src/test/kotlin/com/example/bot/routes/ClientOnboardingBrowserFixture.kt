@@ -28,7 +28,11 @@ import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
+import java.sql.Connection
 import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 
 /** Disposable browser acceptance harness. Test classpath only; no application config or Telegram client. */
 object ClientOnboardingBrowserFixture {
@@ -74,6 +78,13 @@ object ClientOnboardingBrowserFixture {
                 post("/fixture/identity/{persona}") {
                     val body = call.receive<Map<String, String>>()
                     call.respond(mapOf("initData" to signed(call.parameters["persona"], body["startParam"])))
+                }
+                post("/fixture/current-floor-night/{club}") {
+                    val club = checkNotNull(call.parameters["club"]?.toLongOrNull())
+                    val body = call.receive<Map<String, String>>()
+                    val table = checkNotNull(body["tableId"]?.toLongOrNull())
+                    val night = source.connection.use { connection -> seedBrowserFloorNight(connection, club, table) }
+                    call.respond(mapOf("nightId" to night.toString()))
                 }
             }
         }.start(wait = true)
@@ -173,3 +184,105 @@ object ClientOnboardingBrowserFixture {
     private const val OWNER = 998101L
     private const val RECIPIENT = 998102L
 }
+
+/** Test-only setup for data that is activated separately from the client cabinet. */
+private fun seedBrowserFloorNight(
+    connection: Connection,
+    club: Long,
+    table: Long,
+): Long {
+    connection.autoCommit = false
+    val (client, zone, bookingTable) =
+        connection
+            .prepareStatement(
+                "SELECT cc.client_id,c.timezone,ht.booking_table_id FROM client_clubs cc " +
+                    "JOIN clubs c ON c.id=cc.club_id JOIN halls h ON h.club_id=c.id " +
+                    "JOIN hall_tables ht ON ht.hall_id=h.id AND ht.booking_club_id=c.id " +
+                    "WHERE c.id=? AND ht.id=? AND c.name LIKE 'Мобильная смена %'",
+            ).use { statement ->
+                statement.setLong(1, club)
+                statement.setLong(2, table)
+                statement.executeQuery().use { rows ->
+                    check(rows.next())
+                    Triple(
+                        rows.getLong("client_id"),
+                        ZoneId.of(rows.getString("timezone")),
+                        rows.getLong("booking_table_id"),
+                    )
+                }
+            }
+    val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+    val start = now.minusSeconds(120)
+    val end = now.plusSeconds(3600)
+    val startedAt = start.atOffset(ZoneOffset.UTC)
+    val endsAt = end.atOffset(ZoneOffset.UTC)
+    val createdAt = now.atOffset(ZoneOffset.UTC)
+    connection.fixtureWrite("UPDATE tables SET active=TRUE WHERE id=? AND club_id=?", bookingTable, club)
+    val event =
+        connection.fixtureInsert(
+            "INSERT INTO events(club_id,start_at,end_at) VALUES (?,?,?)",
+            club,
+            startedAt,
+            endsAt,
+        )
+    val night =
+        connection.fixtureInsert(
+            "INSERT INTO club_operational_nights(client_id,club_id,business_date,timezone,start_at,end_at," +
+                "source,status,created_at,updated_at) VALUES (?,?,?,?,?,?,'EXCEPTION','SCHEDULED',?,?)",
+            client,
+            club,
+            start.atZone(zone).toLocalDate(),
+            zone.id,
+            startedAt,
+            endsAt,
+            createdAt,
+            createdAt,
+        )
+    connection.fixtureWrite(
+        "INSERT INTO canonical_night_event_links(club_id,canonical_night_id,event_id,legacy_start_at,legacy_end_at) " +
+            "VALUES (?,?,?,?,?)",
+        club,
+        night,
+        event,
+        startedAt,
+        endsAt,
+    )
+    connection.fixtureWrite(
+        "INSERT INTO booking_cutover_fences(club_id,canonical_night_id,booking_table_id) VALUES (?,?,?)",
+        club,
+        night,
+        bookingTable,
+    )
+    connection.fixtureWrite(
+        "INSERT INTO shift_reports(club_id,night_start_utc,status,created_at,updated_at) VALUES (?,?,'DRAFT',?,?)",
+        club,
+        startedAt,
+        createdAt,
+        createdAt,
+    )
+    connection.commit()
+    return night
+}
+
+private fun Connection.fixtureWrite(
+    sql: String,
+    vararg values: Any,
+) {
+    prepareStatement(sql).use { statement ->
+        values.forEachIndexed { index, value -> statement.setObject(index + 1, value) }
+        check(statement.executeUpdate() == 1)
+    }
+}
+
+private fun Connection.fixtureInsert(
+    sql: String,
+    vararg values: Any,
+): Long =
+    prepareStatement(sql, arrayOf("id")).use { statement ->
+        values.forEachIndexed { index, value -> statement.setObject(index + 1, value) }
+        check(statement.executeUpdate() == 1)
+        statement.generatedKeys.use { keys ->
+            check(keys.next())
+            keys.getLong(1)
+        }
+    }

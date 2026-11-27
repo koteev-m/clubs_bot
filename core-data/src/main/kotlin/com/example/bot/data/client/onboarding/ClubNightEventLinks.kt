@@ -16,6 +16,7 @@ internal class ClubNightEventLinks(
     fun classify(nightId: Long): JsonObject {
         val clubId = clubId(nightId)
         val clientId = session.requireClubGrant(clubId)
+        session.requireEventLinkAuthority(clientId, clubId)
         val club = privateClub(clubId)
         val night = night(nightId, clubId, clientId)
         val match = sql.classifyNightEvent(night)
@@ -39,6 +40,7 @@ internal class ClubNightEventLinks(
         body.only(listOf("expectedVersion", "eventId"))
         val clubId = clubId(nightId)
         val clientId = session.requireClubGrant(clubId, WRITE_CALENDAR)
+        session.requireEventLinkAuthority(clientId, clubId)
         val club = privateClub(clubId, lock = true)
         val version = club.long("calendar_version")
         if (body.id("expectedVersion") != version) fail("version_conflict")
@@ -82,6 +84,7 @@ internal class ClubNightEventLinks(
     fun receipt(nightId: Long): JsonObject {
         val clubId = clubId(nightId)
         val clientId = session.requireClubGrant(clubId, WRITE_CALENDAR)
+        session.requireEventLinkAuthority(clientId, clubId)
         privateClub(clubId)
         val night = night(nightId, clubId, clientId)
         return (linked(nightId) ?: fail("not_found")).receipt(night)
@@ -228,8 +231,12 @@ internal fun OnboardingSql.verifiedLinkedCanonicalNight(
     return row(eventSql, clubId, eventId)
         ?.takeIf { it.hasWindow(night.instant("legacy_start_at"), night.instant("legacy_end_at")) }
         ?.takeIf {
-            val match = classifyNightEvent(night)
-            match.status == CandidateStatus.EXACT_MATCH && match.eventId == eventId.toString()
+            if (ownedWorkingEvent(clubId, night.long("id")) == eventId) {
+                !hasWorkingEventConflict(night, eventId) && !anotherNightMatches(night)
+            } else {
+                val match = classifyNightEvent(night)
+                match.status == CandidateStatus.EXACT_MATCH && match.eventId == eventId.toString()
+            }
         }?.let {
             LockedCanonicalNight(
                 night.long("id"),

@@ -41,6 +41,7 @@ internal class ClubOperationalNights(
         touchedDates: Set<LocalDate>,
         version: Long,
         now: Instant,
+        applyNights: Boolean = true,
     ): Boolean {
         val existing = stored(now, touchedDates).associateBy { it.night.businessDate }
         val today = now.atZone(zone).toLocalDate()
@@ -60,6 +61,7 @@ internal class ClubOperationalNights(
                 )
             }
         checkOverlaps(existing, changes, now)
+        if (!applyNights) return false
         changes.forEach { change -> apply(change, version, now) }
         return changes.isNotEmpty()
     }
@@ -85,7 +87,11 @@ internal class ClubOperationalNights(
         if (old != null && proposed == CalendarDateResolution.Invalid) nightConflict("calendar_night_invalid", date)
         val prior = former?.takeIf { explicitlyEdited || it.closesAt.toInstant().isAfter(now) }
         val changesWindow = old?.window() != next?.window() || stored?.cancelled == true
-        if (stored?.linked == true && changesWindow) nightConflict("calendar_night_dependencies", date)
+        if (stored?.linked == true && changesWindow) {
+            val id = checkNotNull(old?.nightId)
+            val detached = ClientWorkingNightPreparation(sql, clientId, clubId).detachEmptyFuture(id, now)
+            if (!detached) nightConflict("calendar_night_dependencies", date)
+        }
         val previousWindowChanged = prior != null && previous != proposed
         if (changesWindow || explicitlyEdited || previousWindowChanged) {
             val windows = listOfNotNull(old, next, prior).map(CalendarNight::window).distinct()
@@ -111,7 +117,12 @@ internal class ClubOperationalNights(
             return true
         }
         if (old != null && nextStarted) nightConflict("calendar_night_started", date)
-        return nextStarted
+        val canFormCurrentNight =
+            nextStarted &&
+                old == null &&
+                sql.automaticWorkingClub(clientId, clubId) &&
+                next?.closesAt?.toInstant()?.isAfter(now) == true
+        return nextStarted && !canFormCurrentNight
     }
 
     private fun businessDateWindow(date: LocalDate): NightWindow =
@@ -180,7 +191,7 @@ internal class ClubOperationalNights(
                 nightId
             }
         sql.audit(
-            checkNotNull(session.userId),
+            session.userId,
             "client.club.calendar.night.reconcile",
             clientId,
             clubId,
@@ -201,7 +212,13 @@ internal class ClubOperationalNights(
         window: NightWindow,
     ): Boolean {
         // Events are reserved for the legacy runtime, regardless of whether they have visible obligations today.
-        val event = "SELECT 1 FROM events WHERE club_id=? AND start_at<? AND (end_at>? OR start_at>=?)"
+        val event =
+            "SELECT 1 FROM events WHERE club_id=? AND start_at<? AND (end_at>? OR start_at>=?)" +
+                if (sql.automaticWorkingClub(clientId, clubId)) {
+                    " AND NOT EXISTS (SELECT 1 FROM client_working_night_events w WHERE w.event_id=events.id)"
+                } else {
+                    ""
+                }
         val bookings = "SELECT 1 FROM bookings WHERE club_id=? AND slot_start<? AND slot_end>?"
         val holds =
             "SELECT 1 FROM booking_holds h JOIN events e ON h.event_id=e.id " +

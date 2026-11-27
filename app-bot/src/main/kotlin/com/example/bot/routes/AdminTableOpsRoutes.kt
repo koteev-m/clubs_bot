@@ -2,11 +2,12 @@ package com.example.bot.routes
 
 import com.example.bot.audit.AuditLogger
 import com.example.bot.data.booking.AllocationInput
+import com.example.bot.data.booking.ShiftClosedForDepositMutationException
+import com.example.bot.data.booking.StaffTableSessionManagedException
 import com.example.bot.data.booking.TableDeposit
 import com.example.bot.data.booking.TableDepositRepository
 import com.example.bot.data.booking.TableSession
 import com.example.bot.data.booking.TableSessionRepository
-import com.example.bot.data.booking.ShiftClosedForDepositMutationException
 import com.example.bot.data.finance.ShiftReportRepository
 import com.example.bot.data.finance.ShiftReportStatus
 import com.example.bot.data.security.Role
@@ -36,15 +37,15 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
-import java.time.Clock
-import java.time.Duration
-import java.time.Instant
-import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
+import java.util.Locale
 
 private const val MAX_NOTE_LENGTH = 500
 
@@ -173,11 +174,13 @@ fun Application.adminTableOpsRoutes(
                             return@post call.respondForbidden()
                         }
 
-                        val table = adminTablesRepository.findById(clubId, tableId)
-                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.table_not_found)
+                        val table =
+                            adminTablesRepository.findById(clubId, tableId)
+                                ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.table_not_found)
 
-                        val payload = runCatching { call.receive<AdminSeatTableRequest>() }.getOrNull()
-                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val payload =
+                            runCatching { call.receive<AdminSeatTableRequest>() }.getOrNull()
+                                ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                         val validationErrors = payload.validateSeatPayload()
                         if (validationErrors.isNotEmpty()) {
@@ -255,6 +258,9 @@ fun Application.adminTableOpsRoutes(
                                     if (ex is CancellationException) {
                                         throw ex
                                     }
+                                    if (ex is StaffTableSessionManagedException) {
+                                        return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
+                                    }
                                     if (ex is ShiftClosedForDepositMutationException) {
                                         auditLogger.tableDepositUpdateRejectedByClosedShift(
                                             clubId = clubId,
@@ -267,7 +273,10 @@ fun Application.adminTableOpsRoutes(
                                             actorUserId = actorId,
                                             actorRole = actorRole?.name,
                                         )
-                                        return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)
+                                        return@post call.respondError(
+                                            HttpStatusCode.Conflict,
+                                            ErrorCodes.shift_report_closed,
+                                        )
                                     }
                                     if (ex is IllegalArgumentException) {
                                         return@post call.respondValidationErrors(mapDepositValidationError(ex))
@@ -341,7 +350,11 @@ fun Application.adminTableOpsRoutes(
                             return@post
                         }
 
-                        val note = payload.note?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_NOTE_LENGTH)
+                        val note =
+                            payload.note
+                                ?.trim()
+                                ?.takeIf { it.isNotEmpty() }
+                                ?.take(MAX_NOTE_LENGTH)
                         val session =
                             tableSessionRepository.openSession(
                                 clubId = clubId,
@@ -386,6 +399,9 @@ fun Application.adminTableOpsRoutes(
                                 if (ex is CancellationException) {
                                     throw ex
                                 }
+                                if (ex is StaffTableSessionManagedException) {
+                                    return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
+                                }
                                 if (ex is ShiftClosedForDepositMutationException) {
                                     auditLogger.tableDepositUpdateRejectedByClosedShift(
                                         clubId = clubId,
@@ -398,7 +414,10 @@ fun Application.adminTableOpsRoutes(
                                         actorUserId = actorId,
                                         actorRole = actorRole?.name,
                                     )
-                                    return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)
+                                    return@post call.respondError(
+                                        HttpStatusCode.Conflict,
+                                        ErrorCodes.shift_report_closed,
+                                    )
                                 }
                                 if (ex is IllegalArgumentException) {
                                     return@post call.respondValidationErrors(mapDepositValidationError(ex))
@@ -474,8 +493,9 @@ fun Application.adminTableOpsRoutes(
                             return@post call.respondForbidden()
                         }
 
-                        val table = adminTablesRepository.findById(clubId, tableId)
-                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.table_not_found)
+                        val table =
+                            adminTablesRepository.findById(clubId, tableId)
+                                ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.table_not_found)
 
                         val session =
                             tableSessionRepository.findActiveSession(clubId, nightStartUtc, tableId)
@@ -490,7 +510,8 @@ fun Application.adminTableOpsRoutes(
                         }
 
                         val lastDeposit =
-                            tableDepositRepository.listDepositsForSession(clubId, session.id)
+                            tableDepositRepository
+                                .listDepositsForSession(clubId, session.id)
                                 .maxWithOrNull(compareBy<TableDeposit> { it.createdAt }.thenBy { it.id })
                         auditLogger.tableSessionClosed(
                             clubId = clubId,
@@ -520,8 +541,9 @@ fun Application.adminTableOpsRoutes(
                             return@put call.respondForbidden()
                         }
 
-                        val payload = runCatching { call.receive<AdminUpdateDepositRequest>() }.getOrNull()
-                            ?: return@put call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val payload =
+                            runCatching { call.receive<AdminUpdateDepositRequest>() }.getOrNull()
+                                ?: return@put call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                         val validationErrors = payload.validateDepositUpdate()
                         if (validationErrors.isNotEmpty()) {
@@ -573,6 +595,9 @@ fun Application.adminTableOpsRoutes(
                                 if (ex is CancellationException) {
                                     throw ex
                                 }
+                                if (ex is StaffTableSessionManagedException) {
+                                    return@put call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
+                                }
                                 if (ex is ShiftClosedForDepositMutationException) {
                                     auditLogger.tableDepositUpdateRejectedByClosedShift(
                                         clubId = clubId,
@@ -585,7 +610,10 @@ fun Application.adminTableOpsRoutes(
                                         actorUserId = actorId,
                                         actorRole = actorRole?.name,
                                     )
-                                    return@put call.respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)
+                                    return@put call.respondError(
+                                        HttpStatusCode.Conflict,
+                                        ErrorCodes.shift_report_closed,
+                                    )
                                 }
                                 if (ex is IllegalArgumentException) {
                                     return@put call.respondValidationErrors(mapDepositValidationError(ex))
@@ -760,7 +788,8 @@ private fun validateAllocations(
             code.uppercase(Locale.ROOT)
         }
     val duplicates =
-        normalized.groupBy { it }
+        normalized
+            .groupBy { it }
             .filterValues { it.size > 1 }
             .keys
             .filter { it.isNotBlank() }
@@ -805,7 +834,9 @@ private suspend fun markHasTableIfPossible(
     val effectiveEarlyCutoff =
         runCatching {
             nightOverrideRepository.getOverride(clubId, nightStartUtc)?.earlyCutoffAt
-                ?: settingsRepository.getByClubId(clubId)?.earlyWindowMinutes
+                ?: settingsRepository
+                    .getByClubId(clubId)
+                    ?.earlyWindowMinutes
                     ?.let { minutes -> nightStartUtc.plus(Duration.ofMinutes(minutes.toLong())) }
         }.getOrNull()
 

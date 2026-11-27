@@ -1,5 +1,6 @@
 package com.example.bot.data.client.onboarding
 
+import com.example.bot.data.booking.core.lockBookingAdmission
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -86,6 +87,9 @@ internal class DirectClubOperations(
         )
         if (confirmedOwner) {
             session.recordBusinessClub(clientId, clubId, checkNotNull(session.userId), "OWNER_CREATE")
+            if (sql.workingOperationsSchema) {
+                sql.update("INSERT INTO client_working_clubs(club_id,client_id) VALUES (?,?)", clubId, clientId)
+            }
         } else {
             session.bootstrapLegacyCreator(clientId, clubId)
         }
@@ -145,6 +149,14 @@ internal class DirectClubOperations(
         val description = merged.text("description", DESCRIPTION_LIMIT)
         val timezone = merged.text("timezone", TIMEZONE_LIMIT, required = true)
         if (timezone !in ZoneId.getAvailableZoneIds()) fail("validation_error")
+        if (timezone != club.text("timezone", TIMEZONE_LIMIT, required = true) &&
+            sql.automaticWorkingClub(profile.long("client_id"), clubId)
+        ) {
+            check(sql.lockBookingAdmission(clubId))
+            if (sql.row("SELECT 1 AS present FROM club_operational_nights WHERE club_id=? LIMIT 1", clubId) != null) {
+                fail("calendar_timezone_locked")
+            }
+        }
         sql.update("UPDATE clubs SET name=?,description=?,timezone=? WHERE id=?", name, description, timezone, clubId)
         sql.update(
             "UPDATE client_direct_club_profiles SET profile_version=profile_version+1," +

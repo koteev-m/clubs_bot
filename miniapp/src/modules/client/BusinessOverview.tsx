@@ -34,26 +34,28 @@ function formatMinor(value: string) {
 export default function BusinessOverview({
   credential,
   profile,
+  financialOnly = false,
 }: {
   credential: string;
   profile: ClubProfile;
+  financialOnly?: boolean;
 }) {
   const remote = useRemote<Metrics>(
     credential,
-    '/api/client/clubs/' + profile.id + '/business-overview',
+    '/api/client/clubs/' + profile.id + (financialOnly ? '/operations/financial-reports' : '/business-overview'),
     undefined,
     {
       onSuccess: (view) => {
         if (
           view.clubId !== profile.id ||
-          !Array.isArray(view.nights) ||
+          (!financialOnly && !Array.isArray(view.nights)) ||
           !Array.isArray(view.reports) ||
-          !view.nights.every(
+          (!financialOnly && !view.nights.every(
             (night) =>
               /^\d{4}-\d{2}-\d{2}$/.test(night.businessDate) &&
               ((counter(night.checkins) && counter(night.bookings)) ||
                 (night.checkins === null && night.bookings === null)),
-          ) ||
+          )) ||
           !view.reports.every(
             (report) =>
               [report.nightStart, report.closedAt].every((instant) =>
@@ -77,7 +79,7 @@ export default function BusinessOverview({
   });
   return (
     <>
-      {nights.length > 0 && (
+      {!financialOnly && nights.length > 0 && (
         <section className="po-card ob-card">
           <h2>Брони и посещения за последние ночи</h2>
           {nights.map((night) => (
@@ -95,6 +97,7 @@ export default function BusinessOverview({
           ))}
         </section>
       )}
+      {financialOnly && reports.length === 0 && <p>Закрытых финансовых смен пока нет.</p>}
       {reports.length > 0 && (
         <section className="po-card ob-card">
           <h2>Отчёты закрытых смен</h2>

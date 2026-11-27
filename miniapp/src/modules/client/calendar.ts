@@ -20,6 +20,7 @@ export interface CalendarView extends Rules {
   timezone: string;
   version: string;
   canWrite: boolean;
+  canMaterialize?: boolean;
   nights: CalendarNight[];
   cancelledNights?: CalendarNight[];
   invalidDates: string[];
@@ -648,6 +649,7 @@ export function validCalendarView(view: CalendarView, clubId: string) {
     typeof view.version !== 'string' ||
     !/^[0-9]+$/.test(view.version) ||
     typeof view.canWrite !== 'boolean' ||
+    (view.canMaterialize !== undefined && typeof view.canMaterialize !== 'boolean') ||
     typeof view.timezone !== 'string'
   )
     return false;

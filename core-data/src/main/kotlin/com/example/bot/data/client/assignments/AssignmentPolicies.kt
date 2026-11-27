@@ -30,8 +30,15 @@ internal data class DelegationPolicy(
     val permission: String,
     val version: Long,
 ) {
-    val section: String get() = permission.removePrefix("client.club.").removeSuffix(".write")
-    val supportingRead: String get() = "client.club.$section.read"
+    val section: String
+        get() =
+            if (permission == CREATE_OPERATIONAL_NIGHT) {
+                "night_formation"
+            } else {
+                permission.removePrefix("client.club.").removeSuffix(".write")
+            }
+    val supportingRead: String
+        get() = if (permission == CREATE_OPERATIONAL_NIGHT) "client.club.calendar.read" else "client.club.$section.read"
     val authority: String get() = "client.staff.delegate.$section"
     val permissions: Set<String> get() = setOf(permission, supportingRead)
     val reference: PolicyReference
@@ -70,8 +77,11 @@ internal class AssignmentPolicyCatalog(
         require(
             this.delegations.all {
                 it.version > 0 &&
-                    it.section in DELEGABLE_SECTIONS &&
-                    it.permission == "client.club.${it.section}.write"
+                    (
+                        it.permission == CREATE_OPERATIONAL_NIGHT ||
+                            it.section in DELEGABLE_SECTIONS &&
+                            it.permission == "client.club.${it.section}.write"
+                    )
             },
         )
     }

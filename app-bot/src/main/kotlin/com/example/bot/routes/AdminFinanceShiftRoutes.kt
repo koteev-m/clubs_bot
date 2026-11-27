@@ -39,10 +39,10 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.serialization.Serializable
 import java.time.Clock
 import java.time.Instant
 import kotlin.math.abs
-import kotlinx.serialization.Serializable
 
 private const val MAX_NOTE_LENGTH = 500
 private const val DEFAULT_DEPOSIT_MISMATCH_THRESHOLD_MINOR = 10_000L
@@ -70,6 +70,9 @@ data class NonTotalIndicatorsResponse(
 data class DepositHintsResponse(
     val sumDepositsForNight: Long,
     val allocationSummaryForNight: Map<String, Long>,
+    val receivedCashMinor: Long = 0,
+    val receivedCardMinor: Long = 0,
+    val unattributedTenderMinor: Long = sumDepositsForNight,
 )
 
 @Serializable
@@ -194,7 +197,8 @@ fun Application.adminFinanceShiftRoutes(
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
     clock: Clock = Clock.systemUTC(),
 ) {
-    val mismatchThresholdMinor = envLong("SHIFT_REPORT_DEPOSIT_MISMATCH_THRESHOLD_MINOR", DEFAULT_DEPOSIT_MISMATCH_THRESHOLD_MINOR)
+    val mismatchThresholdMinor =
+        envLong("SHIFT_REPORT_DEPOSIT_MISMATCH_THRESHOLD_MINOR", DEFAULT_DEPOSIT_MISMATCH_THRESHOLD_MINOR)
 
     routing {
         route("/api/admin") {
@@ -212,8 +216,9 @@ fun Application.adminFinanceShiftRoutes(
                             }
 
                             val report = shiftReportRepository.getOrCreateDraft(clubId, nightStartUtc)
-                            val details = shiftReportRepository.getDetails(report.id)
-                                ?: return@get call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                            val details =
+                                shiftReportRepository.getDetails(report.id)
+                                    ?: return@get call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                             val template = templateRepository.getTemplateData(clubId)
                             val depositHints = shiftReportRepository.getDepositHints(clubId, nightStartUtc)
                             val response = buildShiftReportDetailsResponse(details, template, depositHints)
@@ -229,16 +234,18 @@ fun Application.adminFinanceShiftRoutes(
                                 return@put call.respondForbidden()
                             }
 
-                            val payload = runCatching { call.receive<ShiftReportUpdateRequest>() }.getOrNull()
-                                ?: return@put call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                            val payload =
+                                runCatching { call.receive<ShiftReportUpdateRequest>() }.getOrNull()
+                                    ?: return@put call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                             val validationErrors = validateShiftReportUpdate(payload)
                             if (validationErrors.isNotEmpty()) {
                                 return@put call.respondValidationErrors(validationErrors)
                             }
 
-                            val existing = shiftReportRepository.getDetails(reportId)
-                                ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                            val existing =
+                                shiftReportRepository.getDetails(reportId)
+                                    ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                             if (existing.report.clubId != clubId) {
                                 return@put call.respondForbidden()
                             }
@@ -256,10 +263,15 @@ fun Application.adminFinanceShiftRoutes(
                             if (updated == null) {
                                 return@put call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
                             }
-                            val details = shiftReportRepository.getDetails(reportId)
-                                ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                            val details =
+                                shiftReportRepository.getDetails(reportId)
+                                    ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                             val template = templateRepository.getTemplateData(clubId)
-                            val depositHints = shiftReportRepository.getDepositHints(clubId, details.report.nightStartUtc)
+                            val depositHints =
+                                shiftReportRepository.getDepositHints(
+                                    clubId,
+                                    details.report.nightStartUtc,
+                                )
                             val response = buildShiftReportDetailsResponse(details, template, depositHints)
                             call.respond(HttpStatusCode.OK, response)
                         }
@@ -271,8 +283,9 @@ fun Application.adminFinanceShiftRoutes(
                                 return@post call.respondForbidden()
                             }
 
-                            val details = shiftReportRepository.getDetails(reportId)
-                                ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                            val details =
+                                shiftReportRepository.getDetails(reportId)
+                                    ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                             if (details.report.clubId != clubId) {
                                 return@post call.respondForbidden()
                             }
@@ -280,14 +293,23 @@ fun Application.adminFinanceShiftRoutes(
                                 return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
                             }
 
-                            val depositHints = shiftReportRepository.getDepositHints(clubId, details.report.nightStartUtc)
+                            val depositHints =
+                                shiftReportRepository.getDepositHints(
+                                    clubId,
+                                    details.report.nightStartUtc,
+                                )
                             val mismatch = depositMismatch(details, depositHints)
                             if (mismatch > mismatchThresholdMinor && details.report.comment.isNullOrBlank()) {
                                 return@post call.respondValidationErrors(mapOf("comment" to "required_for_mismatch"))
                             }
 
                             val actorId = call.rbacContext().user.id
-                            val actorRole = call.rbacContext().roles.firstOrNull()?.name
+                            val actorRole =
+                                call
+                                    .rbacContext()
+                                    .roles
+                                    .firstOrNull()
+                                    ?.name
                             val now = Instant.now(clock)
                             val closed =
                                 try {
@@ -298,9 +320,14 @@ fun Application.adminFinanceShiftRoutes(
                             if (!closed) {
                                 return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
                             }
-                            val refreshed = shiftReportRepository.getDetails(reportId)
-                                ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
-                            val totals = buildTotalsResponse(refreshed.revenueEntries, templateRepository.getTemplateData(clubId))
+                            val refreshed =
+                                shiftReportRepository.getDetails(reportId)
+                                    ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                            val totals =
+                                buildTotalsResponse(
+                                    refreshed.revenueEntries,
+                                    templateRepository.getTemplateData(clubId),
+                                )
                             val groupTotals = totals.groups.map { it.groupId to it.amountMinor }
                             auditLogger.shiftReportClosed(
                                 clubId = clubId,
@@ -443,6 +470,9 @@ private fun DepositHints.toResponse(): DepositHintsResponse =
     DepositHintsResponse(
         sumDepositsForNight = sumDepositsForNight,
         allocationSummaryForNight = allocationSummaryForNight,
+        receivedCashMinor = receivedCashMinor,
+        receivedCardMinor = receivedCardMinor,
+        unattributedTenderMinor = unattributedTenderMinor,
     )
 
 private fun NonTotalIndicators.toResponse(): NonTotalIndicatorsResponse =
@@ -457,7 +487,13 @@ private fun ShiftReportUpdateRequest.toUpdatePayload(): ShiftReportUpdatePayload
         peopleMen = peopleMen,
         peopleRejected = peopleRejected,
         comment = comment?.trim()?.ifEmpty { null },
-        bracelets = bracelets.map { com.example.bot.data.finance.ShiftReportBraceletInput(it.braceletTypeId, it.count) },
+        bracelets =
+            bracelets.map {
+                com.example.bot.data.finance.ShiftReportBraceletInput(
+                    it.braceletTypeId,
+                    it.count,
+                )
+            },
         revenueEntries = revenueEntries.map { it.toInput() },
     )
 

@@ -1,11 +1,10 @@
 package com.example.bot.data.finance
 
-import com.example.bot.data.booking.TableDepositRepository
+import com.example.bot.data.client.onboarding.OnboardingSql
+import com.example.bot.data.client.onboarding.long
 import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.toOffsetDateTimeUtc
 import com.example.bot.data.db.withRetriedTx
-import java.time.Clock
-import java.time.Instant
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
@@ -18,6 +17,9 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
+import java.sql.Connection
+import java.time.Clock
+import java.time.Instant
 
 class ShiftReportTemplateRepository(
     private val database: Database,
@@ -174,15 +176,16 @@ class ShiftReportTemplateRepository(
         val now = Instant.now(clock).toOffsetDateTimeUtc()
         return withRetriedTx(name = "shiftReportTemplate.reorderBracelets", database = database) {
             newSuspendedTransaction(context = Dispatchers.IO, db = database) {
-                orderedIds.mapIndexed { index, id ->
-                    ClubBraceletTypesTable.update({
-                        (ClubBraceletTypesTable.id eq id) and
-                            (ClubBraceletTypesTable.clubId eq clubId)
-                    }) {
-                        it[orderIndex] = index
-                        it[updatedAt] = now
-                    }
-                }.sum()
+                orderedIds
+                    .mapIndexed { index, id ->
+                        ClubBraceletTypesTable.update({
+                            (ClubBraceletTypesTable.id eq id) and
+                                (ClubBraceletTypesTable.clubId eq clubId)
+                        }) {
+                            it[orderIndex] = index
+                            it[updatedAt] = now
+                        }
+                    }.sum()
             }
         }
     }
@@ -267,15 +270,16 @@ class ShiftReportTemplateRepository(
         val now = Instant.now(clock).toOffsetDateTimeUtc()
         return withRetriedTx(name = "shiftReportTemplate.reorderGroups", database = database) {
             newSuspendedTransaction(context = Dispatchers.IO, db = database) {
-                orderedIds.mapIndexed { index, id ->
-                    ClubRevenueGroupsTable.update({
-                        (ClubRevenueGroupsTable.id eq id) and
-                            (ClubRevenueGroupsTable.clubId eq clubId)
-                    }) {
-                        it[orderIndex] = index
-                        it[updatedAt] = now
-                    }
-                }.sum()
+                orderedIds
+                    .mapIndexed { index, id ->
+                        ClubRevenueGroupsTable.update({
+                            (ClubRevenueGroupsTable.id eq id) and
+                                (ClubRevenueGroupsTable.clubId eq clubId)
+                        }) {
+                            it[orderIndex] = index
+                            it[updatedAt] = now
+                        }
+                    }.sum()
             }
         }
     }
@@ -374,20 +378,24 @@ class ShiftReportTemplateRepository(
         val now = Instant.now(clock).toOffsetDateTimeUtc()
         return withRetriedTx(name = "shiftReportTemplate.reorderArticles", database = database) {
             newSuspendedTransaction(context = Dispatchers.IO, db = database) {
-                orderedIds.mapIndexed { index, id ->
-                    ClubRevenueArticlesTable.update({
-                        (ClubRevenueArticlesTable.id eq id) and
-                            (ClubRevenueArticlesTable.clubId eq clubId)
-                    }) {
-                        it[orderIndex] = index
-                        it[updatedAt] = now
-                    }
-                }.sum()
+                orderedIds
+                    .mapIndexed { index, id ->
+                        ClubRevenueArticlesTable.update({
+                            (ClubRevenueArticlesTable.id eq id) and
+                                (ClubRevenueArticlesTable.clubId eq clubId)
+                        }) {
+                            it[orderIndex] = index
+                            it[updatedAt] = now
+                        }
+                    }.sum()
             }
         }
     }
 
-    private fun ensureGroupExists(clubId: Long, groupId: Long) {
+    private fun ensureGroupExists(
+        clubId: Long,
+        groupId: Long,
+    ) {
         val exists =
             ClubRevenueGroupsTable
                 .selectAll()
@@ -471,7 +479,8 @@ class ShiftReportRepository(
                     lastConflict = ex
                 }
             }
-            throw lastConflict ?: error("Failed to get or create shift report for clubId=$clubId nightStart=$nightStartUtc")
+            throw lastConflict
+                ?: error("Failed to get or create shift report for clubId=$clubId nightStart=$nightStartUtc")
         }
     }
 
@@ -636,25 +645,66 @@ class ShiftReportRepository(
     suspend fun getDepositHints(
         clubId: Long,
         nightStartUtc: Instant,
-    ): DepositHints {
-        val repo = TableDepositRepository(database)
-        return DepositHints(
-            sumDepositsForNight = repo.sumDepositsForNight(clubId, nightStartUtc),
-            allocationSummaryForNight = repo.allocationSummaryForNight(clubId, nightStartUtc),
-        )
-    }
+    ): DepositHints =
+        withRetriedTx(name = "shiftReport.getDepositHints", readOnly = true, database = database) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = database) {
+                val sql = OnboardingSql(connection.connection as Connection)
+                val rows =
+                    sql.rows(
+                        """
+                        WITH night_operations AS (
+                            SELECT id,amount_minor,received_method,received_cash_minor,received_card_minor
+                            FROM table_deposit_operations WHERE club_id=? AND night_start_utc=?
+                        )
+                        SELECT CAST(NULL AS VARCHAR(255)) AS category_code,
+                            COALESCE(SUM(amount_minor),0) AS amount,
+                            COALESCE(SUM(CASE received_method WHEN 'CASH' THEN amount_minor
+                                WHEN 'MIXED' THEN received_cash_minor ELSE 0 END),0) AS cash,
+                            COALESCE(SUM(CASE received_method WHEN 'CARD' THEN amount_minor
+                                WHEN 'MIXED' THEN received_card_minor ELSE 0 END),0) AS card,
+                            COALESCE(SUM(CASE WHEN received_method IS NULL THEN amount_minor ELSE 0 END),0) AS unattributed
+                        FROM night_operations
+                        UNION ALL
+                        SELECT a.category_code,SUM(a.amount_minor),NULL,NULL,NULL
+                        FROM table_deposit_operation_allocations a JOIN night_operations o ON o.id=a.operation_id
+                        GROUP BY a.category_code HAVING SUM(a.amount_minor)<>0
+                        """.trimIndent(),
+                        clubId,
+                        nightStartUtc,
+                    )
+                val totals = rows.single { it["category_code"] == null }
+                val allocations =
+                    rows.mapNotNull { row -> row["category_code"]?.let { it to row.long("amount") } }.toMap()
+                DepositHints(
+                    sumDepositsForNight = totals.long("amount"),
+                    allocationSummaryForNight = allocations,
+                    receivedCashMinor = totals.long("cash"),
+                    receivedCardMinor = totals.long("card"),
+                    unattributedTenderMinor = totals.long("unattributed"),
+                )
+            }
+        }
 
-    private fun validatePeople(women: Int, men: Int, rejected: Int) {
+    private fun validatePeople(
+        women: Int,
+        men: Int,
+        rejected: Int,
+    ) {
         require(women >= 0 && men >= 0 && rejected >= 0) { "people_count_negative" }
     }
 
-    private fun ensureBraceletTypesExist(clubId: Long, braceletTypeIds: List<Long>) {
+    private fun ensureBraceletTypesExist(
+        clubId: Long,
+        braceletTypeIds: List<Long>,
+    ) {
         if (braceletTypeIds.isEmpty()) return
         val existing =
             ClubBraceletTypesTable
                 .selectAll()
-                .where { (ClubBraceletTypesTable.clubId eq clubId) and (ClubBraceletTypesTable.id inList braceletTypeIds) }
-                .map { it[ClubBraceletTypesTable.id] }
+                .where {
+                    (ClubBraceletTypesTable.clubId eq clubId) and
+                        (ClubBraceletTypesTable.id inList braceletTypeIds)
+                }.map { it[ClubBraceletTypesTable.id] }
                 .toSet()
         val missing = braceletTypeIds.filterNot { existing.contains(it) }
         require(missing.isEmpty()) { "unknown_bracelet_type" }
@@ -731,7 +781,10 @@ class ShiftReportRepository(
         }
     }
 
-    private fun validateRevenueGroups(clubId: Long, groupIds: List<Long>) {
+    private fun validateRevenueGroups(
+        clubId: Long,
+        groupIds: List<Long>,
+    ) {
         if (groupIds.isEmpty()) return
         val existing =
             ClubRevenueGroupsTable

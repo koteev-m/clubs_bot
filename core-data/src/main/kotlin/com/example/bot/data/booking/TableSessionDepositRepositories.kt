@@ -1,6 +1,8 @@
 package com.example.bot.data.booking
 
 import com.example.bot.data.booking.core.LegacyBookingAdmission
+import com.example.bot.data.client.onboarding.OnboardingSql
+import com.example.bot.data.client.onboarding.updateLock
 import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.toOffsetDateTimeUtc
 import com.example.bot.data.db.withRetriedTx
@@ -21,6 +23,7 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.sum
+import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
 import java.math.BigInteger
@@ -176,8 +179,9 @@ class TableSessionRepository(
         clubId: Long,
         actorId: Long,
         now: Instant,
-    ): Boolean =
-        TableSessionsTable.update({
+    ): Boolean {
+        if (staffOwnedSession(clubId, sessionId)) return false
+        return TableSessionsTable.update({
             (TableSessionsTable.id eq sessionId) and
                 (TableSessionsTable.clubId eq clubId) and
                 (TableSessionsTable.status eq TableSessionStatus.OPEN.name)
@@ -187,6 +191,7 @@ class TableSessionRepository(
             it[closedAt] = now.toOffsetDateTimeUtc()
             it[closedBy] = actorId
         } > 0
+    }
 
     suspend fun listActive(
         clubId: Long,
@@ -257,6 +262,7 @@ class TableDepositRepository(
         return try {
             withRetriedTx(name = "tableDeposit.create", database = db) {
                 newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                    requireLegacyDepositSession(clubId, sessionId)
                     ensureShiftOpenForDeposits(clubId = clubId, nightStartUtc = nightStartUtc, operation = "create")
                     insertDeposit(
                         clubId,
@@ -426,6 +432,7 @@ class TableDepositRepository(
     ): Pair<TableDeposit, Long> {
         val clubId = existing[TableDepositsTable.clubId]
         val depositId = existing[TableDepositsTable.id]
+        requireLegacyDepositSession(clubId, existing[TableDepositsTable.tableSessionId])
         val currentSnapshot = snapshotForDeposit(existing)
         val adjustmentAmount = amountMinor - currentSnapshot.amountMinor
         val adjustmentAllocations =
@@ -819,6 +826,34 @@ class TableDepositRepository(
             )
         }
     }
+}
+
+class StaffTableSessionManagedException : IllegalStateException("Table session is managed through the club cabinet")
+
+private fun requireLegacyDepositSession(
+    clubId: Long,
+    sessionId: Long,
+) {
+    if (staffOwnedSession(clubId, sessionId)) throw StaffTableSessionManagedException()
+}
+
+private fun staffOwnedSession(
+    clubId: Long,
+    sessionId: Long,
+): Boolean {
+    val sql = OnboardingSql(TransactionManager.current().connection.connection as Connection)
+    val supportsStaffSessions =
+        sql.row(
+            "SELECT 1 AS present FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=CURRENT_SCHEMA " +
+                "AND LOWER(TABLE_NAME)='table_sessions' AND LOWER(COLUMN_NAME)='seating_mode'",
+        ) != null
+    return supportsStaffSessions &&
+        sql
+            .row(
+                "SELECT seating_mode FROM table_sessions WHERE id=? AND club_id=?" + sql.updateLock(),
+                sessionId,
+                clubId,
+            )?.get("seating_mode") != null
 }
 
 private fun Throwable.isShiftClosedViolation(): Boolean {

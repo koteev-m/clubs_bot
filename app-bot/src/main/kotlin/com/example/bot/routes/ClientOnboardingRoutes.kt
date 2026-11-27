@@ -81,6 +81,7 @@ private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
     post("/applications/{id}/club") { api.mutate(call, OnboardingMutation.APPLICATION_CREATE_CLUB, "id") }
     get("/clubs/{id}/modules-settings") { api.read(call, OnboardingRead.CLUB_MODULE_SETTINGS_GET, "id") }
     patch("/clubs/{id}/modules-settings") { api.mutate(call, OnboardingMutation.CLUB_MODULE_SETTINGS_UPDATE, "id") }
+    clubOperationsEndpoints(api)
     get("/clubs/{id}/business-overview") { api.read(call, OnboardingRead.CLUB_BUSINESS_OVERVIEW, "id") }
     get("/clubs/{id}/finance/template") { api.read(call, OnboardingRead.CLUB_FINANCE_GET, "id") }
     post("/clubs/{id}/finance/template") { api.mutate(call, OnboardingMutation.CLUB_FINANCE_UPDATE, "id") }
@@ -103,6 +104,24 @@ private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
     post("/clubs/{id}/team") { api.mutate(call, OnboardingMutation.CLUB_TEAM_UPDATE, "id") }
     get("/clubs/{id}/profile") { api.read(call, OnboardingRead.CLUB_PROFILE_GET, "id") }
     patch("/clubs/{id}/profile") { api.mutate(call, OnboardingMutation.CLUB_PROFILE_UPDATE, "id") }
+}
+
+private fun Route.clubOperationsEndpoints(api: OnboardingHttp) {
+    get("/clubs/{id}/operations") { api.read(call, OnboardingRead.CLUB_OPERATIONS_GET, "id") }
+    get("/clubs/{id}/operations/nights/{nightId}") {
+        api.read(call, OnboardingRead.CLUB_OPERATIONS_GET, "id", pathIds = listOf("nightId"))
+    }
+    post("/clubs/{id}/operations") { api.mutate(call, OnboardingMutation.CLUB_OPERATIONS_UPDATE, "id") }
+    get("/clubs/{id}/deposit-configuration") { api.read(call, OnboardingRead.CLUB_DEPOSIT_CONFIG_GET, "id") }
+    patch("/clubs/{id}/deposit-configuration") { api.mutate(call, OnboardingMutation.CLUB_DEPOSIT_CONFIG_UPDATE, "id") }
+    post("/clubs/{id}/operations/reports") { api.read(call, OnboardingRead.CLUB_OPERATING_REPORTS, "id", body = true) }
+    get("/clubs/{id}/operations/financial-reports") { api.read(call, OnboardingRead.CLUB_FINANCIAL_REPORTS, "id") }
+    get(
+        "/clubs/{id}/operations/financial-report-access",
+    ) { api.read(call, OnboardingRead.CLUB_REPORT_ACCESS_GET, "id") }
+    patch("/clubs/{id}/operations/financial-report-access") {
+        api.mutate(call, OnboardingMutation.CLUB_REPORT_ACCESS_UPDATE, "id")
+    }
 }
 
 private fun Route.platformInvitationEndpoints(api: OnboardingHttp) {
@@ -324,10 +343,16 @@ private val conflictCodes =
     setOf(
         ErrorCodes.VERSION_CONFLICT,
         ErrorCodes.INVALID_TRANSITION,
+        ErrorCodes.shift_report_closed,
+        "shift_not_open",
+        "operations_table_not_enabled",
+        "booking_cutoff_passed",
+        "entry_denied",
         ErrorCodes.idempotency_conflict,
         ErrorCodes.DUPLICATE_APPLICATION,
         "client_not_empty",
         "finance_group_in_use",
+        "calendar_timezone_locked",
         "calendar_night_dependencies",
         "calendar_night_started",
         "calendar_night_invalid",

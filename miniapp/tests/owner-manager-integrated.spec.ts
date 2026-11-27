@@ -653,6 +653,26 @@ test('verified business owner assigns a network manager who assigns and revokes 
   await expect(
     manager.getByRole('button', { name: 'Управляющие', exact: true }),
   ).toHaveCount(0);
+  const clubApi = '/api/client/clubs/' + club.id;
+  const layout = await api(request, managerId, clubApi + '/halls', {
+    name: 'Основной зал',
+  });
+  const hall = layout.halls.find((value: { name: string }) => value.name === 'Основной зал');
+  expect(hall).toBeDefined();
+  await api(request, managerId, clubApi + '/halls/' + hall.id + '/tables', {
+    label: 'Стол 7',
+    tableNumber: 7,
+    capacity: 6,
+    expectedVersion: hall.layoutRevision,
+  });
+  await manager.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const hallOverview = manager.getByRole('region', { name: 'Обзор залов' });
+  await expect(hallOverview.getByText('Основной зал')).toBeVisible();
+  await expect(hallOverview.getByText('Мест за этими столами: 6')).toBeVisible();
+  expect(await manager.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await hallOverview.getByRole('button', { name: 'Открыть залы и столы' }).click();
+  await expect(manager.getByText('Основной зал', { exact: true })).toBeVisible();
+  await open(manager, await identity(request, 'foreign'), clubUrl);
   for (const credential of [networkId, managerId]) {
     expect(
       (
@@ -689,4 +709,208 @@ test('verified business owner assigns a network manager who assigns and revokes 
     ).status(),
   ).toBe(404);
   await Promise.all([issuer.close(), network.close(), manager.close()]);
+});
+
+test('mobile manager opens the floor desk after ordinary setup and records mixed tender, card and release once', async ({
+  browser,
+  request,
+  baseURL,
+}) => {
+  const platform = await identity(request, 'owner');
+  const owner = await identity(request, 'recipient');
+  const clubManager = await identity(request, 'foreign');
+  const suffix = randomUUID().slice(0, 6);
+  const issued = await api(request, platform, '/api/platform/onboarding/invitations', {
+    clientName: 'Операции ' + suffix,
+    recipientLabel: 'Владелец бизнеса',
+    allowedClubs: 1,
+  });
+  await api(request, owner, '/api/client/invitations/' + issued.id + '/claim', {
+    token: issued.token,
+    expectedVersion: issued.version,
+  });
+  const organization = '/api/platform/onboarding/clients/' + issued.clientId;
+  const client = await api(request, platform, organization);
+  const member = client.members.find((entry: { telegramUserId: string }) => entry.telegramUserId === '998102');
+  expect(member).toBeDefined();
+  await api(request, platform, organization + '/members/' + member.userId + '/business-owner', {
+    expectedVersion: member.version,
+  });
+  const club = await api(request, owner, '/api/client/clients/' + issued.clientId + '/clubs', {
+    venueName: 'Мобильная смена ' + suffix,
+    countryCode: 'RU',
+    cityId: '524901',
+    address: 'Синтетический адрес',
+  });
+  const clubApi = '/api/client/clubs/' + club.id;
+  const roster = clubApi + '/managers';
+  const invite = async (sender: string, role: string) => {
+    const view = await api(request, sender, roster);
+    return api(request, sender, roster, {
+      action: 'invite',
+      expectedVersion: view.version,
+      recipientLabel: 'Сотрудник',
+      role,
+    });
+  };
+  const invitation = await invite(owner, 'CLUB_MANAGER');
+  const preview = await api(request, clubManager, '/api/client/manager-invitations/resolve', { token: invitation.token });
+  await api(request, clubManager, '/api/client/manager-invitations/' + preview.id + '/claim', {
+    token: invitation.token,
+    expectedVersion: preview.version,
+  });
+  const floorInvite = await invite(clubManager, 'FLOOR_MANAGER');
+  const layout = await api(request, clubManager, clubApi + '/halls', { name: 'Основной зал' });
+  const hall = layout.halls[0];
+  const mapped = await api(request, clubManager, clubApi + '/halls/' + hall.id + '/tables', {
+    label: 'Стол 1',
+    tableNumber: 1,
+    capacity: 6,
+    expectedVersion: hall.layoutRevision,
+  });
+  const table = mapped.halls[0].tables[0];
+  const calendar = await api(request, clubManager, clubApi + '/calendar');
+  const startAt = new Date(Date.now() - 5 * 60_000);
+  const endAt = new Date(startAt.getTime() + 6 * 3600_000);
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: calendar.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone: calendar.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  });
+  const businessDate = date.format(startAt);
+  const scheduled = await api(request, clubManager, clubApi + '/calendar', {
+    expectedVersion: calendar.version,
+    timezone: calendar.timezone,
+    weekly: [],
+    holidays: [],
+    exceptions: [{
+      date: businessDate,
+      mode: 'open',
+      open: time.format(startAt),
+      close: time.format(endAt),
+      nextDay: date.format(endAt) !== businessDate,
+    }],
+  }, 'PATCH');
+  const nightId = scheduled.nights.find((night: { businessDate: string }) => night.businessDate === businessDate)?.nightId;
+  expect(nightId).toBeTruthy();
+  expect(table.id).toBeTruthy();
+  const configuration = await api(request, clubManager, clubApi + '/deposit-configuration');
+  await api(request, clubManager, clubApi + '/deposit-configuration', {
+    expectedVersion: configuration.version,
+    primaryName: 'Бар',
+    distribution: true,
+    extras: [{ name: 'Шары', active: true }],
+  }, 'PATCH');
+
+  const page = await browser.newPage({
+    baseURL,
+    viewport: { width: 320, height: 740 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  try {
+    const start = new URL(floorInvite.invitationLink).searchParams.get('startapp')!;
+    const launched = await identity(request, 'second-manager', start);
+    const floor = await identity(request, 'second-manager');
+    const headers = { 'X-Telegram-Init-Data': floor };
+    const operations = clubApi + '/operations';
+    await open(page, launched, '/app');
+    const accept = page.getByRole('button', { name: 'Принять приглашение', exact: true });
+    await expect(accept).toBeVisible();
+    expect((await request.get(operations, { headers })).status()).toBe(404);
+    await accept.click();
+
+    const desk = page.getByRole('region', { name: 'Рабочая ночь' });
+    await expect(desk.getByRole('button', { name: 'Посадить гостей', exact: true })).toBeVisible();
+    await expect(desk.getByText(club.name, { exact: false })).toBeVisible();
+    await expect(desk.getByText('Свободен')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Перейти к настройкам' })).toHaveCount(0);
+    await expect(page.getByText('Менеджер', { exact: true })).toBeVisible();
+    await telegramTheme(page, 'dark');
+    await shot(page, 'floor-desk-dark-320.png');
+
+    await desk.getByRole('button', { name: 'Посадить гостей', exact: true }).click();
+    await expect(desk.getByText(/Выберите свободный стол/)).toBeVisible();
+    await desk.getByRole('button', { name: 'Посадить · Стол 1' }).click();
+    const seat = desk.getByRole('form', { name: 'Посадка гостей' });
+    await seat.getByLabel('Фактически получено').fill('15000');
+    await seat.getByLabel('Шары').fill('3000');
+    await seat.getByRole('radio', { name: 'Комбинированная' }).check();
+    await seat.getByLabel('Наличными', { exact: true }).fill('5000');
+    await expect(seat.getByText(/12\s000,00/)).toBeVisible();
+    await shot(page, 'floor-cash-dark-320.png');
+
+    const reload = page.waitForResponse((response) =>
+      response.url().endsWith(operations) && response.request().method() === 'GET');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    expect((await reload).ok()).toBe(true);
+    await expect(seat.getByLabel('Фактически получено')).toHaveValue('15000');
+    const location = page.url();
+    const back = page.waitForEvent('dialog');
+    await page.evaluate(() => {
+      const telegram = window as unknown as { Telegram: { WebView: { receiveEvent: (event: string) => void } } };
+      window.setTimeout(() => telegram.Telegram.WebView.receiveEvent('back_button_pressed'), 0);
+    });
+    const confirmation = await back;
+    await confirmation.dismiss();
+    await expect(page).toHaveURL(location);
+    await expect(seat.getByLabel('Фактически получено')).toHaveValue('15000');
+
+    await seat.getByRole('button', { name: 'Посадить и записать оплату' }).click();
+    await expect(desk.getByText(/Записано .*наличными/i)).toBeVisible();
+    await expect(desk.getByText('Занят', { exact: true })).toBeVisible();
+    let shift = await api(request, floor, operations);
+    expect(shift.night.id).toBe(nightId);
+    expect(shift.halls[0].tables[0].payments).toMatchObject([{ amountMinor: '1500000', method: 'MIXED', cashMinor: '500000', cardMinor: '1000000' }]);
+
+    let attempts = 0;
+    let firstKey: string | undefined;
+    let sameKey = false;
+    await page.route('**' + operations, async (route) => {
+      if (route.request().method() !== 'POST') {
+        await route.continue();
+        return;
+      }
+      attempts++;
+      const key = route.request().headers()['idempotency-key'];
+      if (attempts === 1) {
+        firstKey = key;
+        const real = await route.fetch();
+        expect(real.ok()).toBe(true);
+        await route.abort();
+      } else {
+        sameKey = Boolean(key && key === firstKey);
+        await route.continue();
+      }
+    });
+    await desk.getByRole('button', { name: 'Доплата · Стол 1' }).click();
+    const topUp = desk.getByRole('form', { name: 'Доплата по посадке' });
+    await expect(topUp.getByRole('radio', { name: 'Наличные' })).not.toBeChecked();
+    await topUp.getByLabel('Фактически получено').fill('500');
+    await topUp.getByRole('radio', { name: 'Карта' }).check();
+    await topUp.getByRole('button', { name: 'Записать доплату' }).click();
+    await expect(desk.getByText(/Неизвестно, сохранена ли исходная запись/)).toBeVisible();
+    await open(page, floor, '/app?mode=client&screen=club&resource=' + club.id);
+    await desk.getByRole('button', { name: 'Проверить исходную запись' }).click();
+    await expect(desk.getByText(/Записано .*Карта/)).toBeVisible();
+    expect(attempts).toBe(2);
+    expect(sameKey).toBe(true);
+    await page.unroute('**' + operations);
+    shift = await api(request, floor, operations);
+    expect(shift.halls[0].tables[0].payments).toMatchObject([
+      { amountMinor: '1500000', method: 'MIXED', cashMinor: '500000', cardMinor: '1000000' },
+      { amountMinor: '50000', method: 'CARD' },
+    ]);
+
+    await desk.getByRole('button', { name: 'Освободить · Стол 1' }).click();
+    await desk.getByRole('button', { name: 'Освободить стол', exact: true }).click();
+    await expect(desk.getByText('Стол 1 · стол освобождён')).toBeVisible();
+    await expect(desk.getByText('Свободен', { exact: true })).toBeVisible();
+    const released = await api(request, floor, operations);
+    expect(released.halls[0].tables[0].sessionId).toBeNull();
+    expect(released.halls[0].tables[0].lastSessionId).toBe(shift.halls[0].tables[0].sessionId);
+  } finally {
+    await page.close();
+  }
 });
