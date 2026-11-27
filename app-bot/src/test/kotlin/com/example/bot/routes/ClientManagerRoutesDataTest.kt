@@ -22,7 +22,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-open class ClientManagerRoutesDataTest : NetworkManagerPolicyContract() {
+open class ClientManagerRoutesDataTest : ClubStaffPolicyContract() {
     override fun legacyDatabase(block: (DataSource) -> Unit) = databaseAt("79", block)
 
     @Test
@@ -74,7 +74,15 @@ open class ClientManagerRoutesDataTest : NetworkManagerPolicyContract() {
                 val updateKey = UUID.randomUUID().toString()
                 val saved = ok(profile, SECOND_MANAGER, update, HttpMethod.Patch, updateKey)
                 assertEquals("Manager saved", saved.string("name"))
-                assertEquals(HttpStatusCode.NotFound, requestAs(path, SECOND_MANAGER).status)
+                assertEquals(
+                    setOf(
+                        "FLOOR_MANAGER",
+                        "ENTRANCE_MANAGER",
+                        "FINANCE_MANAGER",
+                        "PROMOTER",
+                    ).map(::JsonPrimitive).toSet(),
+                    ok(path, SECOND_MANAGER).getValue("roles").jsonArray.toSet(),
+                )
                 val pending = invite(path, FOREIGN, "CLUB_MANAGER")
                 revoke(path, RECIPIENT, networkResult["assignments"]!!.jsonArray.single().jsonObject)
                 assertEquals(HttpStatusCode.NotFound, requestAs(path, FOREIGN).status)
@@ -614,27 +622,5 @@ open class ClientManagerRoutesDataTest : NetworkManagerPolicyContract() {
             HttpStatusCode.NotFound,
             requestAs("$C/clubs/$other/profile", FOREIGN, profileChange(network), HttpMethod.Patch).status,
         )
-    }
-
-    private suspend fun ApplicationTestBuilder.revoke(
-        path: String,
-        issuer: Long,
-        target: JsonObject,
-    ) {
-        val body =
-            JsonObject(
-                obj(
-                    "action" to "revoke_assignment",
-                    "expectedVersion" to ok(path, issuer).string("version"),
-                    "assignmentId" to target.string("id"),
-                    "expectedAssignmentVersion" to target.string("version"),
-                    "reason" to "End of duties",
-                ) +
-                    ("confirmed" to JsonPrimitive(true)),
-            )
-        val key = UUID.randomUUID().toString()
-        val revoked = ok(path, issuer, body, key = key)
-        assertEquals(revoked, ok(path, issuer, body, key = key))
-        assertEquals(HttpStatusCode.Conflict, requestAs(path, issuer, body).status)
     }
 }

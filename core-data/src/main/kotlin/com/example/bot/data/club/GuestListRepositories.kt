@@ -11,6 +11,8 @@ import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingStatusNames
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.core.LegacyBookingAdmission
+import com.example.bot.data.client.onboarding.OnboardingSql
+import com.example.bot.data.client.onboarding.updateLock
 import com.example.bot.data.db.withTxRetry
 import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.privacy.isMappedClub
@@ -31,6 +33,7 @@ import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
 import java.sql.Connection
@@ -654,6 +657,7 @@ class CheckinDbRepository(
         val createdAt = now()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                lockEntranceOutcome(checkin)
                 val id =
                     CheckinsTable.insert {
                         it[clubId] = checkin.clubId
@@ -694,6 +698,7 @@ class CheckinDbRepository(
         val createdAt = now()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                lockEntranceOutcome(checkin)
                 if (invitationUse != null) {
                     val updated =
                         InvitationsTable.update({
@@ -776,6 +781,7 @@ class CheckinDbRepository(
         allowedFromStatuses: Set<BookingStatus> = setOf(BookingStatus.BOOKED),
         createdAt: OffsetDateTime = now(),
     ): CheckinRecord? {
+        lockEntranceOutcome(checkin)
         val updated =
             if (allowedFromStatuses.isNotEmpty()) {
                 val allowedNames = allowedFromStatuses.map { it.name }
@@ -820,6 +826,12 @@ class CheckinDbRepository(
             occurredAt = checkin.occurredAt,
             createdAt = createdAt.toInstantUtc(),
         )
+    }
+
+    private fun lockEntranceOutcome(checkin: NewCheckin) {
+        // Staff seating and no-show hold this row until the operation and receipt commit.
+        val sql = OnboardingSql(TransactionManager.current().connection.connection as Connection)
+        sql.row("SELECT id FROM clubs WHERE id=?" + sql.updateLock(), checkin.clubId)
     }
 
     suspend fun findBySubject(

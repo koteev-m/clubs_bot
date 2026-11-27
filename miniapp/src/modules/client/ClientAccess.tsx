@@ -5,6 +5,9 @@ import NewClub, { blankNewVenue } from './NewClub';
 import { authorityLost } from './onboarding.api';
 import ClubProfile from './ClubProfile';
 import ClubCabinet from './ClubCabinet';
+import ClubDepositSettings from './ClubDepositSettings';
+import ClubFinancialReportAccess from './ClubFinancialReportAccess';
+import ClubOperatingReports from './ClubOperatingReports';
 import ClubCalendar from './ClubCalendar';
 import ClubBookingRules from './ClubBookingRules';
 import GuestBookingPreview from './GuestBookingPreview';
@@ -28,6 +31,7 @@ import {
   ClubProfile as Profile,
   Invitation,
   invitationLabels,
+  isManagerRole,
   OnboardingContext,
   Page,
   NewVenueFields,
@@ -40,6 +44,9 @@ type Screen =
   | { type: 'club'; id: string }
   | { type: 'profile'; id: string }
   | { type: 'settings'; id: string }
+  | { type: 'deposit-configuration'; id: string }
+  | { type: 'operational-reports'; id: string }
+  | { type: 'financial-report-access'; id: string }
   | { type: 'readiness'; id: string }
   | { type: 'preparation-choice'; id: string }
   | { type: 'calendar'; id: string }
@@ -92,6 +99,9 @@ function savedScreen(): Screen {
     'settings',
     'readiness',
     'preparation-choice',
+    'deposit-configuration',
+    'operational-reports',
+    'financial-report-access',
   ] as const)
     if (params.get('screen') === type) return { type, id };
   if (params.get('screen') === 'club') return { type: 'club', id };
@@ -133,7 +143,7 @@ function screenUrl(next: Screen) {
 }
 
 const settingsSections = new Set<Screen['type']>([
-  'profile', 'booking-rules', 'booking-preview', 'layout', 'calendar', 'finance', 'modules',
+  'profile', 'booking-rules', 'booking-preview', 'layout', 'calendar', 'finance', 'modules', 'deposit-configuration',
 ]);
 
 export default function ClientAccess({
@@ -433,6 +443,36 @@ function ClientWorkspace({
       />
     );
   }
+  if (screen.type === 'deposit-configuration')
+    return (
+      <ClubDepositSettings
+        key={screen.id}
+        credential={credential}
+        id={screen.id}
+        back={() => goBack({ type: 'settings', id: screen.id })}
+        reportDirty={reportDirty}
+        reportPending={reportSectionPending}
+      />
+    );
+  if (screen.type === 'operational-reports')
+    return (
+      <ClubOperatingReports
+        key={screen.id}
+        credential={credential}
+        id={screen.id}
+        back={() => goBack({ type: 'club', id: screen.id })}
+      />
+    );
+  if (screen.type === 'financial-report-access')
+    return (
+      <ClubFinancialReportAccess
+        key={screen.id}
+        credential={credential}
+        id={screen.id}
+        back={() => goBack({ type: 'club', id: screen.id })}
+        reportPending={reportSectionPending}
+      />
+    );
   if (screen.type === 'booking-preview')
     return (
       <GuestBookingPreview
@@ -693,8 +733,7 @@ function InvitationScreen({
           (id && received.id !== id) ||
           (manager &&
             (received.acceptanceMode !== 'manager' ||
-              (received.role !== 'NETWORK_MANAGER' &&
-                received.role !== 'CLUB_MANAGER')))
+              !isManagerRole(received.role)))
         )
           throw new Error('Invalid invitation response');
         authority.current = {
@@ -767,7 +806,9 @@ function InvitationScreen({
     <Shell
       title={
         manager
-          ? 'Приглашение управляющего'
+          ? invitation?.role === 'CLUB_MANAGER' || invitation?.role === 'NETWORK_MANAGER'
+            ? 'Приглашение управляющего'
+            : 'Приглашение в команду'
           : staff
             ? 'Приглашение в команду'
             : 'Приглашение клиента'

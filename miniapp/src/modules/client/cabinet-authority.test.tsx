@@ -93,6 +93,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -424,16 +425,42 @@ it('shows verified owner metrics and closed reports only under the reports capab
   ).toBe(false);
 });
 
-it('opens club manager configuration without issuing report or manager roster requests', async () => {
+it('shows the assigned club’s hall capacity and opens configuration without requesting reports or the manager roster', async () => {
+  const open = vi.fn();
   const fetch = vi
     .spyOn(globalThis, 'fetch')
-    .mockImplementation(async (path) =>
-      String(path).endsWith('/profile')
-        ? reply({ ...profile, businessRole: 'CLUB_MANAGER' })
-        : reply(calendar),
-    );
-  render(<ClubCabinet {...props} />);
+    .mockImplementation(async (path) => {
+      if (String(path).endsWith('/profile'))
+        return reply({ ...profile, businessRole: 'CLUB_MANAGER' });
+      if (String(path).endsWith('/layout'))
+        return reply({
+          clubId: '42',
+          clientId: '21',
+          permissions: ['client.club.read'],
+          halls: [
+            {
+              id: '7',
+              name: 'Основной зал',
+              tables: [
+                { hallId: '7', capacity: 4 },
+                { hallId: '7', capacity: 6 },
+              ],
+            },
+            { id: '8', name: 'Малый зал', tables: [] },
+          ],
+        });
+      return reply(calendar);
+    });
+  render(<ClubCabinet {...props} open={open} />);
   expect(await screen.findByText('Управляющий клуба')).toBeTruthy();
+  const halls = await screen.findByRole('region', { name: 'Обзор залов' });
+  expect(await within(halls).findByText('Столов в настройках: 2')).toBeTruthy();
+  expect(within(halls).getByText('Мест за этими столами: 10')).toBeTruthy();
+  expect(within(halls).getByText('Мест за этими столами: 0')).toBeTruthy();
+  fireEvent.click(
+    within(halls).getByRole('button', { name: 'Открыть залы и столы' }),
+  );
+  expect(open).toHaveBeenCalledWith('layout');
   expect(
     screen.getByRole('button', { name: /Профиль.*Просмотр и изменение/ }),
   ).toBeTruthy();
@@ -443,7 +470,74 @@ it('opens club manager configuration without issuing report or manager roster re
   ).toBeNull();
   expect(
     fetch.mock.calls.every(([path]) =>
-      /\/(profile|calendar)$/.test(String(path)),
+      /^\/api\/client\/clubs\/42\/(profile|calendar|layout)$/.test(
+        String(path),
+      ),
     ),
   ).toBe(true);
+});
+
+it('does not render a layout from another client and drops hall data when access is revoked', async () => {
+  let clientId = '22';
+  let revoked = false;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (path) => {
+    if (String(path).endsWith('/profile'))
+      return reply({ ...profile, businessRole: 'CLUB_MANAGER' });
+    if (String(path).endsWith('/layout'))
+      return revoked
+        ? reply({ code: 'not_found' }, 404)
+        : reply({
+            clubId: '42',
+            clientId,
+            permissions: ['client.club.read'],
+            halls: [{ id: '7', name: 'Основной зал', tables: [] }],
+          });
+    return reply(calendar);
+  });
+  render(<ClubCabinet {...props} />);
+  const halls = await screen.findByRole('region', { name: 'Обзор залов' });
+  const retry = await within(halls).findByRole('button', {
+    name: 'Повторить загрузку',
+  });
+  expect(within(halls).queryByText('Основной зал')).toBeNull();
+  clientId = '21';
+  fireEvent.click(retry);
+  await within(halls).findByText('Основной зал');
+  revoked = true;
+  act(() => window.dispatchEvent(new Event('focus')));
+  await screen.findByText(/Доступ утрачен или запись недоступна/);
+  expect(screen.queryByText('Основной зал')).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Обзор залов' })).toBeNull();
+});
+
+it('updates the overview when a scheduled night opens and closes without a page focus event', async () => {
+  const night = calendar.nights[0];
+  vi.useFakeTimers();
+  vi.setSystemTime(Date.parse(night.opensAt) - 1000);
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (path) => {
+    if (String(path).endsWith('/profile'))
+      return reply({ ...profile, businessRole: 'CLUB_MANAGER' });
+    if (String(path).endsWith('/layout'))
+      return reply({
+        clubId: profile.id,
+        clientId: profile.clientId,
+        permissions: ['client.club.read'],
+        halls: [],
+      });
+    return reply({
+      ...calendar,
+      nights: [{ ...night, closesAt: '2090-01-09T00:00:02+03:00' }],
+    });
+  });
+  render(<ClubCabinet {...props} />);
+  await act(async () => vi.advanceTimersByTimeAsync(0));
+  expect(screen.getByRole('heading', { name: 'Ближайшая клубная ночь' })).toBeTruthy();
+  expect(screen.getByText('Вечеринка 08.01.2090')).toBeTruthy();
+
+  await act(async () => vi.advanceTimersByTimeAsync(1000));
+  expect(screen.getByRole('heading', { name: 'Текущая ночь по расписанию' })).toBeTruthy();
+
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  expect(screen.queryByRole('heading', { name: 'Текущая ночь по расписанию' })).toBeNull();
+  expect(screen.getByText('В предварительном расписании нет предстоящих ночей.')).toBeTruthy();
 });

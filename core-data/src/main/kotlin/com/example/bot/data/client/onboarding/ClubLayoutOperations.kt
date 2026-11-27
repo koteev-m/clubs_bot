@@ -1,5 +1,6 @@
 package com.example.bot.data.client.onboarding
 
+import com.example.bot.data.booking.core.lockBookingAdmission
 import com.example.bot.data.layout.LayoutDbRepository
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -19,6 +20,7 @@ internal class ClubLayoutOperations(
         write: Boolean = false,
     ): JsonObject {
         val clientId = session.requireClubGrant(clubId, WRITE_LAYOUT.takeIf { write })
+        session.requireFloorSection(clientId, clubId, READ_FLOOR_LAYOUT)
         val writable = session.hasClubGrant(clientId, clubId, WRITE_LAYOUT)
         val views = ClubLayoutViews(sql)
         return buildJsonObject {
@@ -46,7 +48,8 @@ internal class ClubLayoutOperations(
         body: JsonObject,
     ): JsonObject {
         body.only(listOf("hallId"))
-        session.requireClubGrant(clubId)
+        val clientId = session.requireClubGrant(clubId)
+        session.requireFloorSection(clientId, clubId, READ_FLOOR_LAYOUT)
         val hallId = body.id("hallId")
         hall(clubId, hallId)
         return sql.connection
@@ -72,13 +75,15 @@ internal class ClubLayoutOperations(
         body: JsonObject,
     ): MutationResult {
         val clientId = session.requireClubGrant(clubId, WRITE_LAYOUT)
+        val automatic = sql.automaticWorkingClub(clientId, clubId)
+        if (automatic) check(sql.lockBookingAdmission(clubId))
         session.calendarClub(clubId, lock = true)
         var tableIds = emptyList<Long>()
         var zoneId: Long? = null
         var planRemoved: Boolean? = null
         val hallId =
             if (operation == OnboardingMutation.CLUB_HALL_CREATE) {
-                createHall(clubId, body)
+                createHall(clubId, body, automatic)
             } else {
                 val hallId = body.id("hallId")
                 val hall = hall(clubId, hallId)
@@ -136,6 +141,9 @@ internal class ClubLayoutOperations(
                 if (tableIds.size > 1) put("tableIds", JsonArray(tableIds.map { JsonPrimitive(it.toString()) }))
             },
         )
+        if (automatic && tableIds.isNotEmpty()) {
+            ClientWorkingNightPreparation(sql, clientId, clubId).prepare(session.now)
+        }
         return MutationResult("club_layout", clubId, clientId, get(clubId, write = true))
     }
 
@@ -147,11 +155,12 @@ internal class ClubLayoutOperations(
     private fun createHall(
         clubId: Long,
         body: JsonObject,
+        automatic: Boolean,
     ): Long {
         body.only(listOf("name"))
         val name = body.text("name", HALL_NAME_LIMIT, required = true)
         requireHallName(clubId, name)
-        val active = sql.rows("SELECT id FROM halls WHERE club_id=? AND is_active=TRUE", clubId).isEmpty()
+        val active = automatic || sql.rows("SELECT id FROM halls WHERE club_id=? AND is_active=TRUE", clubId).isEmpty()
         val hallId =
             sql.insert(
                 "INSERT INTO halls(club_id,name,is_active,layout_revision,geometry_json," +

@@ -104,6 +104,14 @@ internal class ClubLayoutTables(
                 draft.capacity,
                 draft.deposit,
             )
+        if (sql.workingOperationsSchema) {
+            sql.update(
+                "INSERT INTO client_working_tables(table_id,club_id) " +
+                    "SELECT ?,w.club_id FROM client_working_clubs w WHERE w.club_id=?",
+                bookingId,
+                clubId,
+            )
+        }
         return sql.insert(
             "INSERT INTO hall_tables(hall_id,table_number,label,capacity,zone_id,x,y,is_placed," +
                 "booking_table_id,booking_club_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",

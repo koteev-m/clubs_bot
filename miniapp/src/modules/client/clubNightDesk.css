@@ -1,0 +1,132 @@
+.night-desk {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.night-desk-heading,
+.night-desk-toolbar,
+.night-desk-tabs,
+.night-desk-actions,
+.night-desk-table-heading {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.night-desk-heading p,
+.night-desk-table p,
+.night-desk-payments p {
+  margin: 0;
+}
+
+.night-desk .ob-button {
+  min-height: 44px;
+  white-space: normal;
+}
+
+.night-desk-tabs .ob-button[aria-pressed='true'] {
+  border-color: var(--po-accent);
+  color: var(--po-accent);
+}
+
+.night-desk-tables,
+.night-desk-booking-list {
+  display: grid;
+  gap: 0.55rem;
+  list-style: none;
+  padding: 0;
+}
+
+.night-desk-tables {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+}
+
+.night-desk-table,
+.night-desk-form {
+  display: grid;
+  gap: 0.55rem;
+  align-content: start;
+  border: 1px solid var(--po-line);
+  border-radius: 0.85rem;
+  padding: 0.75rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.night-desk-table-heading span[data-status] {
+  font-size: 0.85rem;
+  border: 1px solid var(--po-line);
+  border-radius: 0.6rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.night-desk-table-heading span[data-status='free'] {
+  color: var(--po-accent);
+}
+
+.night-desk-actions {
+  justify-content: flex-start;
+}
+
+.night-desk-fields,
+.night-desk-form fieldset,
+.night-desk-allocation {
+  display: grid;
+  gap: 0.55rem;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.night-desk .night-desk-radio {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.night-desk-radio legend {
+  margin-bottom: 0.35rem;
+}
+
+.night-desk-radio label {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  gap: 0.3rem;
+  padding: 0 0.65rem;
+  border: 1px solid var(--po-line);
+  border-radius: 0.65rem;
+  cursor: pointer;
+}
+
+.night-desk-radio input {
+  min-height: auto;
+  width: auto;
+  accent-color: var(--po-accent);
+}
+
+.night-desk-form summary {
+  cursor: pointer;
+  min-height: 44px;
+  align-content: center;
+}
+
+.night-desk-payments ul {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.night-desk-booking-list .ob-button {
+  display: grid;
+  gap: 0.2rem;
+  width: 100%;
+  text-align: left;
+}
+
+@media (min-width: 640px) {
+  .night-desk-fields {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}

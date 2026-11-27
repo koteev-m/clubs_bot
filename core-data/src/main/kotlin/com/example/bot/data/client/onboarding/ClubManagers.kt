@@ -1,9 +1,14 @@
 package com.example.bot.data.client.onboarding
 
+import com.example.bot.data.client.assignments.MANAGE_OPERATIONS_TEAM
 import com.example.bot.data.client.assignments.StaffRole
-import com.example.bot.data.client.assignments.activeManagerSourcesSql
+import com.example.bot.data.client.assignments.managerDelegationPolicies
 import com.example.bot.data.client.assignments.managerPolicy
-import com.example.bot.data.client.assignments.networkManagerSourceRef
+import com.example.bot.data.client.assignments.managerSourcePermissions
+import com.example.bot.data.client.assignments.managerSourceRef
+import com.example.bot.data.client.assignments.managerSources
+import com.example.bot.data.client.assignments.pinnedManagerPolicy
+import com.example.bot.data.client.assignments.subordinateStaffRoles
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -51,21 +56,31 @@ internal class ClubManagers(
         return client
     }
 
-    private fun authority(
+    private fun authorities(
         client: Long,
         club: Long,
-    ): Pair<String, Set<StaffRole>> {
+    ): Map<StaffRole, String> {
         if (session.actor.telegramUserId == session.ownerId) fail("not_found")
         session.member(client, manage = false)
         val owner = session.businessOwnerRef(client, club)
-        if (owner != null) return owner to setOf(StaffRole.CLUB_MANAGER, StaffRole.NETWORK_MANAGER)
-        val network = session.networkManagerSourceRef(client, club) ?: fail("not_found")
-        return network to setOf(StaffRole.CLUB_MANAGER)
+        val assignments = session.managerSources(client, club)
+        val network = assignments.singleOrNull { it["role_code"] == StaffRole.NETWORK_MANAGER.name }
+        val clubManager =
+            assignments.singleOrNull {
+                it["role_code"] == StaffRole.CLUB_MANAGER.name &&
+                    MANAGE_OPERATIONS_TEAM in session.managerSourcePermissions(it)
+            }
+        return buildMap {
+            if (owner != null) put(StaffRole.NETWORK_MANAGER, owner)
+            (owner ?: network?.managerSourceRef())?.let { put(StaffRole.CLUB_MANAGER, it) }
+            if (clubManager != null) subordinateStaffRoles.forEach { put(it, clubManager.managerSourceRef()) }
+        }.ifEmpty { fail("not_found") }
     }
 
     fun roster(club: Long): JsonObject {
         val client = context(club)
-        val (issuer, roles) = authority(client, club)
+        val authorities = authorities(client, club)
+        val roles = authorities.keys
         val current = clubRow(club)
         val allowed = roles.map { it.name }
         return buildJsonObject {
@@ -75,6 +90,15 @@ internal class ClubManagers(
             put("version", current["version"])
             put("canWrite", true)
             put("roles", strings(allowed))
+            put(
+                "rolePermissions",
+                buildJsonObject {
+                    roles.forEach { put(it.name, strings(session.managerPolicy(it).permissions.sorted())) }
+                },
+            )
+            if (StaffRole.FLOOR_MANAGER in roles) {
+                put("delegablePermissions", strings(managerDelegationPolicies.keys.toList()))
+            }
             put("assignableClubs", scopes.choices(client, club, StaffRole.NETWORK_MANAGER in roles))
             val invitations =
                 sql.rows(
@@ -86,7 +110,7 @@ internal class ClubManagers(
                 "invitations",
                 JsonArray(
                     invitations.filter { it["role_code"] in allowed && it["status"] in PENDING }.map {
-                        view(it, !isOriginalIssuer(it, issuer), issuerView = true)
+                        view(it, !canCancel(it, authorities), issuerView = true)
                     },
                 ),
             )
@@ -111,6 +135,10 @@ internal class ClubManagers(
                             put("userId", row["user_id"])
                             put("displayName", row["display_name"] ?: row["username"] ?: row["user_id"])
                             put("version", row["version"])
+                            put("permissions", strings(pinnedManagerPolicy(row).permissions.sorted()))
+                            if (row["role_code"] == StaffRole.FLOOR_MANAGER.name) {
+                                put("delegations", ManagerDelegations(session).list(row))
+                            }
                         }
                     },
                 ),
@@ -123,10 +151,11 @@ internal class ClubManagers(
         body: JsonObject,
     ): MutationResult {
         val client = context(club)
-        val (issuer, roles) = authority(client, club)
+        val authorities = authorities(client, club)
+        val roles = authorities.keys
         session.version(clubRow(club), body)
         when (body.string("action")) {
-            "invite" -> return issue(client, club, body, issuer, roles)
+            "invite" -> return issue(client, club, body, authorities)
             "revoke_assignment" -> sources.revoke(client, club, body, roles)
             "revoke_legacy_assignment" -> {
                 if (session.businessOwnerRef(client, club) == null) fail("forbidden")
@@ -134,7 +163,7 @@ internal class ClubManagers(
             }
             "revoke_invitation" -> {
                 body.only(listOf("action", "expectedVersion", "invitationId", "expectedInvitationVersion", "confirmed"))
-                val row = forAction(client, club, body, issuer, roles)
+                val row = forAction(client, club, body, authorities, allowPredecessor = true)
                 if (row["status"] !in PENDING) fail("invalid_transition")
                 for (scope in scopes.rows(row)) {
                     sql.update(
@@ -151,6 +180,7 @@ internal class ClubManagers(
                     )
                 }
             }
+            "revoke_delegation" -> ManagerDelegations(session).revoke(client, club, body)
             else -> fail("validation_error")
         }
         bump(club)
@@ -161,11 +191,11 @@ internal class ClubManagers(
         client: Long,
         club: Long,
         body: JsonObject,
-        issuer: String,
-        roles: Set<StaffRole>,
+        authorities: Map<StaffRole, String>,
     ): MutationResult {
         body.only(listOf("action", "expectedVersion", "recipientLabel", "role", "clubIds"))
-        val role = roles.singleOrNull { it.name == body.string("role") } ?: fail("forbidden")
+        val role = authorities.keys.singleOrNull { it.name == body.string("role") } ?: fail("forbidden")
+        val issuer = authorities.getValue(role)
         val label = body.text("recipientLabel", MAX_LABEL, required = true)
         val clubs = scopes.selected(body, club, role)
         val token = randomToken()
@@ -173,7 +203,7 @@ internal class ClubManagers(
         var rootId: Long? = null
         for (scope in clubs) {
             val ref = if (scope == club) issuer else session.businessOwnerRef(client, scope) ?: fail("forbidden")
-            val policy = managerPolicy(role)
+            val policy = session.managerPolicy(role)
             val id =
                 sql.insert(
                     "INSERT INTO client_manager_invitations(client_id,club_id,role_code,policy_version," +
@@ -211,8 +241,8 @@ internal class ClubManagers(
     fun issueReceipt(id: Long): JsonObject {
         val row = invitation(id)
         val current = roster(row.long("club_id"))
-        val (issuer, roles) = authority(row.long("client_id"), row.long("club_id"))
-        if (!isOriginalIssuer(row, issuer) || roles.none { it.name == row["role_code"] }) fail("not_found")
+        val authorities = authorities(row.long("client_id"), row.long("club_id"))
+        if (!isOriginalIssuer(row, authorities)) fail("not_found")
         return JsonObject(current + ("createdInvitationId" to JsonPrimitive(id.toString())))
     }
 
@@ -309,9 +339,10 @@ internal class ClubManagers(
             ),
         )
         val client = context(club)
-        val (issuer, roles) = authority(client, club)
+        val authorities = authorities(client, club)
         session.version(clubRow(club), body)
-        val row = forAction(client, club, body, issuer, roles)
+        val row = forAction(client, club, body, authorities)
+        val issuer = checkNotNull(row["issuer_ref"])
         if (effective(row) != "claimed" ||
             !freshClaim(row) ||
             body.string("verificationCode") != row["verification_code"]
@@ -322,6 +353,19 @@ internal class ClubManagers(
         sql.invitationDeadline = minOf(row.instant("claim_valid_until"), row.instant("expires_at"))
         reserveReceipt("manager_roster", club, client, requestHash)
         sources.accept(row, issuer, row.long("claimant_user_id"))
+        bump(club)
+        return roster(club)
+    }
+
+    fun delegate(
+        club: Long,
+        body: JsonObject,
+        requestHash: String,
+    ): JsonObject {
+        val client = context(club)
+        session.version(clubRow(club), body)
+        reserveReceipt("manager_roster", club, client, requestHash)
+        ManagerDelegations(session).issue(client, club, body)
         bump(club)
         return roster(club)
     }
@@ -351,18 +395,14 @@ internal class ClubManagers(
         client: Long,
         club: Long,
         body: JsonObject,
-        issuer: String,
-        roles: Set<StaffRole>,
+        authorities: Map<StaffRole, String>,
+        allowPredecessor: Boolean = false,
     ): DbRow {
         if (body["confirmed"] != JsonPrimitive(true)) fail("validation_error")
         val row = invitation(body.id("invitationId"))
         val sameClub = row.long("client_id") == client && row.long("club_id") == club
-        if (!sameClub ||
-            !isOriginalIssuer(row, issuer) ||
-            roles.none { it.name == row["role_code"] }
-        ) {
-            fail("not_found")
-        }
+        val authorized = if (allowPredecessor) canCancel(row, authorities) else isOriginalIssuer(row, authorities)
+        if (!sameClub || !authorized) fail("not_found")
         if (row.long("version") != body.id("expectedInvitationVersion")) fail("version_conflict")
         return row
     }
@@ -398,6 +438,7 @@ internal class ClubManagers(
                 },
             )
             put("role", row["role_code"])
+            put("permissions", strings(pinnedManagerPolicy(row).permissions.sorted()))
             put("status", state)
             put("version", row["version"])
             put("expiresAt", row.instant("expires_at").toString())
@@ -440,25 +481,22 @@ internal class ClubManagers(
             return false
         }
         val ref = checkNotNull(row["issuer_ref"])
-        return session.businessOwnerRef(client, club, issuer) == ref ||
-            (row["role_code"] == StaffRole.CLUB_MANAGER.name && networkSourceCurrent(client, club, issuer, ref))
+        val role = StaffRole.valueOf(checkNotNull(row["role_code"]))
+        return when {
+            role in subordinateStaffRoles ->
+                session.managerSources(client, club, issuer).any {
+                    it["role_code"] == StaffRole.CLUB_MANAGER.name &&
+                        it.managerSourceRef() == ref &&
+                        MANAGE_OPERATIONS_TEAM in session.managerSourcePermissions(it)
+                }
+            session.businessOwnerRef(client, club, issuer) == ref -> true
+            role == StaffRole.CLUB_MANAGER ->
+                session.managerSources(client, club, issuer).any {
+                    it["role_code"] == StaffRole.NETWORK_MANAGER.name && it.managerSourceRef() == ref
+                }
+            else -> false
+        }
     }
-
-    private fun networkSourceCurrent(
-        client: Long,
-        club: Long,
-        issuer: Long,
-        ref: String,
-    ): Boolean =
-        sql
-            .rows(
-                "$activeManagerSourcesSql AND a.client_id=? AND a.club_id=? AND a.user_id=? " +
-                    "AND a.role_code='NETWORK_MANAGER'",
-                session.now,
-                client,
-                club,
-                issuer,
-            ).any { "ASSIGNMENT:${it["id"]}:${it["version"]}:${it["admission_epoch"]}" == ref }
 
     private fun tokenHash(body: JsonObject) =
         digest(
@@ -467,8 +505,19 @@ internal class ClubManagers(
 
     private fun isOriginalIssuer(
         row: DbRow,
-        issuer: String,
-    ) = row.long("inviter_user_id") == actor && row["issuer_ref"] == issuer
+        authorities: Map<StaffRole, String>,
+    ): Boolean {
+        val issuer = authorities[StaffRole.valueOf(checkNotNull(row["role_code"]))]
+        return issuer != null && row.long("inviter_user_id") == actor && row["issuer_ref"] == issuer
+    }
+
+    private fun canCancel(
+        row: DbRow,
+        authorities: Map<StaffRole, String>,
+    ): Boolean {
+        val role = StaffRole.valueOf(checkNotNull(row["role_code"]))
+        return (role in subordinateStaffRoles && role in authorities) || isOriginalIssuer(row, authorities)
+    }
 
     private fun effective(row: DbRow) =
         if (row["status"] in PENDING &&

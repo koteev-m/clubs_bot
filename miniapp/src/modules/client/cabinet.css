@@ -11,6 +11,19 @@
   font-weight: 650;
   overflow-wrap: anywhere;
 }
+.cm-halls ul {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+.cm-halls li {
+  display: grid;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--po-line);
+  overflow-wrap: anywhere;
+}
 .cm-preparation form {
   display: grid;
   gap: 12px;

@@ -147,6 +147,7 @@ import com.example.bot.telegram.TelegramGuestFallbackHandler
 import com.example.bot.telegram.installDefaultCabinetMenu
 import com.example.bot.telegram.webhook.TelegramWebhookIngressMetrics
 import com.example.bot.telegram.webhook.TelegramWebhookIngressWorker
+import com.example.bot.workers.launchWorkingNightMaintenance
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStarted
@@ -269,6 +270,7 @@ fun Application.module() {
     val staffSupportReadService by inject<StaffSupportReadService>()
     val supportReplyDeliveryService by inject<SupportReplyDeliveryService>()
     val appClock = Clock.systemUTC()
+    launchWorkingNightMaintenance(checkNotNull(DataSourceHolder.dataSource), appClock)
     val notificationService: NotificationService = LoggingNotificationService()
     val telegramClient by inject<TelegramClient>()
     val opsNotificationService by inject<TelegramOperationalNotificationService>()

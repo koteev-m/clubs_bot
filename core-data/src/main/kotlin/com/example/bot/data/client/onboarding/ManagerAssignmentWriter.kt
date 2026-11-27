@@ -29,13 +29,9 @@ internal class ManagerAssignmentWriter(
         club: Long,
     ): List<DbRow> =
         sql.rows(
-            "SELECT a.id,a.client_id,a.club_id,a.user_id,a.role_code,a.version,a.admission_epoch," +
-                "u.display_name,u.username,u.telegram_user_id FROM client_role_assignments a " +
-                "JOIN client_manager_invitations i ON i.source_id=a.id AND i.client_id=a.client_id AND " +
-                "i.club_id=a.club_id " +
-                "AND i.role_code=a.role_code AND i.claimant_user_id=a.user_id AND i.status='accepted' " +
-                "JOIN users u ON u.id=a.user_id WHERE a.client_id=? AND a.club_id=? AND " +
-                "a.status='ACTIVE' ORDER BY a.created_at,a.id",
+            "SELECT a.*,u.display_name,u.username,u.telegram_user_id FROM ($activeManagerSourcesSql) a " +
+                "JOIN users u ON u.id=a.user_id WHERE a.client_id=? AND a.club_id=? ORDER BY a.id",
+            session.now,
             client,
             club,
         )
@@ -195,7 +191,7 @@ internal class ManagerAssignmentWriter(
         val writer = writer(snapshot, audit, "REVOKE")
         val affected = writer.revoke(listOf(source), emptyList(), reason)
         writer.bump(affected)
-        affected.forEach { sql.fenceManagerInvitations(client, it.userId, it.clubId) }
+        sql.fenceManagerInvitations(client, user, club)
     }
 
     private fun initialize(
@@ -288,7 +284,7 @@ internal class ManagerAssignmentWriter(
             scope.userId,
         ) != null
 
-    private fun writer(
+    fun writer(
         snapshot: AssignmentSnapshot,
         audit: Long,
         ref: String,
@@ -299,7 +295,7 @@ internal class ManagerAssignmentWriter(
         ref,
     )
 
-    private fun auditId(
+    fun auditId(
         scope: StaffScope,
         action: String,
         id: UUID,

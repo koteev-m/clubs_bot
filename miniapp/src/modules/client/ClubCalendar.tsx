@@ -213,7 +213,7 @@ function ClubCalendarSession({
   const authority = useRef(false);
   const confirmed = useRef<CalendarView>();
   const authoritySequence = useRef(0);
-  const lastWriteAuthority = useRef(false);
+  const lastWriteAuthority = useRef({ write: false, materialize: false });
   const approvedPlan = useRef('');
   const sourceEpoch = useRef(0);
   const remote = useRemote<CalendarView>(credential, path, undefined, {
@@ -224,9 +224,16 @@ function ClubCalendarSession({
         authoritySequence.current += 1;
         throw new OnboardingError(502, 'invalid_response');
       }
-      if (lastWriteAuthority.current && !next.canWrite)
+      const nextAuthority = {
+        write: next.canWrite,
+        materialize: next.canMaterialize ?? next.canWrite,
+      };
+      if (
+        (lastWriteAuthority.current.write && !nextAuthority.write) ||
+        (lastWriteAuthority.current.materialize && !nextAuthority.materialize)
+      )
         authoritySequence.current += 1;
-      lastWriteAuthority.current = next.canWrite;
+      lastWriteAuthority.current = nextAuthority;
       authority.current = next.clubId === id;
       if (authority.current) {
         const prior =
@@ -234,7 +241,7 @@ function ClubCalendarSession({
         confirmed.current =
           confirmed.current &&
           BigInt(confirmed.current.version) > BigInt(next.version)
-            ? { ...confirmed.current, canWrite: next.canWrite }
+            ? { ...confirmed.current, canWrite: next.canWrite, canMaterialize: next.canMaterialize }
             : next;
         if (calendarSnapshotKey(confirmed.current) !== prior) {
           sourceEpoch.current++;
@@ -294,7 +301,7 @@ function ClubCalendarSession({
     }
     setLatest((previous) =>
       previous && BigInt(previous.version) > BigInt(next.version)
-        ? { ...previous, canWrite: next.canWrite }
+        ? { ...previous, canWrite: next.canWrite, canMaterialize: next.canMaterialize }
         : next,
     );
     if (!dirty && !command.blocked && !conflict) {
@@ -335,7 +342,8 @@ function ClubCalendarSession({
     base && view && calendarSnapshotKey(base) !== calendarSnapshotKey(view),
   );
   const needsReview = !command.blocked && (conflict || (dirty && stale));
-  const blocked = !view?.canWrite || checking || command.blocked || needsReview;
+  const blocked = checking || command.blocked || needsReview;
+  const canMaterialize = view?.canMaterialize ?? view?.canWrite;
   const today = view ? clubToday(view.timezone) : '';
   const plan = useMemo(() => {
     if (!confirmation || !draft || !view || !base) return undefined;
@@ -354,6 +362,7 @@ function ClubCalendarSession({
   const canConfirm =
     plan &&
     !blocked &&
+    (confirmation === 'materialize' ? canMaterialize : view?.canWrite) &&
     !writeDenied &&
     !plan.gaps.length &&
     !plan.invalidDates.length &&
@@ -367,7 +376,7 @@ function ClubCalendarSession({
     operation: 'save' | 'materialize',
   ) => {
     if (
-      !source.canWrite ||
+      !(operation === 'materialize' ? (source.canMaterialize ?? source.canWrite) : source.canWrite) ||
       !base ||
       calendarSnapshotKey(source) !== calendarSnapshotKey(base)
     )
@@ -444,7 +453,7 @@ function ClubCalendarSession({
         !['completed', 'not_committed_at_snapshot'].includes(result.status) ||
         !result.calendar ||
         !validCalendarView(result.calendar, id) ||
-        !result.calendar.canWrite
+        !(result.calendar.canWrite || result.calendar.canMaterialize)
       )
         throw new OnboardingError(502, 'invalid_response');
       const known = confirmed.current;
@@ -539,7 +548,8 @@ function ClubCalendarSession({
   }, [versionConflict, refresh]);
 
   const prepare = (operation: 'save' | 'materialize') => {
-    if (blocked || writeDenied || !changes) return;
+    if (blocked || writeDenied || !changes ||
+      !(operation === 'materialize' ? canMaterialize : view?.canWrite)) return;
     const problem = calendarValidation(changes);
     setValidation(problem);
     if (!problem) {
@@ -616,7 +626,7 @@ function ClubCalendarSession({
           </p>
           {!view.canWrite && (
             <p className="po-notice">
-              Календарь доступен только для просмотра.
+              {canMaterialize ? 'Можно формировать ночи по сохранённому расписанию.' : 'Календарь доступен только для просмотра.'}
             </p>
           )}
           {dirty && (
@@ -665,7 +675,7 @@ function ClubCalendarSession({
                 setArea('special');
               }}
             />
-            {view.canWrite && !dirty && !confirmation && (
+            {canMaterialize && !dirty && !confirmation && (
               <>
                 <button
                   className="po-primary"

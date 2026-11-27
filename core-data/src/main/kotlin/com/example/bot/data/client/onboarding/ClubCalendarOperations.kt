@@ -1,5 +1,6 @@
 package com.example.bot.data.client.onboarding
 
+import com.example.bot.data.booking.core.lockBookingAdmission
 import com.example.bot.time.CalendarNight
 import com.example.bot.time.CalendarPreview
 import com.example.bot.time.CalendarRules
@@ -27,6 +28,7 @@ internal class ClubCalendarOperations(
         write: Boolean = false,
     ): JsonObject {
         val clientId = session.requireClubGrant(clubId, WRITE_CALENDAR.takeIf { write })
+        session.requireFloorSection(clientId, clubId, READ_FLOOR_CALENDAR)
         return view(clubId, clientId, session.calendarClub(clubId))
     }
 
@@ -34,14 +36,18 @@ internal class ClubCalendarOperations(
         clubId: Long,
         body: JsonObject,
     ): MutationResult {
-        val clientId = session.requireClubGrant(clubId, WRITE_CALENDAR)
+        val changes = body.calendarChanges()
+        val clientId = commandAccess(clubId, changes.isEmpty())
+        val automatic = sql.automaticWorkingClub(clientId, clubId)
+        if (automatic) check(sql.lockBookingAdmission(clubId))
+        val floor = session.floorOnly(clientId, clubId)
+        val resultType = if (floor && changes.isEmpty()) "club_night_formation" else "club_calendar"
         val club = session.calendarClub(clubId, lock = true)
         val version = club.long("calendar_version")
         if (body.id("expectedVersion") != version || body.string("timezone") != club["timezone"]) {
             fail("version_conflict")
         }
         if (club.active()) fail("calendar_night_cutover_required")
-        val changes = body.calendarChanges()
         val zone = ZoneId.of(checkNotNull(club["timezone"]))
         val now = session.now
         if (body.reconciliationDate()?.let { it != now.atZone(zone).toLocalDate() } == true) {
@@ -57,9 +63,11 @@ internal class ClubCalendarOperations(
                 changes.mapNotNull { it.key as? LocalDate }.toSet(),
                 updatedVersion,
                 now,
+                applyNights = automatic || !floor || changes.isEmpty(),
             )
+        if (automatic) ClientWorkingNightPreparation(sql, clientId, clubId).prepare(now)
         if (changes.isEmpty() && !reconciled) {
-            return MutationResult("club_calendar", clubId, clientId, view(clubId, clientId, club))
+            return MutationResult(resultType, clubId, clientId, view(clubId, clientId, club))
         }
         sql.update("UPDATE clubs SET calendar_version=? WHERE id=?", updatedVersion, clubId)
         sql.audit(
@@ -78,7 +86,45 @@ internal class ClubCalendarOperations(
                 )
             },
         )
-        return MutationResult("club_calendar", clubId, clientId, view(clubId, clientId, session.calendarClub(clubId)))
+        return MutationResult(resultType, clubId, clientId, view(clubId, clientId, session.calendarClub(clubId)))
+    }
+
+    /** Runs after the maintenance service has locked the client, booking admission and club. */
+    fun rollWorkingCalendar(
+        clientId: Long,
+        clubId: Long,
+        club: DbRow,
+    ) {
+        val zone = ZoneId.of(checkNotNull(club["timezone"]))
+        val now = session.now
+        val today = now.atZone(zone).toLocalDate()
+        val version = club.long("calendar_version")
+        val schedule = rules(clubId).schedule(zone)
+        val changed =
+            ClubOperationalNights(session, clientId, clubId, zone)
+                .reconcile(schedule, schedule, emptySet(), version + 1, now)
+        if (changed) sql.update("UPDATE clubs SET calendar_version=? WHERE id=?", version + 1, clubId)
+        ClientWorkingNightPreparation(sql, clientId, clubId).prepare(now)
+        sql.update("UPDATE client_working_clubs SET scheduled_through=? WHERE club_id=?", today, clubId)
+    }
+
+    fun commandAccess(
+        clubId: Long,
+        formation: Boolean,
+    ): Long {
+        val clientId = session.requireClubGrant(clubId)
+        val permission =
+            if (formation && session.floorOnly(clientId, clubId)) FORM_OPERATING_NIGHT else WRITE_CALENDAR
+        if (!session.hasClubGrant(clientId, clubId, permission)) fail("not_found")
+        return clientId
+    }
+
+    fun receipt(
+        clubId: Long,
+        formation: Boolean,
+    ): JsonObject {
+        commandAccess(clubId, formation)
+        return get(clubId)
     }
 
     private fun view(
@@ -96,7 +142,22 @@ internal class ClubCalendarOperations(
             put("name", club["name"])
             put("timezone", zone.id)
             put("version", club["calendar_version"])
-            put("canWrite", session.hasClubGrant(clientId, clubId, WRITE_CALENDAR))
+            val canWrite = session.hasClubGrant(clientId, clubId, WRITE_CALENDAR)
+            put("canWrite", canWrite)
+            put(
+                "canMaterialize",
+                if (sql.automaticWorkingClub(clientId, clubId)) {
+                    false
+                } else if (session.floorOnly(
+                        clientId,
+                        clubId,
+                    )
+                ) {
+                    session.hasClubGrant(clientId, clubId, FORM_OPERATING_NIGHT)
+                } else {
+                    canWrite
+                },
+            )
             put(
                 "reconciliation",
                 buildJsonObject {
@@ -256,3 +317,5 @@ private fun CalendarChange.auditJson(): JsonObject =
             put("startNextDay", it.startNextDay)
         }
     }
+
+internal fun calendarRequestFormsNights(request: JsonObject): Boolean = request.calendarChanges().isEmpty()

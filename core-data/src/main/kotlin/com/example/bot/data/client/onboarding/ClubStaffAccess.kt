@@ -4,6 +4,7 @@ import com.example.bot.data.client.assignments.ASSIGN_CLUB_MANAGER
 import com.example.bot.data.client.assignments.PlatformMembershipSourceRevocation
 import com.example.bot.data.client.assignments.READ_REPORTS
 import com.example.bot.data.client.assignments.REVOKE_CLUB_MANAGER
+import com.example.bot.data.client.assignments.targetManagerProfilePermissions
 import com.example.bot.data.security.Role
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -64,21 +65,23 @@ internal fun OnboardingSession.profilePermissions(
     clubId: Long,
 ): List<String> {
     val effective = clubPermissions(clientId, clubId)
-    return listOf(
-        READ_CLUB,
-        WRITE_PROFILE,
-        WRITE_LAYOUT,
-        WRITE_CALENDAR,
-        WRITE_BOOKING_RULES,
-        MANAGE_TEAM,
-        READ_FINANCE,
-        WRITE_FINANCE,
-        READ_MODULES,
-        WRITE_MODULES,
-        READ_REPORTS,
-        ASSIGN_CLUB_MANAGER,
-        REVOKE_CLUB_MANAGER,
-    ).filter {
+    val visible =
+        listOf(
+            READ_CLUB,
+            WRITE_PROFILE,
+            WRITE_LAYOUT,
+            WRITE_CALENDAR,
+            WRITE_BOOKING_RULES,
+            MANAGE_TEAM,
+            READ_FINANCE,
+            WRITE_FINANCE,
+            READ_MODULES,
+            WRITE_MODULES,
+            READ_REPORTS,
+            ASSIGN_CLUB_MANAGER,
+            REVOKE_CLUB_MANAGER,
+        )
+    return (visible + targetManagerProfilePermissions.sorted()).distinct().filter {
         it in effective &&
             (it != MANAGE_TEAM || (!businessClub(clientId, clubId) && ClubStaffAccess(this).owns(clubId)))
     }

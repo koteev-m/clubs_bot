@@ -1,12 +1,12 @@
 import { useRef, useState } from 'react';
 import { useTelegram } from '../../app/providers/TelegramProvider';
 import { Field } from './OnboardingShared';
-import { businessRoleNames, type Invitation } from './onboarding.types';
+import { businessRoleNames, isManagerRole, type Invitation } from './onboarding.types';
 import { roleNames, type StaffRole } from './team.types';
 
 export function invitationRole(invitation: Pick<Invitation, 'role'>) {
   const role = invitation.role;
-  if (role === 'CLUB_MANAGER' || role === 'NETWORK_MANAGER')
+  if (isManagerRole(role))
     return businessRoleNames[role];
   if (role && Object.hasOwn(roleNames, role))
     return roleNames[role as StaffRole];

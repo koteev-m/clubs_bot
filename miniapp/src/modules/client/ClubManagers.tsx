@@ -1,7 +1,7 @@
 import InvitationDelivery, { invitationScope } from './InvitationDelivery';
 import { useEffect, useState } from 'react';
 import { OnboardingError } from './onboarding.api';
-import { roleNames, type StaffRole } from './team.types';
+import { permissionNames, roleNames, type StaffRole } from './team.types';
 import {
   useClubConfiguration,
   type ConfigurationView,
@@ -9,6 +9,7 @@ import {
 import {
   businessRoleNames,
   invitationLabels,
+  isManagerRole,
   type Invitation,
   type ManagerRole,
 } from './onboarding.types';
@@ -27,7 +28,12 @@ type Assignment = {
   version: string;
   canRevoke: boolean;
 };
-type Manager = Assignment & { role: ManagerRole };
+type Delegation = { id: string; version: string; permission: string };
+type Manager = Assignment & {
+  role: ManagerRole;
+  permissions?: string[];
+  delegations?: Delegation[];
+};
 type LegacyAssignment = Assignment & { role: StaffRole };
 type ManagerInvitation = Invitation & {
   acceptanceMode: 'manager';
@@ -36,6 +42,8 @@ type ManagerInvitation = Invitation & {
 type Managers = ConfigurationView & {
   name: string;
   roles: ManagerRole[];
+  rolePermissions?: Partial<Record<ManagerRole, string[]>>;
+  delegablePermissions?: string[];
   assignableClubs?: { id: string; name: string }[];
   assignments: Manager[];
   legacyAssignments?: LegacyAssignment[];
@@ -43,13 +51,49 @@ type Managers = ConfigurationView & {
   createdInvitationId?: string;
   invitationLink?: string;
 };
-const isRole = (role: string) =>
-  role === 'CLUB_MANAGER' || role === 'NETWORK_MANAGER';
+const sectionNames: Record<string, string> = {
+  'client.club.profile.write': 'Профиль клуба',
+  'client.club.layout.write': 'Залы и столы',
+  'client.club.calendar.write': 'Календарь и расписание',
+  'client.club.night.create': 'Формирование операционной ночи',
+  'client.club.booking_rules.write': 'Правила бронирования',
+};
+const operationNames: Record<string, string> = {
+  'client.club.read': 'Доступ к назначенному клубу',
+  'client.club.calendar.write': 'Изменение календаря и расписания',
+  'client.club.night.create': 'Формирование операционной ночи',
+  'client.club.operations.read': 'Рабочая ночь, брони и столы',
+  'client.club.operations.booking.write': 'Операции с бронированиями',
+  'client.club.operations.seat': 'Посадка гостей',
+  'client.club.operations.release': 'Освобождение стола',
+  'client.club.operations.table_money.read': 'Просмотр поступлений по столам',
+  'client.club.operations.deposit.record': 'Запись полученного депозита',
+  'client.club.operations.top_up.record': 'Запись полученной доплаты',
+  'client.club.operations.analytics.read': 'Операционная аналитика клуба',
+  'client.club.operations.deposit_categories.write': 'Настройка категорий депозитов',
+  'client.club.operations.team.manage': 'Назначения и делегирование команде',
+  'client.staff.assign.club_manager': 'Назначение управляющих клубом',
+  'client.staff.revoke.club_manager': 'Отзыв управляющих клубом',
+  'client.club.reports.read': 'Просмотр отчётов клуба',
+};
+function permissionList(permissions: string[] = []) {
+  return permissions.flatMap((code) => {
+    const label = operationNames[code] ?? permissionNames[code];
+    return label ? [{ code, label }] : [];
+  });
+}
 function validManagers(view: Managers) {
   return (
     typeof view.name === 'string' &&
     Array.isArray(view.roles) &&
-    view.roles.every(isRole) &&
+    view.roles.every(isManagerRole) &&
+    (view.rolePermissions === undefined ||
+      Object.entries(view.rolePermissions).every(([role, codes]) =>
+        isManagerRole(role) && Array.isArray(codes) && codes.every((value) => typeof value === 'string'),
+      )) &&
+    (view.delegablePermissions === undefined ||
+      (Array.isArray(view.delegablePermissions) &&
+        view.delegablePermissions.every((code) => Object.hasOwn(sectionNames, code)))) &&
     (view.assignableClubs === undefined ||
       (Array.isArray(view.assignableClubs) &&
         view.assignableClubs.every(
@@ -60,8 +104,15 @@ function validManagers(view: Managers) {
     view.assignments.every(
       (item) =>
         typeof item.id === 'string' &&
-        isRole(item.role) &&
-        /^[1-9]\d*$/.test(item.version),
+        isManagerRole(item.role) &&
+        /^[1-9]\d*$/.test(item.version) &&
+        (item.delegations === undefined ||
+          (Array.isArray(item.delegations) && item.delegations.every(
+            (grant) =>
+              typeof grant.id === 'string' &&
+              /^[1-9]\d*$/.test(grant.version) &&
+              Object.hasOwn(sectionNames, grant.permission),
+          ))),
     ) &&
     (view.legacyAssignments === undefined ||
       (Array.isArray(view.legacyAssignments) &&
@@ -78,7 +129,7 @@ function validManagers(view: Managers) {
         item.acceptanceMode === 'manager' &&
         item.clubId === view.clubId &&
         item.clientId === view.clientId &&
-        isRole(item.role) &&
+        isManagerRole(item.role) &&
         item.status in invitationLabels &&
         Array.isArray(item.availableActions),
     )
@@ -123,11 +174,14 @@ export default function ClubManagers({
       id,
       '/managers',
       validManagers,
-      ['canWrite', 'roles', 'assignableClubs'],
+      ['canWrite', 'roles', 'assignableClubs', 'rolePermissions', 'delegablePermissions'],
     );
   const [label, setLabel] = useState('');
   const [extraClubIds, setExtraClubIds] = useState<string[]>([]);
-  const [role, setRole] = useState<ManagerRole>('CLUB_MANAGER');
+  const [chosenRole, setRole] = useState<ManagerRole>('CLUB_MANAGER');
+  const role = view?.roles.includes(chosenRole) ? chosenRole : view?.roles[0] ?? chosenRole;
+  const team = Boolean(view?.roles.includes('FLOOR_MANAGER'));
+  const packagePermissions = permissionList(view?.rolePermissions?.[role]);
   const [intent, setIntent] = useState<Intent>();
   const [refused, setRefused] = useState(false);
   const refresh = remote.refresh;
@@ -145,7 +199,7 @@ export default function ClubManagers({
   const leave = useUnsavedChanges(
     Boolean(
       label ||
-        role !== 'CLUB_MANAGER' ||
+        chosenRole !== 'CLUB_MANAGER' ||
         extraClubIds.length ||
         intent ||
         command.unknown,
@@ -227,7 +281,13 @@ export default function ClubManagers({
   };
   return (
     <Shell
-      title={inviting ? 'Пригласить управляющего' : receiptId ? 'Приглашение управляющего' : 'Управляющие'}
+      title={
+        inviting
+          ? team ? 'Пригласить сотрудника' : 'Пригласить управляющего'
+          : receiptId
+            ? team ? 'Приглашение в команду' : 'Приглашение управляющего'
+            : team ? 'Команда клуба' : 'Управляющие'
+      }
       subtitle={view?.name}
       back={() => {
         if (denied || (!command.blocked && leave())) back();
@@ -291,7 +351,7 @@ export default function ClubManagers({
                       onChange={(event) => setLabel(event.target.value)}
                     />
                   </Field>
-                  <Field label="Роль управляющего">
+                  <Field label={team ? "Роль сотрудника" : "Роль управляющего"}>
                     <select
                       value={role}
                       disabled={blocked || Boolean(intent)}
@@ -307,6 +367,14 @@ export default function ClubManagers({
                       ))}
                     </select>
                   </Field>
+                  {packagePermissions.length > 0 && (
+                    <section>
+                      <h2>Полномочия назначения</h2>
+                      <ul>
+                        {packagePermissions.map(({ code, label }) => <li key={code}>{label}</li>)}
+                      </ul>
+                    </section>
+                  )}
                   {role === 'NETWORK_MANAGER' && otherClubs.length > 0 && (
                     <fieldset disabled={blocked || Boolean(intent)}>
                       <legend>Дополнительные заведения</legend>
@@ -344,14 +412,14 @@ export default function ClubManagers({
                 </form>
               )}
               {receiptId && !issuedInvitation && (
-                <p>Ссылка больше недоступна. Вернитесь к списку управляющих, чтобы проверить приглашение.</p>
+                <p>Ссылка больше недоступна. Вернитесь к списку, чтобы проверить приглашение.</p>
               )}
               {receiptId && issuedInvitation &&
                 (issued?.id === receiptId && issued?.link ? (
                   <InvitationDelivery
                     key={issuedInvitation.id}
                     prefix="cm"
-                    label="Ссылка для управляющего"
+                    label={team ? "Ссылка для сотрудника" : "Ссылка для управляющего"}
                     link={issued.link}
                     recipient={issuedInvitation.recipientLabel}
                     role={businessRoleNames[issuedInvitation.role]}
@@ -373,7 +441,7 @@ export default function ClubManagers({
                   disabled={blocked || Boolean(intent)}
                   onClick={openInvite}
                 >
-                  Пригласить управляющего
+                  {team ? 'Пригласить сотрудника' : 'Пригласить управляющего'}
                 </button>
               )}
               <section className="ob-section">
@@ -421,7 +489,7 @@ export default function ClubManagers({
               <section className="ob-section">
                 <h2>Действующие назначения</h2>
                 {view.assignments.length === 0 && (
-                  <p>Управляющие пока не назначены.</p>
+                  <p>{team ? 'Сотрудники пока не назначены.' : 'Управляющие пока не назначены.'}</p>
                 )}
                 {view.assignments.map((item) => (
                   <article className="po-card ob-card" key={item.id}>
@@ -431,6 +499,36 @@ export default function ClubManagers({
                     <p>
                       {businessRoleNames[item.role]} · {view.name}
                     </p>
+                    {item.role === 'FLOOR_MANAGER' && item.canRevoke && Boolean(view.delegablePermissions?.length) && (
+                      <fieldset disabled={blocked || Boolean(intent)}>
+                        <legend>Делегированные настройки</legend>
+                        {view.delegablePermissions?.map((permission) => {
+                          const grant = item.delegations?.find((value) => value.permission === permission);
+                          return (
+                            <div className="cm-actions" key={permission}>
+                              <button
+                                className="ob-button"
+                                type="button"
+                                onClick={() =>
+                                  run({
+                                    action: grant ? 'revoke_delegation' : 'delegate',
+                                    expectedVersion: view.version,
+                                    assignmentId: item.id,
+                                    expectedAssignmentVersion: item.version,
+                                    confirmed: true,
+                                    ...(grant
+                                      ? { delegationId: grant.id, expectedDelegationVersion: grant.version }
+                                      : { permission }),
+                                  }, () => undefined)
+                                }
+                              >
+                                {grant ? 'Отозвать доступ' : 'Выдать доступ'} · {sectionNames[permission]}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </fieldset>
+                    )}
                     {item.canRevoke === true && (
                       <button
                         className="ob-button"

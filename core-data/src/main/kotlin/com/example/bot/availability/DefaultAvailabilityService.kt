@@ -7,6 +7,10 @@ import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
 import com.example.bot.data.db.Clubs
 import com.example.bot.data.db.withRetriedTx
+import com.example.bot.data.privacy.LegacyClubAccess
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.policy.CutoffPolicy
 import com.example.bot.time.Club
 import com.example.bot.time.ClubException
@@ -35,6 +39,7 @@ class DefaultAvailabilityService(
     nightsTtl: Duration = Duration.ofSeconds(60),
     tablesTtl: Duration = Duration.ofSeconds(15),
     meterRegistry: MeterRegistry? = null,
+    private val legacyClubAccess: LegacyClubAccess,
 ) : AvailabilityService(
         repository = DatabaseAvailabilityRepository(db),
         rulesResolver = OperatingRulesResolver(DatabaseAvailabilityRepository(db), clock),
@@ -43,7 +48,22 @@ class DefaultAvailabilityService(
         nightsTtl = nightsTtl,
         tablesTtl = tablesTtl,
         meterRegistry = meterRegistry,
-    ), AvailabilityCacheInvalidator
+    ),
+    AvailabilityCacheInvalidator {
+    override suspend fun listOpenNights(
+        clubId: Long,
+        limit: Int,
+    ): List<NightDto> = if (isLegacyClub(clubId)) super.listOpenNights(clubId, limit) else emptyList()
+
+    override suspend fun listFreeTables(
+        clubId: Long,
+        eventStartUtc: Instant,
+    ): List<TableAvailabilityDto> =
+        if (isLegacyClub(clubId)) super.listFreeTables(clubId, eventStartUtc) else emptyList()
+
+    private suspend fun isLegacyClub(clubId: Long): Boolean =
+        !legacyClubAccess.containsMappedResource(listOf(LegacyReference(LegacyResource.CLUB, clubId)))
+}
 
 private class DatabaseAvailabilityRepository(
     private val db: Database,
@@ -52,7 +72,7 @@ private class DatabaseAvailabilityRepository(
         withRetriedTx(name = "availability.findClub", readOnly = true, database = db) {
             Clubs
                 .selectAll()
-                .where { Clubs.id eq clubId.toInt() }
+                .where { (Clubs.id eq clubId.toInt()) and unmappedClub(Clubs.id) }
                 .limit(1)
                 .firstOrNull()
                 ?.let { Club(clubId, it[Clubs.timezone]) }
@@ -84,6 +104,7 @@ private class DatabaseAvailabilityRepository(
                 .selectAll()
                 .where {
                     (EventsTable.clubId eq clubId) and
+                        unmappedClub(EventsTable.clubId) and
                         (EventsTable.endAt greater fromOffset) and
                         (EventsTable.startAt lessEq toOffset)
                 }.orderBy(EventsTable.startAt, SortOrder.ASC)
@@ -107,8 +128,10 @@ private class DatabaseAvailabilityRepository(
         return withRetriedTx(name = "availability.findEvent", readOnly = true, database = db) {
             EventsTable
                 .selectAll()
-                .where { (EventsTable.clubId eq clubId) and (EventsTable.startAt eq start) }
-                .limit(1)
+                .where {
+                    (EventsTable.clubId eq clubId) and (EventsTable.startAt eq start) and
+                        unmappedClub(EventsTable.clubId)
+                }.limit(1)
                 .firstOrNull()
                 ?.let { row ->
                     Event(
@@ -126,7 +149,7 @@ private class DatabaseAvailabilityRepository(
         withRetriedTx(name = "availability.listTables", readOnly = true, database = db) {
             TablesTable
                 .selectAll()
-                .where { TablesTable.clubId eq clubId }
+                .where { (TablesTable.clubId eq clubId) and unmappedClub(TablesTable.clubId) }
                 .orderBy(TablesTable.tableNumber, SortOrder.ASC)
                 .map { row ->
                     Table(
@@ -161,8 +184,7 @@ private class DatabaseAvailabilityRepository(
                 .where {
                     (BookingsTable.eventId eq eventId) and
                         (BookingsTable.status inList listOf(BookingStatus.BOOKED.name, BookingStatus.SEATED.name))
-                }
-                .map { it[BookingsTable.tableId] }
+                }.map { it[BookingsTable.tableId] }
                 .toSet()
         }
 }

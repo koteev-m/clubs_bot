@@ -53,7 +53,9 @@ V082 сохраняет режим выдачи приглашения. У пр�
 Проверки выполнялись при мобильном размере экрана в Chromium и WebKit.
 Проверены выбор текста поля, событие копирования, отказ копирования после
 успешной попытки, ручной fallback и передача URL в тестовый мост Telegram SDK.
-Проверка Telegram на физическом iPhone с этой сборкой остаётся открытой.
+Владелец продукта сообщил, что 27.11.2026 ручная приёмка на Stage пройдена
+без замечаний, блокирующих дальнейшую разработку. Принята ревизия
+`5befde028b0e8c20da65c84b8a80bfdef0cedb5a` (V083).
 Кнопка отправки использует официальный `https://t.me/share/url` через
 `openTelegramLink`. Пользователь сам выбирает чат и отправляет сообщение.
 [Telegram Sharing Button](https://core.telegram.org/widgets/share) · [Telegram Mini Apps](https://core.telegram.org/bots/webapps#initializing-mini-apps)

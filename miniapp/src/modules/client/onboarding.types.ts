@@ -2,9 +2,15 @@ export const businessRoleNames = {
   BUSINESS_OWNER: 'Владелец бизнеса',
   NETWORK_MANAGER: 'Управляющий сети',
   CLUB_MANAGER: 'Управляющий клуба',
+  FLOOR_MANAGER: 'Менеджер',
+  ENTRANCE_MANAGER: 'Менеджер входа',
+  FINANCE_MANAGER: 'Финансовый менеджер',
+  PROMOTER: 'Промоутер',
 } as const;
 export type BusinessRole = keyof typeof businessRoleNames;
 export type ManagerRole = Exclude<BusinessRole, 'BUSINESS_OWNER'>;
+export const isManagerRole = (role: unknown): role is ManagerRole =>
+  typeof role === 'string' && role !== 'BUSINESS_OWNER' && Object.hasOwn(businessRoleNames, role);
 
 export interface Invitation {
   acceptanceFlow?: 'direct' | 'confirmation';
