@@ -30,12 +30,12 @@ internal class ClubNightDesk(
                 currentNights(client)
             } else {
                 listOf(
-                    selectedNight(client, selected)?.takeIf { sql.ownedWorkingEvent(clubId, selected) != null }
-                        ?: fail("not_found"),
+                    readableNight(client, selected) ?: fail("not_found"),
                 )
             }
         val upcoming = if (sql.automaticWorkingClub(client, clubId)) upcomingNights(client) else emptyList()
-        return ClubNightDeskView(session, client, clubId).build(nights, upcoming)
+        val history = if (session.hasClubGrant(client, clubId, READ_TABLE_MONEY)) recentNights(client) else emptyList()
+        return ClubNightDeskView(session, client, clubId).build(nights, upcoming, history)
     }
 
     fun mutate(body: JsonObject): MutationResult {
@@ -59,8 +59,11 @@ internal class ClubNightDesk(
             val future = automatic && night.legacyStart > now
             if (!future || action !in FUTURE_ACTIONS) fail("version_conflict")
         }
+        val acquiresTable =
+            action in BOOKING_ACQUISITION &&
+                (action != "move_booking" || body.string("destinationTableId") != null)
         val deadline =
-            if (automatic && action in BOOKING_ACQUISITION) {
+            if (automatic && acquiresTable) {
                 val rules =
                     sql.row(
                         "SELECT cutoff_minutes FROM client_club_booking_rules WHERE client_id=? AND club_id=?",
@@ -97,7 +100,7 @@ internal class ClubNightDesk(
                 result.bookingId,
                 action,
             )
-        session.audit("client.club.floor." + action, client, receipt, 1)
+        session.audit("client.club.floor." + action, client, receipt, 1, result.auditDetails)
         return MutationResult("club_operations", receipt, client, receipt(client, receipt))
     }
 
@@ -174,6 +177,33 @@ internal class ClubNightDesk(
         client: Long,
         nightId: Long,
     ): DbRow? = sql.row(NIGHT_SELECT + " AND n.end_at>? AND n.id=?", client, clubId, session.now, nightId)
+
+    private fun readableNight(
+        client: Long,
+        id: Long,
+    ): DbRow? {
+        val current = selectedNight(client, id)
+        if (current != null && sql.ownedWorkingEvent(clubId, id) != null) return current
+        return if (session.hasClubGrant(client, clubId, READ_TABLE_MONEY)) {
+            sql.row(
+                NIGHT_SELECT + " AND n.end_at<=? AND n.id=? AND l.event_id IS NOT NULL",
+                client,
+                clubId,
+                session.now,
+                id,
+            )
+        } else {
+            null
+        }
+    }
+
+    private fun recentNights(client: Long): List<DbRow> =
+        sql.rows(
+            NIGHT_SELECT + " AND n.end_at<=? AND l.event_id IS NOT NULL ORDER BY n.start_at DESC LIMIT 30",
+            client,
+            clubId,
+            session.now,
+        )
 
     private fun upcomingNights(client: Long): List<DbRow> =
         sql.rows(
@@ -345,4 +375,5 @@ internal data class DeskResult(
     val sessionId: Long? = null,
     val operationId: Long? = null,
     val bookingId: UUID? = null,
+    val auditDetails: JsonObject = JsonObject(emptyMap()),
 )

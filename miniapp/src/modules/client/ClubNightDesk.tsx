@@ -18,10 +18,9 @@ import {
   onboardingRequest,
 } from './onboarding.api';
 import { useRemote } from './onboarding.hooks';
-import type { ClubProfile } from './onboarding.types';
+import type { ClientSummary, ClubProfile } from './onboarding.types';
 import {
   dateFormat,
-  formatTime,
   isBookingAction,
   permissions,
   permits,
@@ -53,6 +52,8 @@ import {
 } from './ClubNightDeskBookings';
 import type { BookingDraft } from './ClubNightDeskBookings';
 import type { BookingAction } from './clubNightDesk.types';
+import { ShiftOverview, WorkspaceHeader, WorkspaceMoney, WorkspaceNavigation } from './ClubNightWorkspaceViews';
+import type { WorkspaceLocation, WorkspaceTab } from './ClubNightWorkspaceViews';
 import './clubNightDesk.css';
 
 type Draft = {
@@ -76,7 +77,11 @@ type Props = {
   profile: ClubProfile;
   reportDirty?: (dirty: boolean) => void;
   reportPending?: (pending: boolean) => void;
-  openSettings?: () => void;
+  reportBack?: (handler?: () => boolean) => void;
+  openClub?: (id: string) => void;
+  menu?: { label: string; run: () => void }[];
+  financialReport?: React.ReactNode;
+  workspaceMemory?: Map<string, WorkspaceLocation>;
 };
 const tableStatus: Record<TableStatus, string> = {
   free: 'Свободен',
@@ -323,10 +328,13 @@ export default function ClubNightDesk(props: Props) {
   );
 }
 
-function NightDesk({ credential, profile, reportDirty, reportPending, openSettings }: Props) {
+function NightDesk({
+  credential, profile, reportDirty, reportPending, reportBack, openClub, menu = [], financialReport, workspaceMemory,
+}: Props) {
   const path = '/api/client/clubs/' + profile.id + '/operations';
   const scope = useClubRequestScope();
-  const [selectedNight, setSelectedNight] = useState('');
+  const savedLocation = workspaceMemory?.get(profile.id);
+  const [selectedNight, setSelectedNight] = useState(savedLocation?.night ?? '');
   const readPath = selectedNight ? path + '/nights/' + selectedNight : path;
   const [intent, setIntent] = useState<Intent>();
   const [busy, setBusy] = useState(false);
@@ -338,8 +346,18 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
   const [draft, setDraft] = useState<Draft>();
   const [bookingDraft, setBookingDraft] = useState<BookingDraft>();
   const [findingTable, setFindingTable] = useState<'seat' | 'booking'>();
-  const [tab, setTab] = useState<'tables' | 'bookings'>('tables');
-  const [bookingId, setBookingId] = useState<string>();
+  const [tab, setTab] = useState<WorkspaceTab>(savedLocation?.tab ?? 'shift');
+  const [statusFilter, setStatusFilter] = useState<TableStatus | undefined>(savedLocation?.status);
+  const [tableId, setTableId] = useState(savedLocation?.tableId);
+  const [tableMap, setTableMap] = useState(savedLocation?.tableMap ?? false);
+  const [formVisible, setFormVisible] = useState(true);
+  const [bookingSearch, setBookingSearch] = useState(savedLocation?.search ?? '');
+  const [bookingFilter, setBookingFilter] = useState(savedLocation?.filter ?? '');
+  const nightChoices = useRef<Partial<Record<WorkspaceTab, string>>>({ ...savedLocation?.nights });
+  const content = useRef<HTMLDivElement>(null);
+  const context = useRemote<{ clients: ClientSummary[] }>(credential, openClub ? '/api/client/context' : null);
+  const clubs = context.data?.clients.flatMap((client) => client.clubs ?? []) ?? [];
+  const [bookingId, setBookingId] = useState(savedLocation?.bookingId);
   const storageKey = useRef<string>();
   const actor = useRef<string>();
   const running = useRef<AbortController>();
@@ -350,6 +368,7 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
     setDraft(undefined);
   }, []);
   const clearPrivateState = useCallback(() => {
+    workspaceMemory?.delete(profile.id);
     running.current?.abort();
     running.current = undefined;
     if (storageKey.current) saveStored(storageKey.current);
@@ -357,11 +376,12 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
     setOutcome(undefined);
     clearDraft();
     setBookingId(undefined);
+    setTableId(undefined);
     setBookingDraft(undefined);
     setProblem('');
     setFindingTable(undefined);
     setBusy(false);
-  }, [clearDraft]);
+  }, [clearDraft, profile.id, workspaceMemory]);
   const remote = useRemote<Desk>(credential, readPath, undefined, {
     retainOnForeground: true,
     onSuccess(view) {
@@ -371,8 +391,20 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
       )
         throw new OnboardingError(503, 'invalid_response');
       actor.current = view.actorId;
+      setBookingId((previous) =>
+        previous && view.bookings.some(({ id }) => id === previous) ? previous : undefined,
+      );
+      setTableId((previous) => previous && view.night &&
+        view.halls.some(({ tables }) => tables.some(({ id }) => id === previous)) ? previous : undefined);
+
     },
     onError(error) {
+      if (selectedNight && error instanceof OnboardingError && error.status === 404) {
+        delete nightChoices.current[tab];
+        setSelectedNight('');
+        setBookingId(undefined);
+        return;
+      }
       if (authorityLost(error)) clearPrivateState();
     },
   });
@@ -383,6 +415,31 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
     view && !remote.loading && !remote.revalidating && !remote.error,
   );
   const dirty = Boolean(draft || bookingDraft || blocking);
+  const tableMoney = view ? permits(view, permissions.payments) : profile.permissions.includes(permissions.payments);
+  const canSeeReports = Boolean(financialReport && (view ? permits(view, 'client.club.operations.financial_reports.read') : true));
+  useEffect(() => {
+    if (!view || view.night || dirty || selectedNight) return;
+    const next = tab === 'bookings' ? view.upcomingNights?.[0]?.id
+      : tab === 'finance' ? view.recentNights?.[0]?.id : undefined;
+    if (next) {
+      nightChoices.current[tab] = next;
+      setSelectedNight(next);
+    }
+  }, [tab, view, dirty, selectedNight]);
+  useLayoutEffect(() => {
+    if (!view || remote.error) return;
+    workspaceMemory?.set(profile.id, {
+      tab, night: selectedNight, nights: { ...nightChoices.current },
+      search: bookingSearch, filter: bookingFilter, tableId, bookingId, status: statusFilter, tableMap,
+    });
+  }, [view, remote.error, workspaceMemory, profile.id, tab, selectedNight, bookingSearch, bookingFilter,
+    tableId, bookingId, statusFilter, tableMap]);
+  useEffect(() => {
+    if (view && tab === 'finance' && !tableMoney && !canSeeReports) {
+      setTab('shift');
+      setSelectedNight('');
+    }
+  }, [view, tab, tableMoney, canSeeReports]);
   useUnsavedChanges(dirty, reportDirty);
   useTelegramClosingConfirmation(dirty);
   useLayoutEffect(() => {
@@ -430,7 +487,7 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
     : '';
   useEffect(() => {
     if (formKey) formAnchor.current?.focus();
-  }, [formKey]);
+  }, [formKey, formVisible]);
   useEffect(() => {
     const closesAt = view?.night?.closesAt;
     if (!closesAt) return;
@@ -529,6 +586,7 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
     )
       return;
     setBookingDraft(undefined);
+    setFormVisible(true);
     setDraft({
       action,
       night: view.night,
@@ -671,8 +729,40 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
     setDraft({ ...draft, categories: view.categories, extras: kept });
     setProblem('');
   }
+  function chooseTab(next: WorkspaceTab) {
+    setTab(next);
+    setBookingId(undefined);
+    setFindingTable(undefined);
+    setFormVisible(false);
+    if (!dirty) setSelectedNight(nightChoices.current[next] ?? '');
+    content.current?.scrollTo?.(0, 0);
+  }
+
+  useLayoutEffect(() => {
+    reportBack?.(() => {
+      if (blocking) return true;
+      if (formVisible && (draft || bookingDraft)) {
+        setFormVisible(false);
+        return true;
+      }
+      if (bookingId || tableId) {
+        if (bookingId) setBookingId(undefined);
+        else setTableId(undefined);
+        return true;
+      }
+      if (tab !== 'shift') {
+        setTab('shift');
+        if (!dirty) setSelectedNight('');
+        return true;
+      }
+      return false;
+    });
+    return () => reportBack?.();
+  }, [reportBack, blocking, formVisible, draft, bookingDraft, bookingId, tableId, tab, dirty]);
+
   function returnToTables(kind: 'seat' | 'booking' = 'seat') {
-    setTab('tables');
+    chooseTab('tables');
+    setSelectedNight(selectedNight);
     setFindingTable(kind);
     window.requestAnimationFrame(() =>
       anchor.current?.scrollIntoView?.({ block: 'start' }),
@@ -693,6 +783,7 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
     )
       return;
     clearDraft();
+    setFormVisible(true);
     setBookingDraft(
       newBookingDraft(action, view.night, table, booking, profile.timezone),
     );
@@ -709,33 +800,21 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
   }
   const unavailable = blocking || !fresh || Boolean(view?.blocked);
 
+  const releasedTable = (outcome?.receipt.action === 'cancel_booking' ||
+    (outcome?.receipt.action === 'move_booking' && outcome.intent.body.destinationTableId)) &&
+    view?.night?.id === outcome.receipt.nightId && !view?.future && !view?.historical
+    ? view?.halls.flatMap((hall) => hall.tables.map((table) => ({ hall, table })))
+      .find(({ table }) => table.id === outcome.receipt.tableId && table.status === 'free' && !table.salesStopped)
+    : undefined;
+  const showingForm = formVisible && Boolean(draft || bookingDraft);
+  const nightOptions = tab === 'finance' ? view?.recentNights ?? [] : view?.upcomingNights ?? [];
+  const canPick = Boolean(view?.night && !view.blocked && permits(view, permissions.seat));
+  const showQuickSeat = tab === 'shift' && canPick && !showingForm && !bookingId;
   return (
-    <section className="po-card ob-card night-desk" aria-label="Рабочая ночь">
-      <header className="night-desk-heading">
-        <div>
-          <h2>Рабочая ночь</h2>
-          <p>
-            {profile.name}
-            {view?.night && ' · ' + dateFormat(view.night.businessDate)}
-          </p>
-          {view?.night && (
-            <p className="po-muted">
-              {formatTime(view.night.opensAt, profile.timezone)} —{' '}
-              {formatTime(view.night.closesAt, profile.timezone)}
-            </p>
-          )}
-        </div>
-        {view && (
-          <button
-            type="button"
-            className="ob-button"
-            onClick={remote.refresh}
-            disabled={!fresh || busy}
-          >
-            Обновить
-          </button>
-        )}
-      </header>
+    <section className="night-desk night-workspace" aria-label="Рабочая ночь">
+      <WorkspaceHeader name={profile.name} view={view} timezone={profile.timezone}
+        menu={[...menu, { label: 'Обновить', run: remote.refresh }]} clubs={clubs} chooseClub={openClub} />
+      <div className="night-work-content" ref={content}>
       <RemoteState {...remote} />
       {remote.revalidating && (
         <p role="status">Проверяем доступ и состояние столов…</p>
@@ -797,6 +876,10 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
                 )}
               </p>
             )}
+          {releasedTable && view && permits(view, permissions.seat) && (
+            <button type="button" className="ob-button po-primary" disabled={unavailable}
+              onClick={() => start('seat', releasedTable.hall, releasedTable.table)}>Посадить других гостей</button>
+          )}
           {(outcome.receipt.action === 'seat' ||
             outcome.receipt.action === 'top_up') && (
             <button
@@ -809,7 +892,7 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
           )}
         </div>
       )}
-      {draft && (
+      {formVisible && draft && (
         <DeskForm
           draft={draft}
           set={set}
@@ -830,7 +913,7 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
           }}
         />
       )}
-      {bookingDraft && (
+      {formVisible && bookingDraft && (
         <BookingForm
           draft={bookingDraft}
           view={view}
@@ -846,84 +929,46 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
           }}
         />
       )}
-      {((view?.upcomingNights?.length ?? 0) > 0 || selectedNight) && (
-        <label className="night-desk-field">
-          Ночь для бронирования
-          <select value={selectedNight} disabled={blocking || Boolean(draft || bookingDraft)} onChange={(event) => {
+      {dirty && !showingForm && !blocking && (
+        <button type="button" className="ob-button" onClick={() => setFormVisible(true)}>Вернуться к форме</button>
+      )}
+      {!showingForm && !bookingId && (tab === 'bookings' || tab === 'finance') &&
+        (nightOptions.length > 0 || selectedNight) && (tab !== 'finance' || tableMoney) && (
+        <label className="night-desk-field">Ночь
+          <select value={selectedNight} disabled={dirty} onChange={(event) => {
+            nightChoices.current[tab] = event.target.value;
             setSelectedNight(event.target.value);
-            setBookingId(undefined);
-            setFindingTable(undefined);
             setProblem('');
           }}>
             <option value="">Текущая ночь</option>
-            {selectedNight && !view?.upcomingNights?.some((night) => night.id === selectedNight) && (
-              <option value={selectedNight}>{view?.night ? dateFormat(view.night.businessDate) : 'Выбранная ночь'}</option>
-            )}
-            {view?.upcomingNights?.map((night) => (
-              <option key={night.id} value={night.id}>{dateFormat(night.businessDate)}</option>
-            ))}
+            {selectedNight && !nightOptions.some((night) => night.id === selectedNight) &&
+              <option value={selectedNight}>{view?.night ? dateFormat(view.night.businessDate) : 'Выбранная ночь'}</option>}
+            {nightOptions.map((night) => <option value={night.id} key={night.id}>{dateFormat(night.businessDate)}</option>)}
           </select>
         </label>
       )}
-      {view && (!view.night || view.blocked) && (
-        <div className="po-notice">
-          <p>{blockedReasons[view.blocked ?? 'no_current_night'] ??
-            'Операции этой ночи пока недоступны.'}</p>
-          {openSettings && (!view.upcomingNights?.length || view.blocked !== 'no_current_night') && (
-            <button className="ob-button" type="button" disabled={blocking} onClick={openSettings}>
-              Проверить настройки
-            </button>
-          )}
-        </div>
+      {!showingForm && tab !== 'finance' && view?.blocked &&
+        (tab !== 'shift' || view.blocked !== 'no_current_night') &&
+        <p className="po-notice">{blockedReasons[view.blocked] ?? 'Операции этой ночи пока недоступны.'}</p>}
+      {!showingForm && tab === 'shift' && view && !bookingId && (
+        <ShiftOverview view={view} timezone={profile.timezone}
+          showTables={(status) => { chooseTab('tables'); setStatusFilter(status); }}
+          openBooking={setBookingId} showBookings={() => chooseTab('bookings')} />
       )}
-      {view?.night && (
+      {!showingForm && tab === 'finance' && <>
+        {view && tableMoney && <WorkspaceMoney view={view} timezone={profile.timezone} amount={amountLabel} />}
+        {canSeeReports && financialReport}
+      </>}
+      {!showingForm && view && !view.historical && (
         <>
-          <div className="night-desk-toolbar">
-            {permits(view, permissions.seat) && (
-              <button
-                type="button"
-                className="ob-button po-primary"
-                onClick={() => returnToTables()}
-                disabled={blocking || !fresh || Boolean(view.blocked)}
-              >
-                Посадить гостей
-              </button>
-            )}
-            {permits(view, permissions.booking) && (
-              <button
-                type="button"
-                className="ob-button"
-                onClick={() => returnToTables('booking')}
-                disabled={unavailable}
-              >
-                Новая бронь
-              </button>
-            )}
-            <div
-              className="night-desk-tabs"
-              role="group"
-              aria-label="Раздел рабочей ночи"
-            >
-              <button
-                type="button"
-                className="ob-button"
-                aria-pressed={tab === 'tables'}
-                onClick={() => setTab('tables')}
-              >
-                Столы
-              </button>
-              <button
-                type="button"
-                className="ob-button"
-                aria-pressed={tab === 'bookings'}
-                onClick={() => setTab('bookings')}
-              >
-                Брони
-              </button>
-            </div>
-          </div>
-          {tab === 'tables' && (
+          {tab === 'tables' && !bookingId && (
             <section ref={anchor} aria-label="Залы и столы">
+              <div className="night-work-section-title"><h3>Столы</h3>
+                <button type="button" className="ob-button" onClick={() => setTableMap(!tableMap)}>{tableMap ? 'Список' : 'Схема'}</button>
+              </div>
+              {statusFilter && <button type="button" className="ob-button" onClick={() => setStatusFilter(undefined)}>Все столы</button>}
+              {permits(view, permissions.booking) && <button type="button" className="ob-button"
+                onClick={() => returnToTables('booking')} disabled={unavailable}>Новая бронь</button>}
               {findingTable && (
                 <p role="status">
                   {findingTable === 'booking'
@@ -938,16 +983,31 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
                 <section key={hall.id} className="night-desk-hall">
                   <h3>{hall.name}</h3>
                   {hall.tables.length === 0 && <p>В зале нет столов.</p>}
+                  {tableMap && hall.tables.some(({ x, y }) => x !== undefined && y !== undefined) && (
+                    <div className="night-work-map" aria-label={'Схема · ' + hall.name}>
+                      {hall.tables.filter(({ x, y, status }) => x !== undefined && y !== undefined &&
+                        (!statusFilter || status === statusFilter)).map((table) => (
+                        <button key={table.id} type="button" data-status={table.status} title={tableName(table)}
+                          style={{ left: `clamp(22px, ${(table.x ?? 0) * 100}%, calc(100% - 22px))`, top: `clamp(22px, ${(table.y ?? 0) * 100}%, calc(100% - 22px))` }}
+                          onClick={() => setTableId(table.id)} aria-label={tableName(table) + ' · ' + tableStatus[table.status]}>
+                          {table.number}</button>
+                      ))}
+                    </div>
+                  )}
                   <ul className="night-desk-tables">
-                    {hall.tables.map((table) => (
+                    {hall.tables.filter((table) => (!statusFilter || table.status === statusFilter) &&
+                       (!tableMap || tableId === table.id || table.x === undefined || findingTable)).map((table) => (
                       <li key={table.id} className="night-desk-table">
                         <span className="night-desk-table-heading">
-                          <strong>{tableName(table)}</strong>
+                          <button type="button" className="night-work-table-button" aria-expanded={tableId === table.id}
+                            onClick={() => setTableId(tableId === table.id ? undefined : table.id)}>{tableName(table)}</button>
                           <span data-status={table.status}>
                             {tableStatus[table.status]}
                           </span>
                         </span>
-                        <p className="po-muted">Мест: {table.capacity}</p>
+                        {(tableId === table.id || findingTable) && <>
+                        <p className="po-muted">Мест: {table.capacity}
+                          {table.seatedGuests !== undefined && ' · Фактически сели: ' + table.seatedGuests}</p>
                         {permits(view, permissions.payments) && (
                           <PaymentHistory payments={table.payments} />
                         )}
@@ -1039,7 +1099,6 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
                               className="ob-button"
                               aria-label={'Бронь · ' + tableName(table)}
                               onClick={() => {
-                                setTab('bookings');
                                 setBookingId(table.bookingId ?? undefined);
                               }}
                             >
@@ -1047,6 +1106,7 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
                             </button>
                           )}
                         </div>
+                        </>}
                       </li>
                     ))}
                   </ul>
@@ -1054,9 +1114,10 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
               ))}
             </section>
           )}
-          {tab === 'bookings' && (
+          {(tab === 'bookings' || bookingId) && (
             <BookingsList
               view={view}
+              search={bookingSearch} setSearch={setBookingSearch} filter={bookingFilter} setFilter={setBookingFilter}
               timezone={profile.timezone}
               disabled={unavailable}
               selected={bookingId}
@@ -1067,6 +1128,12 @@ function NightDesk({ credential, profile, reportDirty, reportPending, openSettin
           )}
         </>
       )}
+      </div>
+      <footer className="night-work-footer">
+        {showQuickSeat && <button type="button" className="ob-button po-primary night-work-seat"
+          onClick={() => returnToTables()} disabled={unavailable}>Посадить гостей</button>}
+        <WorkspaceNavigation tab={tab} finance={tableMoney || canSeeReports} select={chooseTab} />
+      </footer>
     </section>
   );
 }
@@ -1127,16 +1194,18 @@ function DeskForm({
           : 'Посадить гостей';
   return (
     <form
-      className="night-desk-form"
+      className="night-desk-form night-work-seat-form"
       aria-label={title}
       onSubmit={(event) => {
         event.preventDefault();
         submit();
       }}
     >
-      <h3 tabIndex={-1} ref={heading}>
-        {title}
-      </h3>
+      <div className="night-work-form-heading">
+        <h3 tabIndex={-1} ref={heading}>{title}</h3>
+        <button type="button" className="ob-button" aria-label="Закрыть форму"
+          disabled={blocking} onClick={close}>Закрыть</button>
+      </div>
       <p>
         <strong>
           {draft.hall.name} · {tableName(draft.table)}
@@ -1211,8 +1280,9 @@ function DeskForm({
         {money && (
           <>
             <label className="ob-field">
-              Фактически получено
+              <span>Фактически получено <span aria-hidden="true">· ₽</span></span>
               <input
+                aria-label="Фактически получено"
                 inputMode="decimal"
                 value={draft.amount}
                 onChange={(event) => set('amount', event.target.value)}
@@ -1227,6 +1297,7 @@ function DeskForm({
                 <label key={method}>
                   <input
                     type="radio"
+                    aria-label={methodLabels[method]}
                     name="floor-payment-method"
                     value={method}
                     required
@@ -1236,12 +1307,12 @@ function DeskForm({
                       set('cash', '');
                     }}
                   />{' '}
-                  {methodLabels[method]}
+                  {method === 'MIXED' ? 'Наличные + карта' : methodLabels[method]}
                 </label>
               ))}
             </fieldset>
             {draft.method === 'MIXED' && (
-              <div className="night-desk-allocation">
+              <div className="night-desk-allocation night-work-tender-split">
                 <label className="ob-field">
                   Наличными
                   <input
@@ -1253,7 +1324,7 @@ function DeskForm({
                     required
                   />
                 </label>
-                <p>Картой {split ? amountLabel(split.card) : '—'}</p>
+                <p><span>Картой</span><strong>{split ? amountLabel(split.card) + ' ₽' : '—'}</strong></p>
                 {!split && draft.cash && amount !== null && (
                   <p className="po-muted">
                     Укажите положительную сумму наличными меньше общей суммы.
@@ -1262,7 +1333,10 @@ function DeskForm({
               </div>
             )}
             <div className="night-desk-allocation">
-              {draft.categories.extras.map((category) => (
+              {draft.categories.extras.length > 0 && (
+                <details open={Object.values(draft.extras).some(Boolean) || undefined}>
+                  <summary>Распределить депозит</summary>
+                  {draft.categories.extras.map((category) => (
                 <label className="ob-field" key={category.id}>
                   {category.name}
                   <input
@@ -1278,7 +1352,9 @@ function DeskForm({
                     }
                   />
                 </label>
-              ))}
+                  ))}
+                </details>
+              )}
               <dl className="po-details">
                 <div>
                   <dt>{draft.categories.primary.name}</dt>
@@ -1327,7 +1403,7 @@ function DeskForm({
           {problem}
         </p>
       )}
-      <div className="night-desk-actions">
+      <div className="night-work-form-submit">
         <button
           type="submit"
           className="ob-button po-primary"
@@ -1341,14 +1417,6 @@ function DeskForm({
           }
         >
           {submitLabel}
-        </button>
-        <button
-          type="button"
-          className="ob-button"
-          disabled={blocking}
-          onClick={close}
-        >
-          Закрыть форму
         </button>
       </div>
     </form>

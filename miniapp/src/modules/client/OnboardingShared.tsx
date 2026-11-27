@@ -21,6 +21,7 @@ export function Shell({
   closeAtRoot = false,
   children,
   navigation,
+  compact = false,
 }: {
   title: string;
   subtitle?: string;
@@ -31,21 +32,22 @@ export function Shell({
   closeAtRoot?: boolean;
   children: React.ReactNode;
   navigation?: React.ReactNode;
+  compact?: boolean;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const webApp = useTelegram();
   useEffect(() => {
-    heading.current?.focus({ preventScroll: true });
+    if (!compact) heading.current?.focus({ preventScroll: true });
     window.scrollTo(0, 0);
     heading.current?.closest('main')?.scrollTo?.(0, 0);
-  }, [title, subtitle]);
+  }, [title, subtitle, compact]);
   useEffect(() => {
     const surface = heading.current?.closest<HTMLElement>('.platform-owner');
     const resize = () => {
-      const height =
-        webApp.viewportHeight ||
-        window.visualViewport?.height ||
-        window.innerHeight;
+      const telegramHeight = webApp.viewportHeight || window.innerHeight;
+      const height = compact
+        ? Math.min(telegramHeight, window.visualViewport?.height || telegramHeight)
+        : webApp.viewportHeight || window.visualViewport?.height || window.innerHeight;
       if (height > 0)
         surface?.style.setProperty('--po-viewport-height', `${height}px`);
     };
@@ -58,7 +60,7 @@ export function Shell({
       window.removeEventListener('resize', resize);
       window.visualViewport?.removeEventListener('resize', resize);
     };
-  }, [webApp]);
+  }, [webApp, compact]);
   const latestBack = useRef(back);
   useLayoutEffect(() => {
     latestBack.current = backDisabled ? undefined : back;
@@ -81,7 +83,7 @@ export function Shell({
   }, [hasBack, webApp]);
   return (
     <div
-      className={`platform-owner${owner ? '' : ' client-cabinet'}`}
+      className={`platform-owner${owner ? '' : ' client-cabinet'}${compact ? ' client-workspace' : ''}`}
       lang="ru"
     >
       <div className="po-container">
@@ -107,7 +109,7 @@ export function Shell({
               <ArrowLeft size={18} aria-hidden="true" /> {backLabel}
             </button>
           )}
-          <div className="po-page-title">
+          <div className="po-page-title" aria-hidden={compact || undefined}>
             <p className="po-eyebrow">
               {owner ? 'Управление платформой' : 'Мои клубы'}
             </p>

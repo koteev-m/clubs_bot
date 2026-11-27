@@ -130,3 +130,242 @@
     grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   }
 }
+
+.client-workspace .po-container {
+  padding-inline: max(0px, env(safe-area-inset-left, 0px)) max(0px, env(safe-area-inset-right, 0px));
+  max-width: 560px;
+}
+.client-workspace .po-header,
+.client-workspace .po-main > .po-back { display: none; }
+.client-workspace .po-page-title {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+}
+.client-workspace .po-main { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.night-workspace {
+  --work-space: 14px;
+  display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 0;
+  background: var(--po-bg);
+}
+.night-work-header {
+  flex: 0 0 auto;
+  padding: calc(12px + max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px))
+    var(--work-space) 10px;
+  border-bottom: 1px solid var(--po-line);
+}
+.night-work-title, .night-work-meta, .night-work-section-title {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+}
+.night-work-title h2 { margin: 0; font-size: 1.38rem; line-height: 1.25; overflow-wrap: anywhere; }
+.night-work-brand { font-size: .68rem; color: var(--po-muted); text-transform: uppercase; letter-spacing: .11em; }
+.night-work-meta { margin-top: 8px; color: var(--po-muted); font-size: .84rem; }
+.night-work-meta [data-open='true']::before { content: '• '; color: var(--po-accent); }
+.night-work-menu { flex: 0 0 44px; display: grid; place-items: center; padding: 0; }
+.night-work-menu-panel { margin-top: 10px; display: grid; gap: 6px; }
+.night-work-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px var(--work-space); }
+.night-work-content > * + * { margin-top: 10px; }
+.night-work-footer {
+  flex: 0 0 auto;
+  padding: 8px var(--work-space) calc(6px + max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px)) +
+    var(--tg-content-safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--po-line);
+}
+.night-work-seat { width: 100%; min-height: 48px; margin-bottom: 8px; }
+.night-work-nav { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; }
+.night-work-nav button {
+  display: grid; justify-items: center; align-content: center; gap: 3px; color: var(--po-muted);
+  background: transparent; border: 0; border-radius: 10px; min-height: 48px; font-size: .72rem;
+}
+.night-work-nav button[aria-current='page'] {
+  background: color-mix(in srgb, var(--po-accent) 14%, var(--po-bg)); color: inherit;
+}
+.night-work-shift h3, .night-work-section-title h4 { margin: 0; }
+.night-work-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; margin: 10px 0 14px; }
+.night-work-metrics button {
+  background: var(--po-card); color: inherit; border: 1px solid var(--po-line); border-radius: 12px;
+  min-height: 67px; display: grid; justify-items: center; align-content: center; line-height: 1.25; padding: 5px;
+}
+.night-work-metrics strong { font-size: 1.35rem; }
+.night-work-metrics span { color: var(--po-muted); font-size: .75rem; }
+.night-work-shift .night-work-reservation {
+  display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; background: var(--po-card);
+}
+.night-work-reservation small { display: block; color: var(--po-muted); }
+.night-desk [hidden] { display: none; }
+.night-work-table-button { min-height: 44px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; }
+.night-work-map { min-height: 160px; position: relative; border: 1px solid var(--po-line); border-radius: 12px; }
+.night-work-map button { position: absolute; transform: translate(-50%,-50%); border-radius: 50%; width: 44px; height: 44px;
+  border: 1px solid var(--po-line); background: var(--po-card); color: inherit; }
+.night-work-map button[data-status='free'] { border-color: var(--po-accent); }
+.night-work-map button[data-status='reserved'] { border-style: dashed; }
+.night-work-map button[data-status='seated'] { background: color-mix(in srgb, var(--po-accent) 30%, var(--po-bg)); }
+.night-workspace .night-desk-tables { grid-template-columns: 1fr; }
+.night-workspace .po-details { margin: 0; }
+.night-workspace .ob-field input, .night-workspace .ob-field select,
+.night-workspace .ob-field textarea { font-size: 16px; }
+.client-workspace .night-workspace .ob-button.po-primary {
+  background: var(--po-accent); color: var(--ob-primary-text); border-color: var(--po-accent); font-weight: 650;
+}
+.client-workspace .night-workspace .ob-button.po-primary:disabled { opacity: .55; }
+
+
+.night-work-shift .night-work-reservation {
+  color: var(--ob-text);
+  min-height: 58px;
+  margin: 0;
+}
+
+.night-work-booking-card {
+  gap: 6px;
+}
+
+.night-work-booking-card > h3,
+.night-work-seat-form :is(h3, p),
+.night-work-money :is(h3, h4, p, ul) {
+  margin: 0;
+}
+
+.night-work-booking-card > .po-back {
+  width: fit-content;
+  min-height: 44px;
+  padding-block: 0;
+  margin: 0;
+}
+
+.night-work-booking-card .po-details > div {
+  padding-block: 8px;
+}
+
+.night-work-booking-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding-block: 6px;
+}
+
+.night-work-booking-actions .po-primary {
+  grid-column: 1 / -1;
+}
+
+.night-work-booking-card .ob-button,
+.night-work-seat-form .ob-button {
+  margin: 0;
+}
+
+.night-work-form-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.night-work-seat-form .ob-field {
+  margin: 0;
+  gap: 4px;
+}
+
+.night-work-seat-form fieldset {
+  gap: 8px;
+}
+
+.night-work-seat-form fieldset.night-desk-radio {
+  display: grid;
+  grid-template-columns: 1fr .84fr 1.45fr;
+  gap: 4px;
+}
+
+.night-work-seat-form .night-desk-radio label {
+  justify-content: center;
+  gap: 4px;
+  padding-inline: 4px;
+  font-size: .79rem;
+  line-height: 1.2;
+}
+
+.night-work-seat-form .night-desk-radio label:has(:checked) {
+  border-color: var(--po-accent);
+  background: var(--ob-soft);
+}
+
+.night-work-tender-split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.night-work-tender-split p {
+  display: grid;
+  align-content: end;
+  gap: 6px;
+}
+
+.night-work-tender-split .po-muted {
+  grid-column: 1 / -1;
+}
+
+.night-work-form-submit {
+  position: sticky;
+  bottom: 0;
+  margin: 0 -12px -12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--po-line);
+  border-radius: 0 0 .85rem .85rem;
+  background: var(--po-bg);
+}
+
+.night-work-form-submit .ob-button {
+  width: 100%;
+}
+
+.night-work-money,
+.night-work-money > section,
+.night-work-money-total {
+  display: grid;
+  gap: 8px;
+}
+
+.night-work-money > section,
+.night-work-money-total {
+  border: 1px solid var(--po-line);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--po-card);
+}
+
+.night-work-money-total strong {
+  color: var(--po-accent);
+  font-size: clamp(1.5rem, 8vw, 2.125rem);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.night-work-money-total p {
+  color: var(--po-muted);
+  font-size: .8rem;
+}
+
+.night-work-booking-actions .ob-button {
+  padding-inline: 6px;
+}
+
+.night-work-seat-form .night-desk-radio label {
+  position: relative;
+  text-align: center;
+}
+
+.night-work-seat-form .night-desk-radio input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.night-work-seat-form .night-desk-radio label:has(:focus-visible) {
+  outline: 2px solid var(--po-accent);
+  outline-offset: 2px;
+}
+
+.night-work-content:has(.night-work-form-submit) {
+  scroll-padding-bottom: 70px;
+}

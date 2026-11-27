@@ -18,6 +18,7 @@ internal class ClubNightDeskView(
     fun build(
         nights: List<DbRow>,
         upcoming: List<DbRow>,
+        history: List<DbRow>,
     ): JsonObject {
         val current = nights.singleOrNull()
         val event = current?.get("event_id")?.toLong()
@@ -31,15 +32,19 @@ internal class ClubNightDeskView(
                 null
             }
         val future = current?.instant("start_at")?.isAfter(session.now) == true
+        val historical = current?.instant("end_at")?.let { it <= session.now } == true
         val allowed = session.clubPermissions(clientId, clubId)
         val permissions =
-            if (future) {
+            if (historical) {
+                allowed -
+                    setOf(WRITE_DESK_BOOKING, SEAT_TABLE, RELEASE_TABLE, RECORD_TABLE_DEPOSIT, RECORD_TABLE_TOP_UP)
+            } else if (future) {
                 allowed -
                     setOf(SEAT_TABLE, RELEASE_TABLE, RECORD_TABLE_DEPOSIT, RECORD_TABLE_TOP_UP)
             } else {
                 allowed
             }
-        val bookingRows = state?.let { bookings(it.eventId) }.orEmpty()
+        val bookingRows = state?.takeUnless { historical }?.let { bookings(it.eventId) }.orEmpty()
         val byTable = bookingRows.groupBy { it["hall_table_id"] }
         return buildJsonObject {
             put("clubId", clubId.toString())
@@ -48,6 +53,8 @@ internal class ClubNightDeskView(
             put("night", current?.nightView() ?: JsonNull)
             put("upcomingNights", JsonArray(upcoming.map { it.nightView() }))
             put("future", future)
+            put("historical", historical)
+            put("recentNights", JsonArray(history.map { it.nightView() }))
             if (state == null) {
                 put(
                     "blocked",
@@ -73,9 +80,21 @@ internal class ClubNightDeskView(
             put("categories", ClubDepositConfiguration(session, clubId).view())
             put(
                 "halls",
-                JsonArray(halls().map { hall -> hallView(hall, state, byTable, READ_TABLE_MONEY in permissions) }),
+                JsonArray(
+                    halls().map { hall ->
+                        hallView(
+                            hall,
+                            state.takeUnless { historical },
+                            byTable,
+                            READ_TABLE_MONEY in permissions,
+                        )
+                    },
+                ),
             )
             put("bookings", JsonArray(if (state == null) emptyList() else bookingRows.map { reservation(it, state) }))
+            if (state != null && !future && READ_TABLE_MONEY in permissions) {
+                put("tableMoney", nightMoney(state))
+            }
         }
     }
 
@@ -113,7 +132,8 @@ internal class ClubNightDeskView(
             val tables =
                 sql.rows(
                     "SELECT ht.id,ht.label,ht.table_number,ht.capacity,ht.booking_club_id,ht.booking_table_id," +
-                        "t.id AS verified_table_id,t.active AS booking_active FROM hall_tables ht " +
+                        "ht.x,ht.y,ht.is_placed,t.id AS verified_table_id,t.active AS booking_active " +
+                        "FROM hall_tables ht " +
                         "LEFT JOIN tables t ON " +
                         "t.id=ht.booking_table_id AND t.club_id=ht.booking_club_id AND t.club_id=? " +
                         "AND t.table_number=ht.table_number AND t.capacity=ht.capacity WHERE " +
@@ -166,11 +186,16 @@ internal class ClubNightDeskView(
             put("number", row.long("table_number"))
             put("label", row["label"])
             put("capacity", row.long("capacity"))
+            if (row.placed()) {
+                put("x", checkNotNull(row["x"]).toDouble())
+                put("y", checkNotNull(row["y"]).toDouble())
+            }
             put("status", status)
             put("salesStopped", stopped)
             put("sessionId", active?.get("id"))
             put("lastSessionId", last?.get("id"))
             put("bookingId", bookingId?.toString())
+            active?.get("seated_guests")?.toInt()?.let { put("seatedGuests", it) }
             val hasPaymentSubject = active != null || bookingId != null
             if (money && state != null && hasPaymentSubject) {
                 put("payments", payments(state.ledger, active?.long("id"), bookingId))
@@ -202,6 +227,60 @@ internal class ClubNightDeskView(
             }
         return JsonArray(operations + captured)
     }
+
+    private fun nightMoney(state: ClubWorkingNight): JsonArray {
+        val allocations =
+            sql
+                .rows(
+                    """
+                    SELECT a.operation_id,a.category_code,a.category_name_snapshot,a.amount_minor
+                    FROM table_deposit_operation_allocations a JOIN table_deposit_operations o ON o.id=a.operation_id
+                    WHERE o.club_id=? AND o.night_start_utc=? AND o.type IN ('INITIAL','TOPUP') ORDER BY a.id
+                    """.trimIndent(),
+                    clubId,
+                    state.night.legacyStart,
+                ).groupBy { it["operation_id"] }
+        val rows =
+            sql.rows(
+                """
+                SELECT o.*,t.table_number,t.id AS physical_table_id FROM table_deposit_operations o
+                JOIN table_sessions s ON s.id=o.session_id AND s.club_id=o.club_id
+                JOIN tables t ON t.id=s.table_id AND t.club_id=s.club_id
+                WHERE o.club_id=? AND o.night_start_utc=? AND o.type IN ('INITIAL','TOPUP') AND o.amount_minor>0
+                ORDER BY o.created_at DESC,o.id DESC
+                """.trimIndent(),
+                clubId,
+                state.night.legacyStart,
+            )
+        return JsonArray(rows.map { row -> nightPayment(row, allocations[row["id"]].orEmpty()) })
+    }
+
+    private fun nightPayment(
+        row: DbRow,
+        allocations: List<DbRow>,
+    ): JsonObject =
+        buildJsonObject {
+            put("operationId", row["id"])
+            put("tableId", row["physical_table_id"])
+            put("tableNumber", row.long("table_number"))
+            put("recordedAt", row.instant("created_at").toString())
+            put("kind", row["type"])
+            put("amountMinor", row["amount_minor"])
+            put("method", row["received_method"])
+            put("cashMinor", row["received_cash_minor"])
+            put("cardMinor", row["received_card_minor"])
+            put(
+                "allocations",
+                JsonArray(
+                    allocations.map { allocation ->
+                        buildJsonObject {
+                            put("name", allocation["category_name_snapshot"] ?: allocation["category_code"])
+                            put("amountMinor", allocation["amount_minor"])
+                        }
+                    },
+                ),
+            )
+        }
 
     private fun bookings(eventId: Long): List<DbRow> =
         sql.rows(

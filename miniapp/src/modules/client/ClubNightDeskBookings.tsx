@@ -53,8 +53,10 @@ export type BookingDraft = {
   guests: string;
   localTime: string;
   preferredInstant: string;
+  arrivalEdited?: boolean;
   note: string;
   reason: string;
+  cancelChoice: string;
   destination: string;
 };
 export function newBookingDraft(
@@ -78,7 +80,8 @@ export function newBookingDraft(
     preferredInstant: instant ?? '',
     note: '',
     reason: '',
-    destination: '',
+    cancelChoice: '',
+    destination: action === 'move_booking' ? table.id : '',
   };
 }
 export function bookingSuccess(action: BookingAction) {
@@ -112,8 +115,11 @@ export function BookingsList({
   select,
   open,
   seat,
+  search, setSearch, filter, setFilter,
 }: {
   view: Desk;
+  search: string; setSearch: (value: string) => void;
+  filter: string; setFilter: (value: string) => void;
   timezone: string;
   disabled: boolean;
   selected?: string;
@@ -121,8 +127,6 @@ export function BookingsList({
   open: (action: BookingAction, table: Table, booking?: Booking) => void;
   seat: (hall: Hall, table: Table) => void;
 }) {
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('');
   const tables = view.halls.flatMap(({ tables }) => tables);
   const selectedBooking = view.bookings.find(({ id }) => id === selected);
   const term = search.trim().toLocaleLowerCase('ru');
@@ -144,7 +148,7 @@ export function BookingsList({
   });
   return (
     <section className="night-desk-bookings" aria-label="Бронирования">
-      <div className="night-desk-fields">
+      <div className="night-desk-fields" hidden={Boolean(selectedBooking)}>
         <label className="ob-field">
           Поиск брони
           <input
@@ -182,8 +186,8 @@ export function BookingsList({
           disabled={disabled}
         />
       )}
-      {shownBookings.length === 0 && <p>По этим условиям брони не найдены.</p>}
-      <ul className="night-desk-booking-list">
+      {!selectedBooking && shownBookings.length === 0 && <p>По этим условиям брони не найдены.</p>}
+      <ul className="night-desk-booking-list" hidden={Boolean(selectedBooking)}>
         {shownBookings.map((booking) => (
           <li key={booking.id}>
             <button
@@ -191,7 +195,10 @@ export function BookingsList({
               className="ob-button"
               onClick={() => select(booking.id)}
             >
-              <strong>{booking.guestName ?? 'Гость без имени'}</strong>
+              <strong>{booking.arrivalBy && formatTime(booking.arrivalBy, timezone) + ' · '}
+                {booking.guestName ?? 'Гость без имени'}
+                {tables.find((table) => table.id === booking.tableId)?.label && ' · ' + tableName(tables.find((table) => table.id === booking.tableId)!)}
+              </strong>
               <span>
                 {bookingStatuses[booking.status] ?? booking.status} · гостей:{' '}
                 {booking.guests}
@@ -248,6 +255,7 @@ function BookingCard({
       hall && table ? hall.name + ' · ' + tableName(table) : 'Стол не найден',
     ],
     ['Плановое число гостей', booking.guests],
+    ...(table?.bookingId === booking.id && table.seatedGuests !== undefined ? [['Фактически сели', table.seatedGuests] as [string, number]] : []),
     ['Статус брони', bookingStatuses[booking.status] ?? booking.status],
     [
       'Вход',
@@ -276,8 +284,19 @@ function BookingCard({
   if (booking.cancellationReason)
     details.push(['Причина отмены', booking.cancellationReason]);
   return (
-    <section className="night-desk-form" aria-label="Карточка брони">
-      <h3>{booking.guestName ?? 'Гость без имени'}</h3>
+    <section className="night-desk-form night-work-booking-card" aria-label="Карточка брони">
+      <button type="button" className="po-back" onClick={close}>Назад</button>
+      <h3>{booking.guestName ?? 'Гость без имени'}{table && ' · ' + tableName(table)}</h3>
+      <div className="night-work-booking-actions">
+        {canChange && (['move_booking','cancel_booking'] as const).map((action) => (
+          <button key={action} type="button"
+            className={action === 'cancel_booking' ? 'ob-button ob-danger' : 'ob-button'}
+            onClick={() => open(action, table, booking)} disabled={disabled}
+            aria-label={titles[action]}>{action === 'move_booking' ? 'Перенести' : titles[action]}</button>
+        ))}
+        {canSeat && <button type="button" className="ob-button po-primary" onClick={() => seat(hall, table)}
+          disabled={disabled}>Посадить по брони</button>}
+      </div>
       <dl className="po-details">
         {details.map(([label, value]) => (
           <div key={label}>
@@ -287,23 +306,11 @@ function BookingCard({
         ))}
       </dl>
       <div className="night-desk-actions">
-        {canSeat && (
-          <button
-            type="button"
-            className="ob-button po-primary"
-            onClick={() => seat(hall, table)}
-            disabled={disabled}
-          >
-            Посадить по брони
-          </button>
-        )}
         {canChange &&
           (
             [
               'update_booking',
-              'move_booking',
               'extend_wait',
-              'cancel_booking',
               'no_show',
             ] as const
           ).map((action) => (
@@ -317,9 +324,6 @@ function BookingCard({
               {titles[action]}
             </button>
           ))}
-        <button type="button" className="ob-button" onClick={close}>
-          Закрыть карточку
-        </button>
       </div>
     </section>
   );
@@ -370,7 +374,8 @@ export function BookingForm({
     !permits(view, permissions.booking);
   const optionalTime =
     action === 'create_booking' || action === 'update_booking';
-  const asksTime = optionalTime || action === 'extend_wait';
+  const moving = action === 'move_booking';
+  const asksTime = optionalTime || action === 'extend_wait' || moving;
   const [date, time] = draft.localTime.split('T');
   const times =
     time && /^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -411,7 +416,7 @@ export function BookingForm({
       }
       body.guests = guests;
     }
-    if (asksTime && (draft.localTime || !optionalTime)) {
+    if (asksTime && (!moving || draft.arrivalEdited) && (draft.localTime || action === 'extend_wait')) {
       const preferred = times.find(
         (candidate) =>
           Date.parse(candidate) === Date.parse(draft.preferredInstant),
@@ -446,18 +451,23 @@ export function BookingForm({
       if (draft.note.trim()) body.note = draft.note.trim();
     }
     if (action === 'move_booking') {
-      if (!moveOptions.some(({ option }) => option.id === draft.destination)) {
+      if (draft.destination !== table.id && !moveOptions.some(({ option }) => option.id === draft.destination)) {
         setValidation('Выберите доступный стол.');
         return;
       }
-      body.destinationTableId = draft.destination;
+      if (draft.destination !== table.id) body.destinationTableId = draft.destination;
+      if (body.arrivalBy && Date.parse(body.arrivalBy) === Date.parse(booking?.arrivalBy ?? '')) delete body.arrivalBy;
+      if (!body.destinationTableId && !body.arrivalBy) {
+        setValidation('Измените стол или время прибытия.');
+        return;
+      }
     }
     if (action === 'cancel_booking') {
-      if (!draft.reason.trim()) {
+      if (!draft.cancelChoice || (draft.cancelChoice === 'Другое' && !draft.reason.trim())) {
         setValidation('Укажите причину отмены.');
         return;
       }
-      body.reason = draft.reason.trim();
+      body.reason = draft.cancelChoice === 'Другое' ? draft.reason.trim() : draft.cancelChoice;
     }
     execute(body, table, night);
   }
@@ -528,18 +538,18 @@ export function BookingForm({
         )}
         {asksTime && (
           <label className="ob-field">
-            {optionalTime ? 'Ожидаемый приход' : 'Ожидать до'} · время клуба
+            {action === 'extend_wait' ? 'Ожидать до' : 'Ожидаемый приход'} · время клуба
             <input
               type="datetime-local"
               value={draft.localTime}
-              required={!optionalTime}
+              required={action === 'extend_wait' || (moving && Boolean(booking?.arrivalBy))}
               onChange={(event) =>
-                update({ localTime: event.target.value, preferredInstant: '' })
+                update({ localTime: event.target.value, preferredInstant: '', arrivalEdited: true })
               }
             />
           </label>
         )}
-        {times.length > 1 && (
+        {times.length > 1 && (!moving || draft.arrivalEdited) && (
           <label className="ob-field">
             Какое смещение используется
             <select
@@ -552,7 +562,7 @@ export function BookingForm({
               }
               required
               onChange={(event) =>
-                update({ preferredInstant: event.target.value })
+                update({ preferredInstant: event.target.value, arrivalEdited: true })
               }
             >
               <option value="">Выберите смещение</option>
@@ -564,33 +574,38 @@ export function BookingForm({
             </select>
           </label>
         )}
-        {action === 'move_booking' && (
-          <label className="ob-field">
-            Новый стол
-            <select
-              value={draft.destination}
-              required
-              onChange={(event) => update({ destination: event.target.value })}
-            >
-              <option value="">Выберите стол</option>
-              {moveOptions.map(({ option, label }) => (
-                <option key={option.id} value={option.id}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
+        {moving && (
+          <>
+            <label className="ob-field">
+              Новый стол
+              <select value={draft.destination} onChange={(event) => update({ destination: event.target.value })}>
+                <option value={table.id}>{tableName(table)} · текущий</option>
+                {moveOptions.map(({ option, label }) => (
+                  <option key={option.id} value={option.id}>{label} · свободен</option>
+                ))}
+              </select>
+            </label>
+            <p>После переноса: {moveOptions.find(({ option }) => option.id === draft.destination)?.label ?? tableName(table)}
+              {' · '}{draft.localTime.replace('T', ' ') || 'время не задано'}</p>
+          </>
         )}
         {action === 'cancel_booking' && (
-          <label className="ob-field">
-            Причина отмены
-            <textarea
-              value={draft.reason}
-              required
-              maxLength={500}
-              onChange={(event) => update({ reason: event.target.value })}
-            />
-          </label>
+          <>
+            <label className="ob-field">
+              Причина отмены
+              <select value={draft.cancelChoice} required onChange={(event) => update({ cancelChoice: event.target.value })}>
+                <option value="">Выберите причину</option>
+                {['Гость отменил', 'Не придёт', 'Другое'].map((reason) => <option key={reason}>{reason}</option>)}
+              </select>
+            </label>
+            {draft.cancelChoice === 'Другое' && (
+              <label className="ob-field">
+                Объяснение
+                <textarea value={draft.reason} required maxLength={500}
+                  onChange={(event) => update({ reason: event.target.value })} />
+              </label>
+            )}
+          </>
         )}
       </fieldset>
       {(validation || problem) && (

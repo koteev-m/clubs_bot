@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import {
   expect,
   test,
@@ -104,9 +105,12 @@ async function shot(page: Page, name: string) {
   await page.evaluate(() => {
     window.scrollTo(0, 0);
     document.querySelector('main')?.scrollTo(0, 0);
+    document.querySelector('.night-work-content')?.scrollTo(0, 0);
   });
   await page.screenshot({
-    path: test.info().outputPath(name),
+    path: process.env.CLB_WORKSPACE_SCREENSHOTS && name.startsWith('floor-')
+      ? join(process.env.CLB_WORKSPACE_SCREENSHOTS, test.info().project.name + '-' + page.viewportSize()?.width + '-' + name)
+      : test.info().outputPath(name),
     fullPage: true,
   });
 }
@@ -648,7 +652,7 @@ test('verified business owner assigns a network manager who assigns and revokes 
     'CLUB_MANAGER',
   );
   await expect(
-    manager.getByText('Управляющий клуба', { exact: true }),
+    manager.getByRole('region', { name: 'Рабочая ночь' }),
   ).toBeVisible();
   await expect(
     manager.getByRole('button', { name: 'Управляющие', exact: true }),
@@ -666,11 +670,15 @@ test('verified business owner assigns a network manager who assigns and revokes 
     expectedVersion: hall.layoutRevision,
   });
   await manager.evaluate(() => window.dispatchEvent(new Event('focus')));
-  const hallOverview = manager.getByRole('region', { name: 'Обзор залов' });
-  await expect(hallOverview.getByText('Основной зал')).toBeVisible();
-  await expect(hallOverview.getByText('Мест за этими столами: 6')).toBeVisible();
+  await manager.getByRole('button', { name: 'Столы', exact: true }).click();
+  const halls = manager.getByRole('region', { name: 'Залы и столы' });
+  await expect(halls.getByText('Основной зал')).toBeVisible();
+  await halls.getByRole('button', { name: 'Стол 7', exact: true }).click();
+  await expect(halls.getByText('Мест: 6')).toBeVisible();
   expect(await manager.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await hallOverview.getByRole('button', { name: 'Открыть залы и столы' }).click();
+  await manager.getByRole('button', { name: 'Меню кабинета' }).click();
+  await manager.getByRole('button', { name: 'Настройки клуба', exact: true }).click();
+  await manager.getByRole('button', { name: /^Залы, зоны и столы/ }).click();
   await expect(manager.getByText('Основной зал', { exact: true })).toBeVisible();
   await open(manager, await identity(request, 'foreign'), clubUrl);
   for (const credential of [networkId, managerId]) {
@@ -682,6 +690,8 @@ test('verified business owner assigns a network manager who assigns and revokes 
       ).status(),
     ).toBe(404);
   }
+  await manager.getByRole('button', { name: 'Меню кабинета' }).click();
+  await manager.getByRole('button', { name: 'Настройки клуба', exact: true }).click();
   await manager.getByRole('button', { name: /Профиль Название/ }).click();
   await manager
     .getByLabel('Описание клуба')
@@ -769,6 +779,11 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     expectedVersion: hall.layoutRevision,
   });
   const table = mapped.halls[0].tables[0];
+  const completeLayout = await api(request, clubManager, clubApi + '/halls/' + hall.id + '/tables', {
+    label: 'Стол 2', tableNumber: 2, capacity: 6, x: 0.7, y: 0.65,
+    expectedVersion: mapped.halls[0].layoutRevision,
+  });
+  const destination = completeLayout.halls[0].tables[1];
   const calendar = await api(request, clubManager, clubApi + '/calendar');
   const startAt = new Date(Date.now() - 5 * 60_000);
   const endAt = new Date(startAt.getTime() + 6 * 3600_000);
@@ -803,12 +818,14 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     extras: [{ name: 'Шары', active: true }],
   }, 'PATCH');
 
-  const page = await browser.newPage({
+  const width = process.env.CLB_WORKSPACE_WIDTH === '390' ? 390 : 320;
+  const mobile = {
     baseURL,
-    viewport: { width: 320, height: 740 },
+    viewport: { width, height: width === 390 ? 844 : 740 },
     isMobile: true,
     hasTouch: true,
-  });
+  };
+  let page = await browser.newPage(mobile);
   try {
     const start = new URL(floorInvite.invitationLink).searchParams.get('startapp')!;
     const launched = await identity(request, 'second-manager', start);
@@ -819,41 +836,64 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     const accept = page.getByRole('button', { name: 'Принять приглашение', exact: true });
     await expect(accept).toBeVisible();
     expect((await request.get(operations, { headers })).status()).toBe(404);
+    const accepted = page.waitForResponse((response) => response.url().endsWith('/claim') && response.ok());
     await accept.click();
+    await accepted;
+    await expect(page.getByRole('region', { name: 'Рабочая ночь' })).toBeVisible();
 
+    await page.close();
+    page = await browser.newPage(mobile);
+    await open(page, floor, '/app?mode=client');
     const desk = page.getByRole('region', { name: 'Рабочая ночь' });
     await expect(desk.getByRole('button', { name: 'Посадить гостей', exact: true })).toBeVisible();
-    await expect(desk.getByText(club.name, { exact: false })).toBeVisible();
-    await expect(desk.getByText('Свободен')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Перейти к настройкам' })).toHaveCount(0);
-    await expect(page.getByText('Менеджер', { exact: true })).toBeVisible();
+    await expect(desk.getByText(club.name, { exact: true })).toBeVisible();
+    await expect(desk.getByRole('button', { name: /Свободны/ })).toBeVisible();
+    await expect(desk.getByRole('button', { name: 'Финансы', exact: true })).toBeVisible();
+    await desk.getByRole('button', { name: 'Меню кабинета' }).click();
+    await expect(desk.getByRole('button', { name: 'Настройки клуба', exact: true })).toHaveCount(0);
+    await desk.getByRole('button', { name: 'Меню кабинета' }).click();
     await telegramTheme(page, 'dark');
-    await shot(page, 'floor-desk-dark-320.png');
+    await shot(page, 'floor-opening.png');
 
     await desk.getByRole('button', { name: 'Посадить гостей', exact: true }).click();
     await expect(desk.getByText(/Выберите свободный стол/)).toBeVisible();
     await desk.getByRole('button', { name: 'Посадить · Стол 1' }).click();
     const seat = desk.getByRole('form', { name: 'Посадка гостей' });
     await seat.getByLabel('Фактически получено').fill('15000');
+    await seat.getByText('Распределить депозит', { exact: true }).click();
     await seat.getByLabel('Шары').fill('3000');
     await seat.getByRole('radio', { name: 'Комбинированная' }).check();
     await seat.getByLabel('Наличными', { exact: true }).fill('5000');
     await expect(seat.getByText(/12\s000,00/)).toBeVisible();
-    await shot(page, 'floor-cash-dark-320.png');
+    const confirmSeat = seat.getByRole('button', { name: 'Посадить и записать оплату' });
+    await expect(confirmSeat).toBeInViewport();
+    const navigation = desk.getByRole('navigation', { name: 'Разделы рабочей ночи' });
+    const assertAboveNavigation = async () => {
+      const action = (await confirmSeat.boundingBox())!;
+      const nav = (await navigation.boundingBox())!;
+      expect(action.height).toBeGreaterThanOrEqual(44);
+      expect(action.y + action.height).toBeLessThanOrEqual(nav.y);
+    };
+    await assertAboveNavigation();
+    await shot(page, 'floor-seat.png');
 
     const reload = page.waitForResponse((response) =>
       response.url().endsWith(operations) && response.request().method() === 'GET');
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     expect((await reload).ok()).toBe(true);
     await expect(seat.getByLabel('Фактически получено')).toHaveValue('15000');
+    await page.setViewportSize({ width, height: 545 });
+    await expect(navigation).toBeInViewport();
+    await expect(confirmSeat).toBeInViewport();
+    await assertAboveNavigation();
+    await expect(seat.getByLabel('Фактически получено')).toHaveValue('15000');
+    await page.setViewportSize(mobile.viewport);
     const location = page.url();
-    const back = page.waitForEvent('dialog');
     await page.evaluate(() => {
       const telegram = window as unknown as { Telegram: { WebView: { receiveEvent: (event: string) => void } } };
       window.setTimeout(() => telegram.Telegram.WebView.receiveEvent('back_button_pressed'), 0);
     });
-    const confirmation = await back;
-    await confirmation.dismiss();
+    await desk.getByRole('button', { name: 'Вернуться к форме' }).click();
     await expect(page).toHaveURL(location);
     await expect(seat.getByLabel('Фактически получено')).toHaveValue('15000');
 
@@ -884,6 +924,7 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
         await route.continue();
       }
     });
+    await desk.getByRole('button', { name: 'Стол 1', exact: true }).click();
     await desk.getByRole('button', { name: 'Доплата · Стол 1' }).click();
     const topUp = desk.getByRole('form', { name: 'Доплата по посадке' });
     await expect(topUp.getByRole('radio', { name: 'Наличные' })).not.toBeChecked();
@@ -903,13 +944,70 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
       { amountMinor: '50000', method: 'CARD' },
     ]);
 
+    await desk.getByRole('button', { name: 'Финансы', exact: true }).click();
+    await expect(desk.getByRole('heading', { name: 'Поступления по столам' })).toBeVisible();
+    await shot(page, 'floor-finance.png');
+    await desk.getByRole('button', { name: 'Столы', exact: true }).click();
+    await shot(page, 'floor-tables.png');
+    await desk.getByRole('button', { name: 'Стол 1', exact: true }).click();
     await desk.getByRole('button', { name: 'Освободить · Стол 1' }).click();
     await desk.getByRole('button', { name: 'Освободить стол', exact: true }).click();
     await expect(desk.getByText('Стол 1 · стол освобождён')).toBeVisible();
-    await expect(desk.getByText('Свободен', { exact: true })).toBeVisible();
+    await expect(desk.getByText('Свободен', { exact: true })).toHaveCount(2);
     const released = await api(request, floor, operations);
     expect(released.halls[0].tables[0].sessionId).toBeNull();
     expect(released.halls[0].tables[0].lastSessionId).toBe(shift.halls[0].tables[0].sessionId);
+    await api(request, floor, operations, {
+      nightId, tableId: table.id, action: 'create_booking', guestName: 'Алексей', guests: 4,
+      arrivalBy: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    await open(page, floor, '/app?mode=client');
+    await telegramTheme(page, 'dark');
+    await expect(desk.getByRole('button', { name: /Алексей/ })).toBeVisible();
+    await shot(page, 'floor-shift.png');
+    await desk.getByRole('button', { name: /Алексей/ }).click();
+    await expect(desk.getByRole('button', { name: 'Посадить по брони' })).toBeVisible();
+    const bookingCard = desk.getByRole('region', { name: 'Карточка брони' });
+    const moveBox = (await bookingCard.getByRole('button', { name: 'Перенести бронь' }).boundingBox())!;
+    const cancelBox = (await bookingCard.getByRole('button', { name: 'Отменить бронь' }).boundingBox())!;
+    expect(moveBox.y).toBe(cancelBox.y);
+    expect(Math.min(moveBox.height, cancelBox.height)).toBeGreaterThanOrEqual(44);
+    await shot(page, 'floor-booking.png');
+    await desk.getByRole('button', { name: 'Перенести бронь', exact: true }).click();
+    const move = desk.getByRole('form', { name: 'Перенести бронь' });
+    await move.getByLabel('Новый стол').selectOption(destination.id);
+    await move.getByRole('button', { name: 'Перенести бронь' }).click();
+    const reseat = desk.getByRole('button', { name: 'Посадить других гостей' });
+    await expect(reseat).toBeVisible();
+    await reseat.click();
+    await expect(seat.getByRole('button', { name: 'Закрыть форму' })).toBeVisible();
+    await seat.getByRole('button', { name: 'Закрыть форму' }).click();
+    await desk.getByRole('button', { name: 'Брони', exact: true }).click();
+    await desk.getByRole('searchbox', { name: 'Поиск брони' }).fill('Алексей');
+    await desk.getByRole('button', { name: /Алексей/ }).click();
+    await desk.getByRole('button', { name: 'Отменить бронь', exact: true }).click();
+    const cancel = desk.getByRole('form', { name: 'Отменить бронь' });
+    await cancel.getByLabel('Причина отмены').selectOption('Не придёт');
+    await cancel.getByRole('button', { name: 'Отменить бронь' }).click();
+    await expect(reseat).toBeVisible();
+    await reseat.click();
+    await expect(seat.getByText('Стол 2', { exact: false })).toBeVisible();
+
+    const team = await api(request, clubManager, roster);
+    const floorAssignment = team.assignments.find((entry: { role: string }) => entry.role === 'FLOOR_MANAGER');
+    expect(floorAssignment).toBeDefined();
+    await api(request, clubManager, roster, {
+      action: 'revoke_assignment', expectedVersion: team.version, confirmed: true,
+      assignmentId: floorAssignment.id, expectedAssignmentVersion: floorAssignment.version,
+      reason: 'Смена завершена',
+    });
+    expect((await request.get(operations, { headers })).status()).toBe(404);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(desk).toHaveCount(0);
+
+  } catch (error) {
+    await page.screenshot({ path: test.info().outputPath('workspace-failure.png') });
+    throw error;
   } finally {
     await page.close();
   }

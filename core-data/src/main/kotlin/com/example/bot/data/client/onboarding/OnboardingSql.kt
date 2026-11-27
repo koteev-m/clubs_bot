@@ -441,7 +441,8 @@ internal class OnboardingSession(
         clientId: Long,
         resourceId: Long,
         version: Long,
-    ) = sql.audit(checkNotNull(userId), action, clientId, resourceId, version, now, correlation)
+        additionalMetadata: JsonObject = JsonObject(emptyMap()),
+    ) = sql.audit(checkNotNull(userId), action, clientId, resourceId, version, now, correlation, additionalMetadata)
 }
 
 private const val IDENTITY_DISPLAY_LIMIT = 255
