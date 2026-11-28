@@ -135,6 +135,7 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
     ownerCredential,
   );
   owner.once("dialog", (dialog) => dialog.accept());
+  await owner.getByRole("button", { name: "Люди и доступы" }).click();
   await owner.getByRole("button", { name: "Подтвердить владельца бизнеса" }).click();
   await expect(owner.getByText("Владелец бизнеса", { exact: true })).toBeVisible();
   await recipient.evaluate(() => window.dispatchEvent(new Event("pageshow")));
@@ -290,6 +291,7 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
       /\/applications(?:$|\/[^/]+\/(submit|approve|club)$)/.test(path),
     ),
   ).toBe(false);
+  await owner.getByRole("button", { name: "Люди и доступы" }).click();
   owner.once("dialog", (dialog) => dialog.accept());
   await owner
     .getByRole("button", { name: "Отозвать доступ", exact: true })
@@ -564,6 +566,7 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
     .click();
   await page.getByRole("button", { name: "Добавить столы" }).click();
   await page.getByLabel("Номер нового стола").fill("1");
+  await page.getByLabel('Минимальный депозит за стол, ₽').fill('0');
   await page
     .getByRole("button", { name: "Создать стол", exact: true })
     .click();

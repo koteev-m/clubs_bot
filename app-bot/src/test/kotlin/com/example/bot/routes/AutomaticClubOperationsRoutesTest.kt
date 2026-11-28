@@ -1,6 +1,9 @@
 package com.example.bot.routes
 
 import com.example.bot.availability.DefaultAvailabilityService
+import com.example.bot.data.booking.core.BookingCoreError
+import com.example.bot.data.booking.core.BookingCoreResult
+import com.example.bot.data.booking.core.BookingHoldRepository
 import com.example.bot.data.client.onboarding.ClientWorkingNightMaintenance
 import com.example.bot.data.privacy.JdbcLegacyClubAccess
 import io.ktor.client.statement.bodyAsText
@@ -20,6 +23,7 @@ import org.jetbrains.exposed.sql.Database
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -49,6 +53,7 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                         "h2"
                     }
                 }
+            assertEquals(1, migrateBookingRulesFixture(source, dialect, "87"))
             assertEquals(1, migrateBookingRulesFixture(source, dialect))
             clock.time = start.plusSeconds(30)
             val maintenance = ClientWorkingNightMaintenance(source, clock)
@@ -198,8 +203,11 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                         "$base/halls/${hall.string("id")}/tables",
                         SECOND_MANAGER,
                         JsonObject(
-                            obj("label" to "Table 1", "expectedVersion" to hall.string("layoutRevision")) +
-                                ("tableNumber" to JsonPrimitive(1)) + ("capacity" to JsonPrimitive(6)),
+                            obj(
+                                "label" to "Table 1",
+                                "expectedVersion" to hall.string("layoutRevision"),
+                                "minDeposit" to "30000",
+                            ) + ("tableNumber" to JsonPrimitive(1)) + ("capacity" to JsonPrimitive(6)),
                         ),
                     )
                 val table =
@@ -220,11 +228,15 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                         .jsonObject
                 val loungeLayout =
                     ok(
-                        "$base/halls/${secondHall.string("id")}/tables",
+                        "$base/halls/${secondHall.string("id")}/tables/batch",
                         SECOND_MANAGER,
                         JsonObject(
-                            obj("label" to "Lounge table", "expectedVersion" to secondHall.string("layoutRevision")) +
-                                ("tableNumber" to JsonPrimitive(2)) + ("capacity" to JsonPrimitive(4)),
+                            mapOf(
+                                "expectedVersion" to JsonPrimitive(secondHall.string("layoutRevision")),
+                                "minDeposit" to JsonPrimitive("12500.50"),
+                                "tableNumbers" to JsonArray(listOf(JsonPrimitive(2))),
+                                "capacity" to JsonPrimitive(4),
+                            ),
                         ),
                     )
                 val calendar = ok("$base/calendar", SECOND_MANAGER)
@@ -294,6 +306,11 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                 assertGuestSeparation(source, club.toLong(), start, end)
                 val future = ok("$operations/nights/$night", THIRD_MANAGER)
                 assertEquals("true", future.string("future"))
+                val workingTables = future["halls"]!!.jsonArray.flatMap { it.jsonObject["tables"]!!.jsonArray }
+                assertEquals("30000.00", workingTables.first().jsonObject.string("minDeposit"))
+                assertEquals(JsonPrimitive(6), workingTables.first().jsonObject["capacity"])
+                assertEquals("12500.50", workingTables.last().jsonObject.string("minDeposit"))
+                assertEquals(JsonPrimitive(4), workingTables.last().jsonObject["capacity"])
                 assertFalse(future["permissions"]!!.jsonArray.contains(JsonPrimitive("client.club.operations.seat")))
 
                 val reservation =
@@ -301,10 +318,43 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                         operations,
                         THIRD_MANAGER,
                         JsonObject(
-                            baseCommand + obj("action" to "create_booking", "guestName" to "Guest") +
+                            baseCommand +
+                                obj(
+                                    "action" to "create_booking",
+                                    "guestName" to "Guest",
+                                    "bookingDepositMinor" to "5000000",
+                                ) +
                                 ("guests" to JsonPrimitive(2)),
                         ),
                     )
+                val futureBooking = ok("$operations/nights/$night", THIRD_MANAGER)["bookings"]!!.jsonArray.single()
+                assertEquals("5000000", futureBooking.jsonObject.string("bookingDepositMinor"))
+                assertEquals("30000.00", futureBooking.jsonObject.string("minDeposit"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM table_deposit_operations"))
+                val tablePath = "$base/halls/${hall.string("id")}/tables/$table"
+                val revision =
+                    tables["halls"]!!
+                        .jsonArray
+                        .first()
+                        .jsonObject
+                        .string("layoutRevision")
+                val resize = obj("expectedVersion" to revision, "minDeposit" to "40000")
+                val rejected =
+                    requestAs(
+                        tablePath,
+                        SECOND_MANAGER,
+                        JsonObject(resize + ("capacity" to JsonPrimitive(1))),
+                        HttpMethod.Patch,
+                    )
+                assertEquals(HttpStatusCode.Conflict, rejected.status)
+                assertTrue(rejected.bodyAsText().contains("table_capacity_conflict"))
+                assertEquals(
+                    "30000.00",
+                    source.scalar("SELECT min_deposit FROM tables WHERE club_id=$club AND table_number=1"),
+                )
+                ok(tablePath, SECOND_MANAGER, JsonObject(resize + ("capacity" to JsonPrimitive(5))), HttpMethod.Patch)
+                val saved = ok("$operations/nights/$night", THIRD_MANAGER)["bookings"]!!.jsonArray.single()
+                assertEquals(futureBooking, saved)
                 val loungeTable =
                     loungeLayout["halls"]!!
                         .jsonArray
@@ -556,16 +606,6 @@ open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
                 ("exceptions" to JsonArray(listOf(exception))),
         )
     }
-
-    private class DeskClock : Clock() {
-        @Volatile var time: Instant = Instant.now().plusSeconds(30)
-
-        override fun instant() = time
-
-        override fun getZone(): ZoneId = ZoneOffset.UTC
-
-        override fun withZone(zone: ZoneId): Clock = Clock.fixed(time, zone)
-    }
 }
 
 @Tag("it")
@@ -574,4 +614,85 @@ class AutomaticClubOperationsPostgresIT : AutomaticClubOperationsRoutesTest() {
         target: String?,
         block: (DataSource) -> Unit,
     ) = withClientManagerPostgres(target, block)
+}
+
+open class ClubTableCapacityRoutesTest : ClientManagerRoutesFixture() {
+    @Test
+    fun `capacity edits respect a live hold and new legacy admission uses the resized table`() =
+        database { source ->
+            val clock = DeskClock()
+            withApp(source, clock) {
+                val (club) = business(source)
+                source.connection.use { connection ->
+                    connection.createStatement().use { statement ->
+                        statement.executeUpdate("DELETE FROM client_working_clubs WHERE club_id=$club")
+                    }
+                }
+                val base = "$C/clubs/$club"
+                claim(invite("$base/managers", RECIPIENT, "CLUB_MANAGER"), SECOND_MANAGER)
+                val created = ok("$base/halls", SECOND_MANAGER, obj("name" to "Hall"))
+                val hall = created["halls"]!!.jsonArray.single().jsonObject
+                val path = "$base/halls/${hall.string("id")}/tables"
+                val layout =
+                    ok(
+                        path,
+                        SECOND_MANAGER,
+                        JsonObject(
+                            obj("label" to "Table 1", "expectedVersion" to hall.string("layoutRevision")) +
+                                ("tableNumber" to JsonPrimitive(1)) + ("capacity" to JsonPrimitive(6)),
+                        ),
+                    )
+                val createdHall = layout["halls"]!!.jsonArray.single().jsonObject
+                val savedTable = createdHall["tables"]!!.jsonArray.single().jsonObject
+                val table = savedTable.string("id")
+                val bookingTable = source.scalar("SELECT booking_table_id FROM hall_tables WHERE id=$table").toLong()
+                val start = clock.instant().truncatedTo(ChronoUnit.SECONDS).plusSeconds(60)
+                val end = start.plusSeconds(3600)
+                source.connection.use { connection ->
+                    connection.createStatement().use { statement ->
+                        statement.executeUpdate(
+                            "INSERT INTO events(club_id,start_at,end_at) VALUES ($club,'$start','$end')",
+                        )
+                    }
+                }
+                val holds = BookingHoldRepository(Database.connect(source), clock)
+                val ttl = Duration.ofMinutes(2)
+                val before = holds.createHold(bookingTable, start, end, 6, ttl, "table-resize-old")
+                assertTrue(before is BookingCoreResult.Success)
+                val resize =
+                    JsonObject(
+                        obj("expectedVersion" to createdHall.string("layoutRevision")) +
+                            ("capacity" to JsonPrimitive(4)),
+                    )
+                val blocked = requestAs("$path/$table", SECOND_MANAGER, resize, HttpMethod.Patch)
+                assertEquals(HttpStatusCode.Conflict, blocked.status)
+                assertTrue(blocked.bodyAsText().contains("table_capacity_conflict"))
+                clock.time = clock.instant().plus(ttl).plusSeconds(1)
+                ok("$path/$table", SECOND_MANAGER, resize, HttpMethod.Patch)
+                assertEquals(
+                    BookingCoreResult.Failure(BookingCoreError.TableOccupied),
+                    holds.createHold(bookingTable, start, end, 6, ttl, "table-resize-new"),
+                )
+                val after = holds.createHold(bookingTable, start, end, 4, ttl, "table-resize-valid")
+                assertTrue(after is BookingCoreResult.Success)
+            }
+        }
+}
+
+@Tag("it")
+class ClubTableCapacityPostgresIT : ClubTableCapacityRoutesTest() {
+    override fun databaseAt(
+        target: String?,
+        block: (DataSource) -> Unit,
+    ) = withClientManagerPostgres(target, block)
+}
+
+private class DeskClock : Clock() {
+    @Volatile var time: Instant = Instant.now().plusSeconds(30)
+
+    override fun instant() = time
+
+    override fun getZone(): ZoneId = ZoneOffset.UTC
+
+    override fun withZone(zone: ZoneId): Clock = Clock.fixed(time, zone)
 }

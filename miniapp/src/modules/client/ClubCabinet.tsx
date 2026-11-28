@@ -15,6 +15,8 @@ import {
   ClubRequestScopeProvider,
   createClubRequestScope,
 } from './clubRequestScope';
+import { dateFormat, formatTime } from './clubNightDesk.types';
+import type { Desk } from './clubNightDesk.types';
 import './cabinet.css';
 
 type Section =
@@ -32,11 +34,13 @@ type Section =
   | 'financial-report-access'
   | 'settings'
   | 'readiness'
+  | 'management'
+  | 'management-reports'
   | 'club';
 type Props = {
   credential: string;
   id: string;
-  mode?: 'overview' | 'settings' | 'readiness' | 'choice';
+  mode?: 'overview' | 'settings' | 'management' | 'management-reports' | 'readiness' | 'choice';
   back: (clientId?: string) => void;
   leaveClub?: () => void;
   openClub?: (id: string) => void;
@@ -214,6 +218,27 @@ function HallOverview({
 function hasLimitedFloorSettings(profile: ClubProfile) {
   return profile.businessRole === 'FLOOR_MANAGER' &&
     !profile.permissions.includes('client.club.operations.team.manage');
+}
+
+function ManagementSummary({ profile, credential }: { profile: ClubProfile; credential: string }) {
+  const remote = useRemote<Desk>(credential, '/api/client/clubs/' + profile.id + '/operations', undefined, {
+    onSuccess(data) {
+      if (data.clubId !== profile.id || data.clientId !== profile.clientId) throw new OnboardingError(404, 'not_found');
+    },
+  });
+  const desk = remote.data;
+  const night = desk?.night ?? desk?.upcomingNights?.[0];
+  const status = desk?.blocked && desk.blocked !== 'no_current_night'
+    ? 'Рабочие операции требуют проверки'
+    : desk?.night ? 'Текущая ночь доступна для работы'
+      : night ? 'Есть запланированная ночь' : 'Открытой или ближайшей подготовленной ночи нет';
+  return <section className="po-card ob-card" aria-label="Готовность клуба">
+    <RemoteState {...remote} />
+    {desk && <>
+      <h3>{status}</h3>
+      {night && <p>{dateFormat(night.businessDate)} · {formatTime(night.opensAt, profile.timezone)}–{formatTime(night.closesAt, profile.timezone)}</p>}
+    </>}
+  </section>;
 }
 
 function Settings({
@@ -454,6 +479,7 @@ function Cabinet({
         <ClubNightDesk credential={credential} profile={profile} reportDirty={trackDirty}
           reportPending={trackPending} reportBack={(handler) => { deskBack.current = handler; }}
           openClub={openClub ? (clubId) => { if (canLeave()) openClub(clubId); } : undefined}
+          openManagement={clubManager ? () => safeOpen('management') : undefined}
           openLayout={profile.permissions.includes('client.club.layout.write') ? callbacks.openLayout : undefined}
           openCalendar={profile.permissions.some((permission) =>
             permission === 'client.club.calendar.write' || permission === 'client.club.night.create')
@@ -467,8 +493,12 @@ function Cabinet({
   return (
     <Shell
       title={
-        mode === 'settings'
-          ? 'Настройки клуба'
+        mode === 'management'
+          ? 'Управление клубом'
+          : mode === 'management-reports'
+            ? 'Показатели'
+            : mode === 'settings'
+              ? 'Настройки клуба'
           : mode === 'readiness'
             ? 'Проверка готовности'
             : profile?.name || 'Кабинет клуба'
@@ -663,6 +693,35 @@ function Cabinet({
               )}
             </>
           )}
+          {mode === 'management' && clubManager && permits('read') && (
+            <>
+              <ManagementSummary profile={profile} credential={credential} />
+              <nav className="cm-sections" aria-label="Управление клубом">
+                {profile.permissions.includes('client.club.calendar.write') &&
+                  <button className="ob-button" onClick={callbacks.openCalendar}>Расписание</button>}
+                {permits('team.manage') &&
+                  <button className="ob-button" onClick={() => safeOpen('managers')}>Команда</button>}
+                <button className="ob-button" onClick={() => safeOpen('settings')}>Настройки клуба</button>
+                {(permits('analytics.read') || permits('financial_reports.read')) &&
+                  <button className="ob-button" onClick={() => safeOpen('management-reports')}>Показатели</button>}
+                <button className="ob-button" onClick={() => safeOpen('readiness')}>Проверка готовности</button>
+              </nav>
+            </>
+          )}
+          {mode === 'management-reports' && clubManager && permits('read') && (
+            <>
+              {permits('analytics.read') && <section className="po-card ob-card">
+                <h3>Операционные данные</h3>
+                <button className="ob-button" onClick={() => safeOpen('operational-reports')}>Открыть операционные показатели</button>
+              </section>}
+              {permits('financial_reports.read') && <section aria-label="Финансовые итоги">
+                <h3>Финансовые итоги</h3>
+                <BusinessOverview credential={credential} profile={profile} financialOnly />
+              </section>}
+            </>
+          )}
+          {(mode === 'management' || mode === 'management-reports') && (!clubManager || !permits('read')) &&
+            <p>Раздел недоступен для текущего назначения.</p>}
           {mode === 'settings' && (
             <>
               <p className="po-muted">

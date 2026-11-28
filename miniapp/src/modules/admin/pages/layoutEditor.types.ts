@@ -39,6 +39,7 @@ export interface PhysicalTablesApi<Id extends LayoutId> {
     hall: Id,
     tableNumbers: number[],
     capacity: number,
+    minDeposit: string,
   ) => Promise<EditorTable<Id>[]>;
   update: (
     hall: Id,

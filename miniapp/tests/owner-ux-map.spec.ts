@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { join } from 'node:path';
 
 const signed = new URLSearchParams({
   user: JSON.stringify({ id: 880062001, first_name: 'Synthetic' }),
@@ -139,7 +140,7 @@ test('distinct owner sections keep navigation inside mobile viewport through scr
       ),
     ).toBe(true);
     await expect(
-      page.getByRole('button', { name: 'Доступы', exact: true }),
+      page.getByRole('button', { name: 'Клиенты', exact: true }),
     ).toBeInViewport();
     expect(
       await page
@@ -150,7 +151,7 @@ test('distinct owner sections keep navigation inside mobile viewport through scr
   await page.screenshot({
     path: test.info().outputPath('owner-clubs-safe-area.png'),
   });
-  await page.getByRole('button', { name: 'Доступы', exact: true }).click();
+  await page.getByRole('button', { name: 'Клиенты', exact: true }).click();
   await expect(page.getByLabel('Список организаций')).toBeVisible();
   await expect(page).toHaveURL(/screen=clients/);
   await page.goBack();
@@ -159,6 +160,63 @@ test('distinct owner sections keep navigation inside mobile viewport through scr
   await expect(page).toHaveURL(/screen=clients/);
   await telegramEvent(page, 'back_button_pressed');
   await expect(page.getByRole('heading', { name: 'Управление платформой', exact: true })).toBeVisible();
+});
+
+test('platform and client navigation group existing actions on mobile', async ({ page }) => {
+  await page.route('**/api/**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/access')) return route.fulfill({ json: { platformOwner: true } });
+    if (path.endsWith('/summary'))
+      return route.fulfill({ json: { clients: 1, archivedClients: 0, clubs: 1, activeMembers: 0, openInvitations: 0 } });
+    if (path.endsWith('/clients/search')) return route.fulfill({ json: { items: [client], nextCursor: null } });
+    if (path.endsWith('/clubs/search'))
+      return route.fulfill({
+        json: { items: [{ id: profile.id, name: profile.name, clientId: client.id, clientName: client.name,
+          published: false, clientActive: true, clientArchived: false }], nextCursor: null },
+      });
+    if (path.endsWith('/clients/' + client.id)) return route.fulfill({ json: { ...client, clubs: [profile] } });
+    return route.fulfill({ json: { items: [], nextCursor: null } });
+  });
+  const platform = page.getByRole('navigation', { name: 'Навигация платформы' });
+  const sections = page.getByRole('navigation', { name: 'Разделы карточки клиента' });
+  async function save(width: number, screen: string) {
+    const name = width + '-' + screen + '.png';
+    const exportDir = process.env.CLB_WORKSPACE_SCREENSHOTS;
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({
+      path: exportDir
+        ? join(exportDir, test.info().project.name + '-' + name)
+        : test.info().outputPath(name),
+    });
+  }
+  for (const [width, height] of [[320, 740], [390, 844]]) {
+    await page.setViewportSize({ width, height });
+    await page.goto('/app?mode=platform-owner' + telegramHash);
+    await expect(platform.getByRole('button')).toHaveText(['Обзор', 'Клиенты', 'Клубы', 'Заявки']);
+    await expect(page.getByRole('button', { name: 'Пригласить клиента' })).toBeInViewport();
+    await expect(page.getByText('Организации вне архива')).toBeVisible();
+    await save(width, 'platform-overview');
+    await platform.getByRole('button', { name: 'Клиенты' }).click();
+    await page.getByRole('button', { name: /Организация A/ }).click();
+    await expect(sections.getByRole('button')).toHaveText(['Обзор', 'Клубы', 'Люди и доступы', 'Приглашения']);
+    await expect(page.getByText('Лимит заведений')).toBeVisible();
+    await save(width, 'platform-client');
+    await sections.getByRole('button', { name: 'Люди и доступы' }).click();
+    await expect(page.getByText('Доступы ещё не выданы')).toBeVisible();
+    await expect(page.getByText('Лимит заведений')).toHaveCount(0);
+    await sections.getByRole('button', { name: 'Приглашения' }).click();
+    await expect(page.getByText('Приглашений пока нет')).toBeVisible();
+    await platform.getByRole('button', { name: 'Клубы' }).click();
+    await expect(page.getByText('Для гостей', { exact: true })).toBeVisible();
+    await expect(page.getByText('Не опубликован')).toBeVisible();
+    await expect(page.getByText(/Готовность внутренних операций/)).toBeVisible();
+    await save(width, 'platform-clubs');
+    await page.getByRole('button', { name: /Клубы организации/ }).click();
+    await expect(page).toHaveURL(/section=clubs/);
+    await expect(page.getByText('Первый клуб')).toBeVisible();
+    await platform.getByRole('button', { name: 'Заявки' }).click();
+    await expect(page.getByRole('heading', { name: 'Заявки на подключение' })).toBeVisible();
+  }
 });
 
 test('archive is reversible, filtered and explains revoked access', async ({
@@ -201,9 +259,12 @@ test('archive is reversible, filtered and explains revoked access', async ({
   await page.goto('/app?mode=platform-owner&screen=clients' + telegramHash);
   await page.getByRole('button', { name: /Организация A/ }).click();
   await expect(page.getByText('Активных пользователей: 0')).toBeVisible();
+  const sections = page.getByRole('navigation', { name: 'Разделы карточки клиента' });
+  await sections.getByRole('button', { name: 'Люди и доступы' }).click();
   await expect(
     page.getByText(/Отзыв доступа отключает пользователя/),
   ).toBeVisible();
+  await sections.getByRole('button', { name: 'Обзор' }).click();
   await page
     .getByRole('button', { name: 'Архивировать организацию' })
     .click();
@@ -242,7 +303,9 @@ test('single club opens directly with organization path; multiple contexts keep 
           clients: [
             { ...client, clubs: [profile] },
             ...(multiple
-              ? [{ ...client, id: '21', name: 'Организация B' }]
+              ? [{ ...client, id: '21', name: 'Организация B',
+                clubs: [{ ...profile, id: '101', clientId: '21', name: 'Второй клуб' }],
+              }]
               : []),
           ],
         },

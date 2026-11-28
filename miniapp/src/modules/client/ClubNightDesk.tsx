@@ -65,6 +65,7 @@ type Draft = {
   table: Table;
   observedPaymentIds: string;
   priorPayment: boolean;
+  bookingDepositMinor?: string | null;
   categories: Categories;
   mode: Mode;
   method: Method | '';
@@ -83,6 +84,7 @@ type Props = {
   openClub?: (id: string) => void;
   openLayout?: () => void;
   openCalendar?: () => void;
+  openManagement?: () => void;
   menu?: { label: string; run: () => void }[];
   financialReport?: React.ReactNode;
   workspaceMemory?: Map<string, WorkspaceLocation>;
@@ -331,7 +333,7 @@ export default function ClubNightDesk(props: Props) {
 }
 
 function NightDesk({
-  credential, profile, reportDirty, reportPending, reportBack, openClub, openLayout, openCalendar,
+  credential, profile, reportDirty, reportPending, reportBack, openClub, openLayout, openCalendar, openManagement,
   menu = [], financialReport, workspaceMemory,
 }: Props) {
   const path = '/api/client/clubs/' + profile.id + '/operations';
@@ -601,6 +603,7 @@ function NightDesk({
       table,
       observedPaymentIds: paymentIds(table),
       priorPayment: hasRecordedPayment(table),
+      bookingDepositMinor: view.bookings.find((booking) => booking.id === table.bookingId)?.bookingDepositMinor,
       categories: view.categories,
       mode:
         permits(view, permissions.deposit) || hasRecordedPayment(table)
@@ -633,6 +636,11 @@ function NightDesk({
       paymentIds(latestTable) === draft.observedPaymentIds,
   );
   const sameNight = Boolean(draft && view?.night?.id === draft.night.id);
+  const reviewedBooking = view?.bookings.find((booking) => booking.id === draft?.table.bookingId);
+  const currentBookingDeposit = fresh && sameNight && sameTable && reviewedBooking
+    ? reviewedBooking.bookingDepositMinor
+    : draft?.bookingDepositMinor;
+  const bookingDepositChanged = (draft?.bookingDepositMinor ?? null) !== (currentBookingDeposit ?? null);
   const categoryChanged = Boolean(
     draft &&
       view &&
@@ -825,7 +833,8 @@ function NightDesk({
     clearDraft();
     setFormVisible(true);
     setBookingDraft(
-      newBookingDraft(action, view.night, table, booking, profile.timezone),
+      newBookingDraft(action, view.night, table, booking, profile.timezone,
+        view.halls.find((item) => item.tables.some(({ id }) => id === table.id))?.name),
     );
     setProblem('');
     setOutcome(undefined);
@@ -860,7 +869,7 @@ function NightDesk({
   return (
     <section className="night-desk night-workspace" aria-label="Рабочая ночь">
       <WorkspaceHeader name={profile.name} view={view} timezone={profile.timezone}
-        menu={[...menu, { label: 'Обновить', run: remote.refresh }]} clubs={clubs} chooseClub={openClub} />
+        menu={[...menu, { label: 'Обновить', run: remote.refresh }]} clubs={clubs} chooseClub={openClub} manage={openManagement} />
       <div className="night-work-content" ref={content}>
       <RemoteState {...remote} />
       {remote.revalidating && (
@@ -952,6 +961,8 @@ function NightDesk({
           sameNight={sameNight}
           sameTable={sameTable}
           categoryChanged={categoryChanged}
+          currentBookingDeposit={currentBookingDeposit}
+          bookingDepositChanged={bookingDepositChanged}
           submit={submit}
           refreshCategories={refreshCategories}
           close={() => {
@@ -1023,7 +1034,8 @@ function NightDesk({
               </p>}
               {!table && <ClubNightTableGrid halls={view.halls} hallId={hallId} setHallId={setHallId}
                 status={statusFilter} setStatus={setStatusFilter} map={tableMap} setMap={setTableMap}
-                picking={Boolean(findingTable)} eligible={pickable} choose={chooseTable} />}
+                picking={Boolean(findingTable)} eligible={pickable} choose={chooseTable}
+                credential={credential} clubId={profile.id} fresh={fresh} refresh={remote.refresh} />}
               {hall && table && (
                 <section className="night-desk-table night-work-table-card" aria-label="Карточка стола">
                   <button type="button" className="po-back" onClick={closeTable}>
@@ -1036,6 +1048,9 @@ function NightDesk({
                   <p className="po-muted">{hall.name}</p>
                   <p className="po-muted">Мест: {table.capacity}
                     {table.seatedGuests !== undefined && ' · Фактически сели: ' + table.seatedGuests}</p>
+                  {table.minDeposit != null && <p className="po-muted">
+                    Минимальный депозит за стол: {Number(table.minDeposit).toLocaleString('ru-RU')} ₽
+                  </p>}
                   {permits(view, permissions.payments) && (
                     <PaymentHistory payments={table.payments} />
                   )}
@@ -1178,6 +1193,8 @@ function DeskForm({
   sameNight,
   sameTable,
   categoryChanged,
+  currentBookingDeposit,
+  bookingDepositChanged,
   heading,
   set,
   submit,
@@ -1193,6 +1210,8 @@ function DeskForm({
   sameNight: boolean;
   sameTable: boolean;
   categoryChanged: boolean;
+  currentBookingDeposit?: string | null;
+  bookingDepositChanged: boolean;
   heading: React.RefObject<HTMLHeadingElement>;
   set: <K extends keyof Draft>(key: K, value: Draft[K]) => void;
   submit: () => void;
@@ -1242,6 +1261,11 @@ function DeskForm({
         </strong>{' '}
         · {dateFormat(draft.night.businessDate)}
       </p>
+      {draft.action === 'seat' && draft.table.bookingId &&
+        <p className="po-muted">Депозит по брони: {currentBookingDeposit == null
+          ? 'нет согласованной суммы' : amountLabel(currentBookingDeposit) + ' ₽'}</p>}
+      {draft.action === 'seat' && bookingDepositChanged &&
+        <p className="po-notice" role="status">Сумма по брони обновилась. Сверьте её с полученной оплатой.</p>}
       {blocking && (
         <p className="po-muted">
           Исходная операция ожидает подтверждения сервера.

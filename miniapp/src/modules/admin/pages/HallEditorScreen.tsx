@@ -23,7 +23,7 @@ import {
   mapAdminErrorMessage,
   mapValidationErrors,
 } from '../utils/adminErrors';
-import ClubTableCreationForm, { TableCreation } from './ClubTableCreationForm';
+import ClubTableCreationForm, { tableDepositRubles, type TableCreation } from './ClubTableCreationForm';
 import HallPlanStage from './HallPlanStage';
 import HallPlanViewer from './HallPlanViewer';
 import {
@@ -46,6 +46,7 @@ const maxFileSizeMb = 5;
 type HallEditorScreenProps<Id extends LayoutId = number> = {
   clubId: Id;
   hallId: Id;
+  hallName?: string;
   api?: HallEditorApi<Id>;
   readOnly?: boolean;
   savedPlan?: boolean;
@@ -79,6 +80,7 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
 function HallEditorSession<Id extends LayoutId = number>({
   clubId,
   hallId,
+  hallName,
   onBack,
   api: suppliedApi,
   readOnly = false,
@@ -427,10 +429,10 @@ function HallEditorSession<Id extends LayoutId = number>({
                 tableNumber: number,
                 capacity: draft.capacity,
                 label: draft.label || `Стол ${number}`,
-                ...(draft.minDeposit && { minDeposit: draft.minDeposit }),
+                minDeposit: draft.minDeposit,
               }),
             ]
-          : await physical.createBatch(hallId, draft.numbers, draft.capacity);
+          : await physical.createBatch(hallId, draft.numbers, draft.capacity, draft.minDeposit);
       if (!mountedRef.current) return;
       setTables((previous) => [...previous, ...created]);
       setCreationOpen(false);
@@ -518,6 +520,13 @@ function HallEditorSession<Id extends LayoutId = number>({
       finishTable();
       return;
     }
+    const depositChanged = physical && selectedTable.bookingLinked &&
+      form.minDeposit !== (selectedTable.bookingDeposit ?? '');
+    const deposit = depositChanged ? tableDepositRubles(form.minDeposit) : undefined;
+    if (depositChanged && deposit === undefined) {
+      setFieldErrors({ payload: 'Укажите минимальный депозит в рублях, до двух знаков после запятой.' });
+      return;
+    }
     setBusy(true);
     setFieldErrors({});
     try {
@@ -529,10 +538,7 @@ function HallEditorSession<Id extends LayoutId = number>({
       const updated = physical
         ? await physical.update(hallId, selectedTable.id, {
             ...payload,
-            ...(selectedTable.bookingLinked &&
-            form.minDeposit !== (selectedTable.bookingDeposit ?? '')
-              ? { minDeposit: form.minDeposit || '0' }
-              : {}),
+            ...(deposit !== undefined ? { minDeposit: deposit } : {}),
           })
         : await api.updateHallTable(hallId, selectedTable.id, payload);
       if (!mountedRef.current) return;
@@ -549,7 +555,9 @@ function HallEditorSession<Id extends LayoutId = number>({
         setFieldErrors(validation);
       } else {
         if (!mountedRef.current) return;
-        setFieldErrors({ payload: mapAdminErrorMessage(normalized) });
+        setFieldErrors({ payload: normalized.code === 'table_capacity_conflict'
+          ? 'У стола есть действующая бронь или резерв на большее число гостей. Укажите вместимость с учётом этих гостей.'
+          : mapAdminErrorMessage(normalized) });
       }
     } finally {
       if (mountedRef.current) {
@@ -617,6 +625,7 @@ function HallEditorSession<Id extends LayoutId = number>({
         (creationOpen ? (
           <div className="mt-3 space-y-2">
             <ClubTableCreationForm
+              hallName={hallName}
               locations={reservedTableLocations}
               reserved={physical.reservedNumbers()}
               busy={busy || readOnly}
@@ -790,8 +799,9 @@ function HallEditorSession<Id extends LayoutId = number>({
             </div>
             {physical && selectedTable.bookingLinked && (
               <label className="block text-sm text-gray-600">
-                Минимальный депозит в единицах booking
+                Минимальный депозит за стол, ₽
                 <input
+                  aria-label="Минимальный депозит за стол, ₽"
                   inputMode="decimal"
                   className="mt-1 block min-h-[44px] w-full rounded border border-gray-300 px-3 text-gray-900"
                   value={form.minDeposit}
@@ -803,6 +813,7 @@ function HallEditorSession<Id extends LayoutId = number>({
                     }))
                   }
                 />
+                <small>0 ₽ — без минимального депозита.</small>
               </label>
             )}
             {fieldErrors.payload && (
@@ -814,7 +825,7 @@ function HallEditorSession<Id extends LayoutId = number>({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  className="min-h-[44px] flex-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  className="club-table-edit-save min-h-[44px] flex-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   onClick={handleFinishTable}
                   disabled={busy}
                 >

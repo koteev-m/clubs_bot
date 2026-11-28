@@ -274,18 +274,26 @@ it('explains a club-wide number conflict and preserves single range and arbitrar
     target: { value: '8' },
   });
   fireEvent.submit(screen.getByRole('form', { name: 'Создание столов' }));
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Минимальный депозит за стол, ₽'), {
+    target: { value: '0' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Создание столов' }));
   expect(save).toHaveBeenLastCalledWith(
-    expect.objectContaining({ numbers: [8], mode: 'single' }),
+    expect.objectContaining({ numbers: [8], mode: 'single', minDeposit: '0' }),
   );
   fireEvent.change(screen.getByLabelText('Способ добавления'), {
     target: { value: 'range' },
+  });
+  fireEvent.change(screen.getByLabelText('Минимальный депозит за каждый стол, ₽'), {
+    target: { value: '30000,50' },
   });
   fireEvent.change(screen.getByLabelText('Количество столов'), {
     target: { value: '3' },
   });
   fireEvent.submit(screen.getByRole('form', { name: 'Создание столов' }));
   expect(save).toHaveBeenLastCalledWith(
-    expect.objectContaining({ numbers: [8, 9, 10], mode: 'range' }),
+    expect.objectContaining({ numbers: [8, 9, 10], mode: 'range', minDeposit: '30000.50' }),
   );
   fireEvent.change(screen.getByLabelText('Способ добавления'), {
     target: { value: 'list' },

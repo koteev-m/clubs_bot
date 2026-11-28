@@ -56,6 +56,7 @@ internal fun Application.registerClientLayoutRoutes(repository: ClientOnboarding
                 http.mutate(call, OnboardingMutation.CLUB_TABLE_UPDATE, "hallId", "tableId")
             }
             get("/halls/{hallId}/plan") { http.plan(call) }
+            get("/operations/halls/{hallId}/plan/{version}/{sha256}") { http.plan(call, working = true) }
             post("/halls/{hallId}/plan") { http.upload(call) }
             post("/halls/{hallId}/plan/remove") {
                 http.mutate(call, OnboardingMutation.CLUB_PLAN_REMOVE, "hallId")
@@ -98,24 +99,38 @@ private class ClientLayoutHttp(
         call.respond(repository.mutate(call.layoutActor(), operation, clubId, JsonObject(body + ids), key))
     }
 
-    suspend fun plan(call: ApplicationCall) =
-        call.layoutResponse {
-            val plan =
-                repository.read(
-                    call.layoutActor(),
-                    OnboardingRead.CLUB_PLAN_GET,
-                    call.layoutId("clubId"),
-                    JsonObject(mapOf("hallId" to JsonPrimitive(call.layoutId("hallId").toString()))),
+    suspend fun plan(
+        call: ApplicationCall,
+        working: Boolean = false,
+    ) = call.layoutResponse {
+        val reference =
+            if (working) {
+                mapOf(
+                    "layoutRevision" to JsonPrimitive(call.layoutId("version").toString()),
+                    "sha256" to
+                        JsonPrimitive(
+                            call.parameters["sha256"]?.takeIf { PLAN_SHA256.matches(it) } ?: invalidLayout(),
+                        ),
                 )
-            // Authorization and resource-parent matching have completed inside the fresh repository read.
-            // Client images deliberately have no 304 path: no cached bytes outlive a grant check.
-            val type = plan.getValue("contentType").jsonPrimitive.content
-            check(type in PLAN_TYPES)
-            val bytes = Base64.getDecoder().decode(plan.getValue("bytesBase64").jsonPrimitive.content)
-            check(bytes.isNotEmpty() && bytes.size <= MAX_CLIENT_PLAN_BYTES)
-            call.response.headers.append("X-Content-Type-Options", "nosniff")
-            call.respondBytes(bytes, ContentType.parse(type), HttpStatusCode.OK)
-        }
+            } else {
+                emptyMap()
+            }
+        val plan =
+            repository.read(
+                call.layoutActor(),
+                OnboardingRead.CLUB_PLAN_GET,
+                call.layoutId("clubId"),
+                JsonObject(reference + ("hallId" to JsonPrimitive(call.layoutId("hallId").toString()))),
+            )
+        // Authorization and resource-parent matching have completed inside the fresh repository read.
+        // Client images deliberately have no 304 path: no cached bytes outlive a grant check.
+        val type = plan.getValue("contentType").jsonPrimitive.content
+        check(type in PLAN_TYPES)
+        val bytes = Base64.getDecoder().decode(plan.getValue("bytesBase64").jsonPrimitive.content)
+        check(bytes.isNotEmpty() && bytes.size <= MAX_CLIENT_PLAN_BYTES)
+        call.response.headers.append("X-Content-Type-Options", "nosniff")
+        call.respondBytes(bytes, ContentType.parse(type), HttpStatusCode.OK)
+    }
 
     suspend fun upload(call: ApplicationCall) =
         call.layoutResponse {
@@ -194,7 +209,8 @@ private suspend fun ApplicationCall.layoutResponse(block: suspend () -> Unit) {
                 "payload_too_large" -> HttpStatusCode.PayloadTooLarge
                 "unsupported_media_type" -> HttpStatusCode.UnsupportedMediaType
                 "version_conflict", "idempotency_conflict", "hall_name_conflict", "table_number_conflict",
-                "table_link_required", "hall_plan_required", "zone_name_conflict", "zone_in_use", "last_zone",
+                "table_link_required", "table_capacity_conflict", "hall_plan_required",
+                "zone_name_conflict", "zone_in_use", "last_zone",
                 ->
                     HttpStatusCode.Conflict
                 else -> HttpStatusCode.InternalServerError
@@ -214,3 +230,5 @@ private const val MAX_LAYOUT_BODY_BYTES = 16_384L
 private val POSITIVE_LAYOUT_ID = Regex("[1-9][0-9]*")
 private val LAYOUT_KEY = Regex("[A-Za-z0-9._:-]{8,128}")
 private val PLAN_TYPES = setOf("image/png", "image/jpeg")
+
+private val PLAN_SHA256 = Regex("[a-f0-9]{64}")

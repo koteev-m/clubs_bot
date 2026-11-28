@@ -47,6 +47,14 @@ class BookingServiceHoldErrorMappingTest {
         }
 
     @Test
+    fun `hold maps a concurrent table capacity change to domain conflict`() =
+        runTest {
+            val fixture = fixture(BookingCoreError.TableOccupied)
+            assertEquals(BookingCmdResult.DuplicateActiveBooking, fixture.service.hold(REQUEST, IDEMPOTENCY_KEY))
+            verify(exactly = 0) { fixture.cacheInvalidator.invalidateTables(any(), any()) }
+        }
+
+    @Test
     fun `hold keeps unexpected repository failures fail closed`() =
         runTest {
             val fixture = fixture(BookingCoreError.UnexpectedFailure)

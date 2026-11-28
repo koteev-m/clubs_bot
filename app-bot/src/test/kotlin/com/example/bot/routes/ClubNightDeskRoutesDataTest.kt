@@ -379,7 +379,131 @@ open class ClubNightDeskRoutesDataTest : ClientManagerRoutesFixture() {
             }
         }
 
-    protected suspend fun ApplicationTestBuilder.setup(source: DataSource): DeskFixture {
+    @Test
+    fun `booking agreement is independent of money and survives edits move and seating`() =
+        database { source ->
+            withApp(source) {
+                val desk = setup(source, openShift = false)
+                val original = source.scalar("SELECT booking_table_id FROM hall_tables WHERE id=${desk.table}")
+                source.execute("UPDATE tables SET min_deposit=30000 WHERE id=$original")
+                val create =
+                    JsonObject(
+                        obj("action" to "create_booking", "nightId" to desk.night, "tableId" to desk.table) +
+                            obj("guestName" to "Guest") + ("guests" to JsonPrimitive(3)),
+                    )
+                val invalid =
+                    listOf(JsonPrimitive("2999999"), JsonPrimitive("-1"), JsonPrimitive("5.00"), JsonPrimitive(5000000))
+                for (amount in invalid) {
+                    val command = JsonObject(create + ("bookingDepositMinor" to amount))
+                    assertEquals(HttpStatusCode.BadRequest, requestAs(desk.path, THIRD_MANAGER, command).status)
+                }
+                val key = UUID.randomUUID().toString()
+                val created = ok(desk.path, THIRD_MANAGER, create, key = key)
+                assertEquals(created, ok(desk.path, THIRD_MANAGER, create, key = key))
+                assertEquals("3000000", agreement(desk).string("bookingDepositMinor"))
+
+                val edit = bookingAgreementCommand(desk, "update_booking")
+                val increase =
+                    JsonObject(edit + obj("bookingDepositMinor" to "5000000") + ("guests" to JsonPrimitive(3)))
+                val editKey = UUID.randomUUID().toString()
+                val edited = ok(desk.path, THIRD_MANAGER, increase, key = editKey)
+                assertEquals(edited, ok(desk.path, THIRD_MANAGER, increase, key = editKey))
+                assertEquals(HttpStatusCode.Conflict, requestAs(desk.path, THIRD_MANAGER, increase).status)
+                val destination = higherMinimumTable(desk, source)
+                val move =
+                    JsonObject(bookingAgreementCommand(desk, "move_booking") + obj("destinationTableId" to destination))
+                ok(desk.path, THIRD_MANAGER, move)
+                val guestUpdate =
+                    bookingAgreementCommand(desk, "update_booking", destination) + ("guests" to JsonPrimitive(4))
+                val lower = JsonObject(guestUpdate + obj("bookingDepositMinor" to "5100000"))
+                assertEquals(HttpStatusCode.BadRequest, requestAs(desk.path, THIRD_MANAGER, lower).status)
+                ok(desk.path, THIRD_MANAGER, JsonObject(guestUpdate))
+                assertEquals("4", agreement(desk).string("guests"))
+                assertEquals("5000000", agreement(desk).string("bookingDepositMinor"))
+                assertEquals("30000.00", agreement(desk).string("minDeposit"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM bookings WHERE total_deposit <> 0"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM shift_reports"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM table_deposit_operations"))
+                val attemptedEdit =
+                    JsonObject(
+                        bookingAgreementCommand(desk, "update_booking", destination) +
+                            obj("bookingDepositMinor" to "6000000") + ("guests" to JsonPrimitive(4)),
+                    )
+                ok(
+                    desk.path,
+                    THIRD_MANAGER,
+                    JsonObject(
+                        obj(
+                            "action" to "seat",
+                            "nightId" to desk.night,
+                            "tableId" to destination,
+                            "bookingId" to created.string("bookingId"),
+                            "mode" to "BILL",
+                        ) + ("expectedLastSessionId" to JsonNull),
+                    ),
+                )
+                assertEquals("SEATED", agreement(desk).string("status"))
+                assertEquals("5000000", agreement(desk).string("bookingDepositMinor"))
+                assertEquals(HttpStatusCode.Conflict, requestAs(desk.path, THIRD_MANAGER, attemptedEdit).status)
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM table_deposit_operations"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM shift_reports"))
+            }
+        }
+
+    private suspend fun ApplicationTestBuilder.agreement(desk: DeskFixture): JsonObject =
+        ok(desk.path, THIRD_MANAGER)["bookings"]!!.jsonArray.single().jsonObject
+
+    private suspend fun ApplicationTestBuilder.bookingAgreementCommand(
+        desk: DeskFixture,
+        action: String,
+        tableId: String = desk.table,
+    ): JsonObject {
+        val booking = agreement(desk)
+        return obj(
+            "action" to action,
+            "nightId" to desk.night,
+            "tableId" to tableId,
+            "bookingId" to booking.string("id"),
+            "expectedUpdatedAt" to booking.string("updatedAt"),
+        )
+    }
+
+    private suspend fun ApplicationTestBuilder.higherMinimumTable(
+        desk: DeskFixture,
+        source: DataSource,
+    ): String {
+        val club = "$C/clubs/${desk.club}"
+        val hall = ok("$club/layout", SECOND_MANAGER)["halls"]!!.jsonArray.single().jsonObject
+        val revision = hall.string("layoutRevision")
+        val layout =
+            ok(
+                "$club/halls/${hall.string("id")}/tables",
+                SECOND_MANAGER,
+                JsonObject(
+                    obj("label" to "Стол 2", "expectedVersion" to revision, "minDeposit" to "55000") +
+                        ("tableNumber" to JsonPrimitive(2)) + ("capacity" to JsonPrimitive(6)),
+                ),
+            )
+        val tables =
+            layout["halls"]!!
+                .jsonArray
+                .single()
+                .jsonObject["tables"]!!
+                .jsonArray
+        val tableId = tables.last().jsonObject.string("id")
+        val bookingTable = source.scalar("SELECT booking_table_id FROM hall_tables WHERE id=$tableId")
+        source.execute(
+            "UPDATE tables SET active=TRUE WHERE id=$bookingTable",
+            "INSERT INTO booking_cutover_fences(club_id,canonical_night_id,booking_table_id) " +
+                "VALUES (${desk.club},${desk.night},$bookingTable)",
+        )
+        return tableId
+    }
+
+    protected suspend fun ApplicationTestBuilder.setup(
+        source: DataSource,
+        openShift: Boolean = true,
+    ): DeskFixture {
         val (club, other) = business(source)
         val roster = "$C/clubs/$club/managers"
         claim(invite(roster, RECIPIENT, "CLUB_MANAGER"), SECOND_MANAGER)
@@ -416,9 +540,13 @@ open class ClubNightDeskRoutesDataTest : ClientManagerRoutesFixture() {
                 "legacy_start_at,legacy_end_at) " +
                 "VALUES ($club,8802,8801,'$start','$end')",
             "INSERT INTO booking_cutover_fences(club_id,canonical_night_id,booking_table_id) VALUES ($club,8802,$slot)",
-            "INSERT INTO shift_reports(club_id,night_start_utc,status,created_at,updated_at) VALUES " +
-                "($club,'$start','DRAFT','$now','$now')",
         )
+        if (openShift) {
+            source.execute(
+                "INSERT INTO shift_reports(club_id,night_start_utc,status,created_at,updated_at) VALUES " +
+                    "($club,'$start','DRAFT','$now','$now')",
+            )
+        }
         val desk = DeskFixture(club, other, "8802", table, "$C/clubs/$club/operations")
         assertEquals(
             "free",

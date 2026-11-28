@@ -64,8 +64,8 @@ internal class ClubDeskReservations(
                 DeskResult()
             }
             "create_booking" -> {
-                body.only(BASE + setOf("guestName", "phone", "guests", "arrivalBy", "note"))
-                DeskResult(bookingId = create(table, body))
+                body.only(BASE + setOf("guestName", "phone", "guests", "arrivalBy", "note", BOOKING_DEPOSIT_FIELD))
+                create(table, body)
             }
             else -> changeBooking(action, table, body)
         }
@@ -79,20 +79,15 @@ internal class ClubDeskReservations(
         val booking = requireBooking(table, id, setOf("BOOKED"))
         if (body.string("expectedUpdatedAt") != booking.instant("updated_at").toString()) fail("version_conflict")
         val fields = BASE + setOf("bookingId", "expectedUpdatedAt")
-        when (action) {
-            "update_booking" -> {
-                body.only(fields + setOf("arrivalBy", "guests"))
-                sql.update(
-                    "UPDATE bookings SET arrival_by=?,guests_count=?,updated_at=? WHERE id=? AND club_id=?",
-                    arrival(body),
-                    body.optionalCount("guests", minOf(MAX_BOOKING_GUESTS, table.capacity)) ?: fail("validation_error"),
-                    now,
-                    id,
-                    club,
-                )
+        if (action == "update_booking" || action == "move_booking") {
+            return if (action == "move_booking") {
+                move(table, body, id, booking, fields)
+            } else {
+                body.only(fields + setOf("arrivalBy", "guests", BOOKING_DEPOSIT_FIELD))
+                update(table, body, id, booking)
             }
-            "move_booking" -> return move(table, body, id, booking, fields)
-
+        }
+        when (action) {
             "cancel_booking" -> {
                 body.only(fields + "reason")
                 status(id, "CANCELLED", body.text("reason", DESK_NOTE_LENGTH, required = true))
@@ -118,6 +113,40 @@ internal class ClubDeskReservations(
             else -> fail("validation_error")
         }
         return DeskResult(bookingId = id)
+    }
+
+    private fun update(
+        table: DeskTable,
+        body: JsonObject,
+        id: UUID,
+        booking: DbRow,
+    ): DeskResult {
+        val previous = booking["staff_booking_deposit_minor"]?.toLong()
+        val agreed = if (BOOKING_DEPOSIT_FIELD in body) body.bookingDepositMinor() else previous
+        if (agreed != null && agreed != previous) {
+            val minimum = maxOf(table.minDeposit.depositMinor(), checkNotNull(booking["min_deposit"]).depositMinor())
+            if (agreed < minimum) fail("validation_error")
+        }
+        sql.update(
+            "UPDATE bookings SET arrival_by=?,guests_count=?,staff_booking_deposit_minor=?,updated_at=? " +
+                "WHERE id=? AND club_id=?",
+            arrival(body),
+            body.optionalCount("guests", minOf(MAX_BOOKING_GUESTS, table.capacity)) ?: fail("validation_error"),
+            agreed,
+            now,
+            id,
+            club,
+        )
+        return DeskResult(
+            bookingId = id,
+            auditDetails =
+                buildJsonObject {
+                    if (agreed != previous) {
+                        put("previousBookingDepositMinor", previous?.toString())
+                        put(BOOKING_DEPOSIT_FIELD, agreed?.toString())
+                    }
+                },
+        )
     }
 
     private fun move(
@@ -175,18 +204,22 @@ internal class ClubDeskReservations(
     private fun create(
         table: DeskTable,
         body: JsonObject,
-    ): UUID {
+    ): DeskResult {
         state.requireAvailable(table)
         val name = body.text("guestName", MAX_GUEST_NAME, required = true)
         val phone = body.text("phone", MAX_PHONE).ifBlank { null }
         if (phone != null && !phone.matches(Regex("\\+[1-9][0-9]{6,14}"))) fail("validation_error")
         val count = body.optionalCount("guests", minOf(MAX_BOOKING_GUESTS, table.capacity)) ?: fail("validation_error")
+        val minimum = table.minDeposit.depositMinor()
+        val agreed = if (BOOKING_DEPOSIT_FIELD in body) body.bookingDepositMinor() else minimum
+        if (agreed < minimum) fail("validation_error")
         val id = UUID.randomUUID()
         sql.update(
             "INSERT INTO bookings(id,event_id,club_id,table_id,table_number,guest_name,phone_e164,guests_count," +
                 "min_deposit,total_deposit,arrival_by,status,qr_secret,idempotency_key," +
                 "created_at,updated_at,slot_start,slot_end," +
-                "staff_note,staff_created) VALUES (?,?,?,?,?,?,?,?,?,0,?,'BOOKED',?,?,?,?,?,?,?,TRUE)",
+                "staff_note,staff_created,staff_booking_deposit_minor) " +
+                "VALUES (?,?,?,?,?,?,?,?,?,0,?,'BOOKED',?,?,?,?,?,?,?,TRUE,?)",
             id,
             state.eventId,
             club,
@@ -204,9 +237,18 @@ internal class ClubDeskReservations(
             night.legacyStart,
             night.end,
             body.text("note", DESK_NOTE_LENGTH).ifBlank { null },
+            agreed,
         )
-        return id
+        return DeskResult(
+            bookingId = id,
+            auditDetails = buildJsonObject { put(BOOKING_DEPOSIT_FIELD, agreed.toString()) },
+        )
     }
+
+    private fun JsonObject.bookingDepositMinor(): Long =
+        string(BOOKING_DEPOSIT_FIELD)?.takeIf(BOOKING_DEPOSIT_MINOR::matches)?.toLong() ?: fail("validation_error")
+
+    private fun String.depositMinor(): Long = toBigDecimal().movePointRight(2).longValueExact()
 
     private fun requireBooking(
         table: DeskTable,
@@ -215,7 +257,8 @@ internal class ClubDeskReservations(
     ): DbRow =
         sql
             .row(
-                "SELECT id,guest_user_id,status,arrival_by,updated_at,guests_count,staff_wait_until " +
+                "SELECT id,guest_user_id,status,arrival_by,updated_at,guests_count,staff_wait_until," +
+                    "min_deposit,staff_booking_deposit_minor " +
                     "FROM bookings WHERE " +
                     "id=? AND club_id=? AND table_id=? AND event_id=? AND slot_start=? AND slot_end=? " +
                     "AND staff_closed_session_id IS NULL FOR UPDATE",
@@ -282,6 +325,8 @@ internal class ClubDeskReservations(
         }
 
     companion object {
+        private const val BOOKING_DEPOSIT_FIELD = "bookingDepositMinor"
+        private val BOOKING_DEPOSIT_MINOR = Regex("0|[1-9][0-9]{0,11}")
         private val BASE = setOf("action", "nightId", "tableId")
         val actions =
             setOf(

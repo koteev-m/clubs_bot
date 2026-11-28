@@ -72,6 +72,7 @@ internal class ClubLayoutTables(
             if ("minDeposit" in body) fail("table_link_required")
             sql.update("UPDATE hall_tables SET table_number=?,capacity=? WHERE id=?", number, capacity, id)
         } else {
+            if (capacity < old.long("capacity")) requireCapacity(clubId, bookingId, capacity)
             updateBooking(clubId, bookingId, number, capacity, body)
         }
         if ("zoneId" in body) {
@@ -83,13 +84,14 @@ internal class ClubLayoutTables(
     }
 
     private fun batch(body: JsonObject): List<TableDraft> {
-        body.only(HALL_FIELDS + listOf("tableNumbers", "capacity"))
+        body.only(HALL_FIELDS + listOf("tableNumbers", "capacity", "minDeposit"))
         val values = body["tableNumbers"] as? JsonArray ?: fail("validation_error")
         if (values.size !in 1..MAX_BATCH) fail("validation_error")
         val numbers = values.map { positiveNumber(it as? JsonPrimitive) }
         if (numbers.toSet().size != numbers.size) fail("table_number_conflict")
         val capacity = body.capacity(MAX_BOOKING_CAPACITY)
-        return numbers.map { TableDraft(it, "Стол $it", capacity, BigDecimal.ZERO, null) }
+        val deposit = body.deposit()
+        return numbers.map { TableDraft(it, "Стол $it", capacity, deposit, null) }
     }
 
     private fun insert(
@@ -130,6 +132,33 @@ internal class ClubLayoutTables(
             session.now,
             session.now,
         )
+    }
+
+    private fun requireCapacity(
+        clubId: Long,
+        tableId: Long,
+        capacity: Int,
+    ) {
+        // The caller holds club admission; the row lock also coordinates with canonical booking writers.
+        sql.row("SELECT id FROM tables WHERE id=? AND club_id=? FOR UPDATE", tableId, clubId) ?: fail("not_found")
+        val booking =
+            sql.row(
+                "SELECT b.id FROM bookings b " +
+                    "WHERE b.club_id=? AND b.table_id=? AND b.guests_count>? " +
+                    "AND b.status IN ('BOOKED','SEATED') AND b.slot_end>? LIMIT 1",
+                clubId,
+                tableId,
+                capacity,
+                session.now,
+            )
+        val hold =
+            sql.row(
+                "SELECT id FROM booking_holds WHERE table_id=? AND guests_count>? AND expires_at>? LIMIT 1",
+                tableId,
+                capacity,
+                session.now,
+            )
+        if (booking != null || hold != null) fail("table_capacity_conflict")
     }
 
     private fun updateBooking(

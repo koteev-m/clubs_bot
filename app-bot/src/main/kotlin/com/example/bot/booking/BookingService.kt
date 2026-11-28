@@ -147,6 +147,7 @@ class BookingService(
                     when (result.error) {
                         BookingCoreError.DuplicateActiveBooking,
                         BookingCoreError.ActiveHoldExists,
+                        BookingCoreError.TableOccupied,
                         -> {
                             log("booking.hold", req.clubId, "duplicate_active", null, entityId = null)
                             BookingCmdResult.DuplicateActiveBooking

@@ -256,10 +256,10 @@ describe('connected onboarding screens', () => {
     expect(location.search).toContain('screen=applications');
   });
 
-  it('protects unsent membership grants on browser Back and opening another platform detail', async () => {
+  it('protects unsent membership grants on browser Back and switching client sections', async () => {
     history.replaceState({ ownerTrail: [] }, '', '/app?mode=platform-owner&screen=clients');
     history.pushState({ ownerTrail: [JSON.stringify({ type: 'clients' })] }, '',
-      '/app?mode=platform-owner&screen=client&resource=20');
+      '/app?mode=platform-owner&screen=client&resource=20&section=people');
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => response({
       id: '20', name: 'Организация', clubs: [], invitations: [invitation],
       members: [{ userId: '90', version: '1', active: false, permissions: [],
@@ -269,11 +269,11 @@ describe('connected onboarding screens', () => {
     render(<PlatformOnboarding credential="owner" />);
     const grant = await screen.findByRole('checkbox', { name: 'Управление заявками' }) as HTMLInputElement;
     fireEvent.click(grant);
-    fireEvent.click(screen.getByRole('button', { name: /Candidate/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Приглашения' }));
     const moves = vi.spyOn(history, 'go');
     act(() => history.back());
     await waitFor(() => expect(moves).toHaveBeenCalledWith(1));
-    await waitFor(() => expect(location.search).toContain('screen=client&resource=20'));
+    await waitFor(() => expect(location.search).toContain('screen=client&resource=20&section=people'));
     expect(confirm).toHaveBeenCalledTimes(2);
     expect(grant.checked).toBe(true);
   });

@@ -422,8 +422,33 @@ it('drops private state after a wake-up denial and rejects a neighbouring club p
   ).toBeNull();
 });
 
+it('shows a refreshed agreement during seating and preserves the actual amount entered', async () => {
+  const current = view();
+  current.halls[0].tables[0] = { ...free, status: 'reserved', bookingId: 'book' };
+  current.bookings = [{
+    id: 'book', tableId: '1', guestName: 'Гость', guests: 3, status: 'BOOKED',
+    updatedAt: '2026-11-27T18:20:30Z', bookingDepositMinor: '3000000',
+  }];
+  useServer(() => current, vi.fn());
+  mount();
+  await openTable();
+  fireEvent.click(await screen.findByRole('button', { name: 'Посадить · Стол 1' }));
+  const form = screen.getByRole('form', { name: 'Посадка гостей' });
+  expect(within(form).getByText(/Депозит по брони: 30\s000/)).toBeTruthy();
+  amount(form, '35000');
+  current.bookings = [{ ...current.bookings[0], bookingDepositMinor: '5000000' }];
+  act(() => window.dispatchEvent(new Event('focus')));
+  await within(form).findByText(/Депозит по брони: 50\s000/);
+  await within(form).findByText(/Сумма по брони обновилась/);
+  expect((within(form).getByLabelText(/Фактически получено/) as HTMLInputElement).value).toBe('35000');
+});
+
 it('sends manual booking and booking schedule changes for the exact nightly table', async () => {
   const current = view();
+  current.night = {
+    id: '7', businessDate: '2026-11-27',
+    opensAt: '2026-11-27T21:00:00Z', closesAt: '2026-11-28T09:00:00Z',
+  };
   const writes = vi.fn((command: Command) => response(receipt(command)));
   useServer(() => current, writes);
   mount();
@@ -439,7 +464,7 @@ it('sends manual booking and booking schedule changes for the exact nightly tabl
     target: { value: '3' },
   });
   fireEvent.change(within(form).getByLabelText(/Ожидаемый приход/), {
-    target: { value: '2026-11-28T01:30' },
+    target: { value: '01:30' },
   });
   fireEvent.click(within(form).getByRole('button', { name: 'Создать бронь' }));
   await screen.findByText('Стол 1 · бронь создана');
@@ -451,6 +476,7 @@ it('sends manual booking and booking schedule changes for the exact nightly tabl
       guestName: 'Новый гость',
       guests: 3,
       arrivalBy: '2026-11-27T22:30:00.000Z',
+      bookingDepositMinor: '0',
     },
     expect.any(String),
   );

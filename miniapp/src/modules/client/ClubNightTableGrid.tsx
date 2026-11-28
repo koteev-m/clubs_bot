@@ -1,4 +1,5 @@
 import { Grid2X2, Map } from 'lucide-react';
+import WorkingHallPlan from './WorkingHallPlan';
 import { tableName } from './clubNightDesk.types';
 import type { Hall, Table, TableStatus } from './clubNightDesk.types';
 
@@ -18,9 +19,13 @@ const filters = [
 ] as const;
 
 export default function ClubNightTableGrid({
-  halls, hallId, setHallId, status, setStatus, map, setMap, picking, eligible, choose,
+  halls, hallId, setHallId, status, setStatus, map, setMap, picking, eligible, choose, credential, clubId, fresh, refresh,
 }: {
   halls: Hall[];
+  credential: string;
+  clubId: string;
+  fresh: boolean;
+  refresh: () => void;
   hallId: string;
   setHallId: (id: string) => void;
   status?: TableStatus;
@@ -69,22 +74,13 @@ export default function ClubNightTableGrid({
       {visibleHalls.map((hall) => {
         const tables = visibleTables(hall);
         if (!tables.length) return null;
-        const positioned = map ? tables.filter(({ x, y }) => x !== undefined && y !== undefined) : [];
-        const grid = map ? tables.filter(({ x, y }) => x === undefined || y === undefined) : tables;
+        const grid = tables;
         return (
           <section key={hall.id} className="night-grid-hall" aria-label={hall.name}>
             <h4>{hall.name}</h4>
-            {positioned.length > 0 && (
-              <div className="night-work-map" aria-label={'Схема · ' + hall.name}>
-                {positioned.map((table) => (
-                  <button key={table.id} type="button" data-status={table.status} title={tableName(table)}
-                    style={{ left: `clamp(22px, ${(table.x ?? 0) * 100}%, calc(100% - 22px))`, top: `clamp(22px, ${(table.y ?? 0) * 100}%, calc(100% - 22px))` }}
-                    onClick={() => choose(hall, table)} aria-label={tableName(table) + ' · ' + tableStatus[table.status]}>
-                    {table.number}
-                  </button>
-                ))}
-              </div>
-            )}
+            {map && (fresh ? <WorkingHallPlan key={hall.plan?.layoutRevision + ':' + hall.plan?.sha256}
+              hall={hall} tables={tables} credential={credential} clubId={clubId} refresh={refresh}
+              grid={() => setMap(false)} choose={(table) => choose(hall, table)} /> : <p role="status">Проверяем доступ к плану…</p>)}
             {grid.length > 0 && <ul className="night-grid-tiles">{grid.map((table) => (
               <li key={table.id}>
                 <button type="button" className="night-grid-tile" data-status={table.status} aria-label={tableName(table)}

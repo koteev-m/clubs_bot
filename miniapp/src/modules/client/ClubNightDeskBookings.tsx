@@ -52,6 +52,9 @@ export type BookingDraft = {
   phone: string;
   guests: string;
   localTime: string;
+  hallName?: string;
+  deposit: string;
+  depositEdited?: boolean;
   preferredInstant: string;
   arrivalEdited?: boolean;
   note: string;
@@ -65,6 +68,7 @@ export function newBookingDraft(
   table: Table,
   booking: Booking | undefined,
   timezone: string,
+  hallName?: string,
 ): BookingDraft {
   const instant =
     action === 'extend_wait' ? booking?.waitUntil : booking?.arrivalBy;
@@ -73,10 +77,13 @@ export function newBookingDraft(
     night,
     table,
     booking,
+    hallName,
+    deposit: booking?.bookingDepositMinor != null ? minorToRubles(booking.bookingDepositMinor) :
+      action === 'create_booking' ? minorToRubles(String(rublesToMinor(table.minDeposit ?? '0') ?? 0n)) : '',
     guestName: '',
     phone: '',
     guests: booking?.guests.toString() ?? '',
-    localTime: instant ? clubLocalTime(instant, timezone) : '',
+    localTime: instant ? (action === 'extend_wait' ? clubLocalTime(instant, timezone) : clubLocalTime(instant, timezone).slice(11)) : '',
     preferredInstant: instant ?? '',
     note: '',
     reason: '',
@@ -270,6 +277,7 @@ function BookingCard({
         : (booking.source ?? 'Источник не подтверждён'),
     ],
     ['Минимальный депозит', booking.minDeposit ?? 'Не указан'],
+    ['Депозит по брони', booking.bookingDepositMinor == null ? 'Нет согласованной суммы' : formatBookingDeposit(booking.bookingDepositMinor)],
     [
       'Ожидание до',
       booking.waitUntil
@@ -376,11 +384,17 @@ export function BookingForm({
     action === 'create_booking' || action === 'update_booking';
   const moving = action === 'move_booking';
   const asksTime = optionalTime || action === 'extend_wait' || moving;
+  const extending = action === 'extend_wait';
   const [date, time] = draft.localTime.split('T');
-  const times =
-    time && /^\d{4}-\d{2}-\d{2}$/.test(date)
-      ? wallTimeOptions(date, time, timezone)
-      : [];
+  const times = extending
+    ? time && /^\d{4}-\d{2}-\d{2}$/.test(date) ? wallTimeOptions(date, time, timezone) : []
+    : arrivalOptions(night, draft.localTime, timezone);
+  const preferred = times.find((candidate) => Date.parse(candidate) === Date.parse(draft.preferredInstant));
+  const original = !extending && !draft.arrivalEdited && booking?.arrivalBy;
+  const arrival = original || (times.length === 1 ? times[0] : preferred);
+  const currentMinimum = rublesToMinor(current?.minDeposit ?? table.minDeposit ?? '0') ?? 0n;
+  const savedMinimum = rublesToMinor(booking?.minDeposit ?? '0') ?? 0n;
+  const minimum = currentMinimum > savedMinimum ? currentMinimum : savedMinimum;
   const moveOptions =
     view?.halls.flatMap((hall) =>
       hall.tables
@@ -417,11 +431,7 @@ export function BookingForm({
       body.guests = guests;
     }
     if (asksTime && (!moving || draft.arrivalEdited) && (draft.localTime || action === 'extend_wait')) {
-      const preferred = times.find(
-        (candidate) =>
-          Date.parse(candidate) === Date.parse(draft.preferredInstant),
-      );
-      const instant = times.length === 1 ? times[0] : preferred;
+      const instant = arrival;
       if (!instant) {
         setValidation(
           'Укажите существующее местное время и выберите смещение, если время повторяется.',
@@ -431,6 +441,14 @@ export function BookingForm({
       if (action === 'extend_wait')
         body.waitUntil = new Date(instant).toISOString();
       else body.arrivalBy = new Date(instant).toISOString();
+    }
+    if (action === 'create_booking' || (action === 'update_booking' && draft.depositEdited)) {
+      const deposit = rublesToMinor(draft.deposit);
+      if (deposit === null || (deposit < minimum && String(deposit) !== booking?.bookingDepositMinor)) {
+        setValidation('Укажите депозит не ниже ' + formatBookingDeposit(String(minimum)) + '.');
+        return;
+      }
+      body.bookingDepositMinor = String(deposit);
     }
     if (action === 'create_booking') {
       if (!draft.guestName.trim()) {
@@ -491,7 +509,8 @@ export function BookingForm({
         </div>
       ) : <h3>{titles[action]}</h3>}
       <p>
-        <strong>{tableName(table)}</strong> · {dateFormat(night.businessDate)}
+        Ночь {dateFormat(night.businessDate)} · <strong>{draft.hallName ? draft.hallName + ' · ' : ''}{tableName(table)}</strong>
+        {action === 'create_booking' && ' · мест: ' + table.capacity}
         {booking?.guestName && ' · ' + booking.guestName}
       </p>
       {scopeChanged && (
@@ -527,11 +546,18 @@ export function BookingForm({
             />
           </label>
         )}
+        {optionalTime && (
+          <label className="ob-field">
+            Депозит по брони, ₽
+            <input inputMode="decimal" value={draft.deposit} onChange={(event) => update({ deposit: event.target.value, depositEdited: true })} />
+            <small>Минимум: {formatBookingDeposit(String(minimum))}. Оплата отдельно.</small>
+          </label>
+        )}
         {asksTime && (
           <label className="ob-field">
-            {action === 'extend_wait' ? 'Ожидать до' : 'Ожидаемый приход'} · время клуба
+            {extending ? 'Ожидать до' : 'Ожидаемый приход'} · время клуба
             <input
-              type="datetime-local"
+              type={extending ? "datetime-local" : "time"}
               value={draft.localTime}
               required={action === 'extend_wait' || (moving && Boolean(booking?.arrivalBy))}
               onChange={(event) =>
@@ -540,9 +566,13 @@ export function BookingForm({
             />
           </label>
         )}
-        {times.length > 1 && (!moving || draft.arrivalEdited) && (
+        {asksTime && !extending && draft.localTime && (
+          <small className="po-muted">{arrival ? 'Приход: ' + arrivalLabel(arrival, timezone) :
+            times.length ? 'Выберите точное время прихода.' : 'Время вне интервала ночи или не существует в часовом поясе клуба.'}</small>
+        )}
+        {times.length > 1 && !original && (!moving || draft.arrivalEdited) && (
           <label className="ob-field">
-            Какое смещение используется
+            Какое время используется
             <select
               value={
                 times.find(
@@ -559,7 +589,7 @@ export function BookingForm({
               <option value="">Выберите смещение</option>
               {times.map((instant) => (
                 <option key={instant} value={instant}>
-                  UTC{instant.slice(19)}
+                  {arrivalLabel(instant, timezone)} · UTC{instant.slice(19)}
                 </option>
               ))}
             </select>
@@ -577,7 +607,7 @@ export function BookingForm({
               </select>
             </label>
             <p>После переноса: {moveOptions.find(({ option }) => option.id === draft.destination)?.label ?? tableName(table)}
-              {' · '}{draft.localTime.replace('T', ' ') || 'время не задано'}</p>
+              {' · '}{arrival ? arrivalLabel(arrival, timezone) : 'время не задано'}</p>
           </>
         )}
         {action === 'create_booking' && (
@@ -660,4 +690,45 @@ function clubLocalTime(instant: string, timeZone: string) {
   const field = (type: string) =>
     parts.find((part) => part.type === type)?.value;
   return `${field('year')}-${field('month')}-${field('day')}T${field('hour')}:${field('minute')}`;
+}
+
+function rublesToMinor(value: string) {
+  const parts = /^(\d{1,10})(?:[.,](\d{0,2}))?$/.exec(value.trim());
+  return parts ? BigInt(parts[1]) * 100n + BigInt((parts[2] ?? '').padEnd(2, '0')) : null;
+}
+
+function minorToRubles(value: string) {
+  if (!/^\d{1,12}$/.test(value)) return '';
+  const amount = BigInt(value);
+  return String(amount / 100n) + ',' + String(amount % 100n).padStart(2, '0');
+}
+
+function formatBookingDeposit(value: string) {
+  if (!/^\d{1,12}$/.test(value)) return 'Сумма не подтверждена';
+  const [whole, fraction] = minorToRubles(value).split(',');
+  return new Intl.NumberFormat('ru-RU').format(BigInt(whole)) + ',' + fraction + ' ₽';
+}
+
+function arrivalLabel(instant: string, timezone: string) {
+  const [day, time] = clubLocalTime(instant, timezone).split('T');
+  return dateFormat(day) + ', ' + time;
+}
+
+/** Resolve against the actual UTC interval. The business date can precede opening. */
+export function arrivalOptions(night: Night, time: string, timezone: string) {
+  if (!/^\d{2}:\d{2}$/.test(time)) return [];
+  const start = Date.parse(night.opensAt);
+  const end = Date.parse(night.closesAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+  const first = Date.parse(clubLocalTime(night.opensAt, timezone).slice(0, 10));
+  const last = Date.parse(clubLocalTime(night.closesAt, timezone).slice(0, 10));
+  const options: string[] = [];
+  for (let day = first; day <= last; day += 86400000) {
+    const date = new Date(day).toISOString().slice(0, 10);
+    options.push(...wallTimeOptions(date, time, timezone).filter((candidate) => {
+      const instant = Date.parse(candidate);
+      return instant >= start && instant < end;
+    }));
+  }
+  return options;
 }
