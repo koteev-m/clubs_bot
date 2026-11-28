@@ -8,6 +8,8 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import java.math.BigDecimal
 
+internal const val MAX_BOOKING_CAPACITY = 50
+
 /** The caller owns the authorized client and club locks before table operations. */
 internal class ClubLayoutTables(
     private val session: OnboardingSession,
@@ -243,7 +245,6 @@ internal class ClubLayoutTables(
     private companion object {
         const val LABEL_LIMIT = 100
         const val MAX_BATCH = 100
-        const val MAX_BOOKING_CAPACITY = 50
         const val MAX_LEGACY_CAPACITY = 100
         const val LEGACY_COORDINATE = 0.5
         val DEPOSIT = Regex("[0-9]{1,10}(\\.[0-9]{1,2})?")

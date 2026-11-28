@@ -79,6 +79,8 @@ type Props = {
   reportPending?: (pending: boolean) => void;
   reportBack?: (handler?: () => boolean) => void;
   openClub?: (id: string) => void;
+  openLayout?: () => void;
+  openCalendar?: () => void;
   menu?: { label: string; run: () => void }[];
   financialReport?: React.ReactNode;
   workspaceMemory?: Map<string, WorkspaceLocation>;
@@ -103,12 +105,17 @@ const methodLabels: Record<Method, string> = {
 const blockedReasons: Record<string, string> = {
   no_current_night: 'Сейчас нет открытой операционной ночи.',
   ambiguous_night: 'Сервер не смог однозначно определить текущую ночь.',
-  missing_night_mapping:
-    'Для этого клуба требуется проверка существующих связей ночи и событий. Обратитесь к управляющему.',
+  working_club_preparing: 'Клуб подключается к рабочим операциям. Обновите состояние через несколько секунд.',
+  working_club_review_required:
+    'Рабочие операции для клуба пока недоступны. Нужна проверка происхождения клуба или существующих операций службой поддержки.',
+  working_calendar_review_required:
+    'Расписание содержит пересекающиеся ночи или часовой пояс отличается от профиля клуба. Проверьте расписание.',
+  working_layout_review_required:
+    'Рабочие операции заблокированы из-за несовместимых настроек столов. Проверьте номера и вместимость в планировке. Если предупреждение осталось, обратитесь в поддержку.',
   working_night_unprepared:
-    'Ночь ещё не подготовлена. Проверьте расписание и наличие столов в действующем зале. При конфликте событий обратитесь к управляющему.',
+    'Рабочая ночь ещё не подготовлена. Проверьте расписание и активные столы. Если предупреждение осталось, обратитесь в поддержку.',
   working_tables_unprepared:
-    'Для этой ночи пока нет доступных столов. Проверьте сохранённые залы и столы в настройках.',
+    'Для этой ночи пока нет доступных столов. Проверьте активные залы и столы в настройках.',
 };
 const moneyWhole = new Intl.NumberFormat('ru-RU');
 const decimalPattern = /^\d{1,10}(?:[.,]\d{0,2})?$/;
@@ -329,7 +336,8 @@ export default function ClubNightDesk(props: Props) {
 }
 
 function NightDesk({
-  credential, profile, reportDirty, reportPending, reportBack, openClub, menu = [], financialReport, workspaceMemory,
+  credential, profile, reportDirty, reportPending, reportBack, openClub, openLayout, openCalendar,
+  menu = [], financialReport, workspaceMemory,
 }: Props) {
   const path = '/api/client/clubs/' + profile.id + '/operations';
   const scope = useClubRequestScope();
@@ -947,16 +955,24 @@ function NightDesk({
           </select>
         </label>
       )}
-      {!showingForm && tab !== 'finance' && view?.blocked &&
-        (tab !== 'shift' || view.blocked !== 'no_current_night') &&
-        <p className="po-notice">{blockedReasons[view.blocked] ?? 'Операции этой ночи пока недоступны.'}</p>}
+      {!showingForm && view?.blocked && (tab !== 'finance' || !view.tableMoney) && (
+        <section className="po-notice" aria-label="Готовность рабочих операций">
+          <p>{blockedReasons[view.blocked] ?? 'Операции этой ночи пока недоступны.'}</p>
+          {view.blocked === 'working_club_preparing' &&
+            <button type="button" className="ob-button" onClick={remote.refresh}>Обновить состояние</button>}
+          {openCalendar && ['no_current_night', 'working_night_unprepared', 'working_calendar_review_required', 'ambiguous_night'].includes(view.blocked) &&
+            <button type="button" className="ob-button" onClick={openCalendar}>Открыть расписание</button>}
+          {openLayout && ['working_layout_review_required', 'working_tables_unprepared', 'working_night_unprepared'].includes(view.blocked) &&
+            <button type="button" className="ob-button" onClick={openLayout}>Открыть залы и столы</button>}
+        </section>
+      )}
       {!showingForm && tab === 'shift' && view && !bookingId && (
         <ShiftOverview view={view} timezone={profile.timezone}
           showTables={(status) => { chooseTab('tables'); setStatusFilter(status); }}
           openBooking={setBookingId} showBookings={() => chooseTab('bookings')} />
       )}
       {!showingForm && tab === 'finance' && <>
-        {view && tableMoney && <WorkspaceMoney view={view} timezone={profile.timezone} amount={amountLabel} />}
+        {view && tableMoney && (!view.blocked || view.tableMoney) && <WorkspaceMoney view={view} timezone={profile.timezone} amount={amountLabel} />}
         {canSeeReports && financialReport}
       </>}
       {!showingForm && view && !view.historical && (
@@ -1114,7 +1130,7 @@ function NightDesk({
               ))}
             </section>
           )}
-          {(tab === 'bookings' || bookingId) && (
+          {((tab === 'bookings' && !view.blocked) || bookingId) && (
             <BookingsList
               view={view}
               search={bookingSearch} setSearch={setBookingSearch} filter={bookingFilter} setFilter={setBookingFilter}

@@ -36,6 +36,11 @@ export function WorkspaceHeader({ name, view, timezone, menu, clubs, chooseClub 
   chooseClub?: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const night = view?.night;
+  const businessDate = night && dateFormat(night.businessDate);
+  const openingDate = night && new Intl.DateTimeFormat('ru-RU', {
+    timeZone: timezone, day: '2-digit', month: '2-digit', year: 'numeric',
+  }).format(new Date(night.opensAt));
   return (
     <header className="night-work-header">
       <div className="night-work-title">
@@ -45,12 +50,12 @@ export function WorkspaceHeader({ name, view, timezone, menu, clubs, chooseClub 
             aria-expanded={expanded} onClick={() => setExpanded(!expanded)}><Menu size={19} /></button>}
       </div>
       <div className="night-work-meta">
-        <span>{view?.night
-          ? dateFormat(view.night.businessDate) + ' · ' + formatTime(view.night.opensAt, timezone) +
-            '–' + formatTime(view.night.closesAt, timezone)
+        <span>{night
+          ? businessDate + ' · ' + (businessDate === openingDate ? '' : openingDate + ', ') +
+            formatTime(night.opensAt, timezone) + '–' + formatTime(night.closesAt, timezone)
           : view ? 'Нет открытой ночи' : 'Загружаем ночь'}</span>
         {view?.night && <span data-open={!view.blocked && !view.future && !view.historical}>
-          {view.blocked && view.blocked !== 'working_tables_unprepared'
+          {view.blocked
             ? 'Недоступна' : view.future ? 'Запланирована' : view.historical ? 'Завершена' : 'Открыта'}</span>}
       </div>
       {expanded && (
@@ -93,6 +98,9 @@ export function ShiftOverview({ view, timezone, showTables, openBooking, showBoo
   openBooking: (id: string) => void;
   showBookings: () => void;
 }) {
+  if (view.blocked && view.blocked !== 'no_current_night') {
+    return <h3 id="night-work-shift-title">Смена</h3>;
+  }
   const tables = view.halls.flatMap((hall) => hall.tables);
   const upcoming = view.bookings.filter(({ status }) => status === 'BOOKED' || status === 'CONFIRMED')
     .sort((a, b) => (a.arrivalBy ?? 'z').localeCompare(b.arrivalBy ?? 'z'));

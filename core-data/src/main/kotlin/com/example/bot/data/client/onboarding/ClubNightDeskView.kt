@@ -46,6 +46,8 @@ internal class ClubNightDeskView(
             }
         val bookingRows = state?.takeUnless { historical }?.let { bookings(it.eventId) }.orEmpty()
         val byTable = bookingRows.groupBy { it["hall_table_id"] }
+        val blocked = blockedReason(nights.size, state)
+        val hasMoneyView = READ_TABLE_MONEY in permissions && (historical || blocked == null)
         return buildJsonObject {
             put("clubId", clubId.toString())
             put("clientId", clientId.toString())
@@ -55,27 +57,7 @@ internal class ClubNightDeskView(
             put("future", future)
             put("historical", historical)
             put("recentNights", JsonArray(history.map { it.nightView() }))
-            if (state == null) {
-                put(
-                    "blocked",
-                    when (nights.size) {
-                        0 -> "no_current_night"
-                        1 ->
-                            if (sql.automaticWorkingClub(
-                                    clientId,
-                                    clubId,
-                                )
-                            ) {
-                                "working_night_unprepared"
-                            } else {
-                                "missing_night_mapping"
-                            }
-                        else -> "ambiguous_night"
-                    },
-                )
-            } else if (!hasPreparedTables(state)) {
-                put("blocked", "working_tables_unprepared")
-            }
+            blocked?.let { put("blocked", it) }
             put("permissions", JsonArray(permissions.sorted().map(::JsonPrimitive)))
             put("categories", ClubDepositConfiguration(session, clubId).view())
             put(
@@ -92,11 +74,25 @@ internal class ClubNightDeskView(
                 ),
             )
             put("bookings", JsonArray(if (state == null) emptyList() else bookingRows.map { reservation(it, state) }))
-            if (state != null && !future && READ_TABLE_MONEY in permissions) {
+            if (state != null && !future && hasMoneyView) {
                 put("tableMoney", nightMoney(state))
             }
         }
     }
+
+    private fun blockedReason(
+        nightCount: Int,
+        state: ClubWorkingNight?,
+    ): String? =
+        when {
+            nightCount == 0 -> "no_current_night"
+            nightCount > 1 -> "ambiguous_night"
+            state != null && hasPreparedTables(state) -> null
+            !sql.automaticWorkingClub(clientId, clubId) ->
+                PreexistingClientWorkingClub(sql, clientId, clubId).blocker(session.now) ?: "working_club_preparing"
+            state == null -> "working_night_unprepared"
+            else -> "working_tables_unprepared"
+        }
 
     private fun hasPreparedTables(state: ClubWorkingNight): Boolean =
         sql.row(

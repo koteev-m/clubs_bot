@@ -1,11 +1,15 @@
 package com.example.bot.routes
 
 import com.example.bot.availability.DefaultAvailabilityService
+import com.example.bot.data.client.onboarding.ClientWorkingNightMaintenance
 import com.example.bot.data.privacy.JdbcLegacyClubAccess
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -28,6 +32,152 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 open class AutomaticClubOperationsRoutesTest : ClientManagerRoutesFixture() {
+    @Test
+    fun `upgrade adopts verified earlier client club with existing schedule and leaves conflicting club alone`() =
+        databaseAt("86") { source ->
+            val clock = DeskClock()
+            val start = clock.instant().plusSeconds(75).truncatedTo(ChronoUnit.MINUTES)
+            val end = start.plusSeconds(6 * 3600)
+            val (club, neighbor) = prepareEarlierClientClubs(source, clock, start, end)
+            val dialect =
+                source.connection.use {
+                    if (it.metaData.databaseProductName ==
+                        "PostgreSQL"
+                    ) {
+                        "postgresql"
+                    } else {
+                        "h2"
+                    }
+                }
+            assertEquals(1, migrateBookingRulesFixture(source, dialect))
+            clock.time = start.plusSeconds(30)
+            val maintenance = ClientWorkingNightMaintenance(source, clock)
+            withApp(source, clock) {
+                val path = "$C/clubs/$club/operations"
+                val before = ok(path, THIRD_MANAGER)
+                assertEquals("working_club_preparing", before.string("blocked"))
+                val currentBefore = before["night"]!!.jsonObject
+                assertEquals(
+                    start.atZone(ZoneId.of("Europe/Moscow")).toLocalDate().toString(),
+                    currentBefore.string("businessDate"),
+                )
+                assertEquals(start.toString(), currentBefore.string("opensAt"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM client_working_clubs"))
+                val base = "$C/clubs/$club"
+                val hall = ok("$base/layout", SECOND_MANAGER)["halls"]!!.jsonArray.single().jsonObject
+                val calendar = ok("$base/calendar", SECOND_MANAGER)
+                coroutineScope { List(2) { async { maintenance.refresh() } }.awaitAll() }
+                assertEquals(
+                    HttpStatusCode.Conflict,
+                    requestAs(
+                        "$base/halls/${hall.string("id")}/tables",
+                        SECOND_MANAGER,
+                        JsonObject(
+                            obj("label" to "Stale table", "expectedVersion" to hall.string("layoutRevision")) +
+                                ("tableNumber" to JsonPrimitive(3)) + ("capacity" to JsonPrimitive(4)),
+                        ),
+                    ).status,
+                )
+                assertTrue(calendar.string("version") != ok("$base/calendar", SECOND_MANAGER).string("version"))
+                val after = ok(path, THIRD_MANAGER)
+                assertFalse(after.containsKey("blocked"))
+                assertEquals(currentBefore, after["night"])
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_working_clubs"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM events WHERE club_id=$club"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM events WHERE club_id=$neighbor"))
+                assertEquals("2", source.scalar("SELECT COUNT(*) FROM booking_cutover_fences WHERE club_id=$club"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM booking_cutover_fences WHERE club_id=$neighbor"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM tables WHERE club_id=$neighbor"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM clubs WHERE id=$club AND is_active=FALSE"))
+                assertGuestSeparation(source, club.toLong(), start, end)
+                assertEquals(HttpStatusCode.NotFound, requestAs("$C/clubs/$neighbor/operations", THIRD_MANAGER).status)
+                val table = source.scalar("SELECT id FROM hall_tables WHERE label='Earlier table'")
+                val command = obj("nightId" to currentBefore.string("id"), "tableId" to table)
+                val booked =
+                    ok(
+                        path,
+                        THIRD_MANAGER,
+                        JsonObject(
+                            command + obj("action" to "create_booking", "guestName" to "Guest") +
+                                ("guests" to JsonPrimitive(2)),
+                        ),
+                    )
+                val seated =
+                    ok(
+                        path,
+                        THIRD_MANAGER,
+                        JsonObject(
+                            command +
+                                obj("action" to "seat", "mode" to "CLUB", "bookingId" to booked.string("bookingId")) +
+                                ("expectedLastSessionId" to JsonNull),
+                        ),
+                    )
+                assertTrue(seated.string("sessionId").isNotBlank())
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM checkins"))
+                maintenance.refresh()
+                assertEquals("2", source.scalar("SELECT COUNT(*) FROM booking_cutover_fences WHERE club_id=$club"))
+            }
+        }
+
+    private fun prepareEarlierClientClubs(
+        source: DataSource,
+        clock: DeskClock,
+        start: Instant,
+        end: Instant,
+    ): Pair<String, String> {
+        lateinit var clubs: Pair<String, String>
+        withApp(source, clock) {
+            clubs = business(source)
+            val (club, neighbor) = clubs
+            val base = "$C/clubs/$club"
+            claim(invite("$base/managers", RECIPIENT, "CLUB_MANAGER"), SECOND_MANAGER)
+            claim(invite("$base/managers", SECOND_MANAGER, "FLOOR_MANAGER"), THIRD_MANAGER)
+            val hall =
+                ok(
+                    "$base/halls",
+                    SECOND_MANAGER,
+                    obj("name" to "Saved hall"),
+                )["halls"]!!.jsonArray.single().jsonObject
+            val hallId = hall.string("id")
+            ok(
+                "$base/halls/$hallId/tables",
+                SECOND_MANAGER,
+                JsonObject(
+                    obj("label" to "Linked table", "expectedVersion" to hall.string("layoutRevision")) +
+                        ("tableNumber" to JsonPrimitive(2)) + ("capacity" to JsonPrimitive(4)),
+                ),
+            )
+            val calendar = ok("$base/calendar", SECOND_MANAGER)
+            ok(
+                "$base/calendar",
+                SECOND_MANAGER,
+                calendarChange(calendar, start, end, ZoneId.of("Europe/Moscow")),
+                HttpMethod.Patch,
+            )
+            source.connection.use { connection ->
+                connection.createStatement().use { statement ->
+                    // An older layout-only row has survived V072–V086 without a booking projection.
+                    statement.executeUpdate(
+                        "INSERT INTO hall_tables(hall_id,table_number,label,capacity,zone_id) " +
+                            "SELECT hall_id,1,'Earlier table',6,zone_id FROM hall_zones WHERE hall_id=$hallId",
+                    )
+                    statement.executeUpdate(
+                        "UPDATE client_business_clubs SET evidence='VERIFIED_CREATION' WHERE club_id=$club",
+                    )
+                }
+                val insertEvent = "INSERT INTO events(club_id,start_at,end_at) VALUES (?,?,?)"
+                connection.prepareStatement(insertEvent).use { statement ->
+                    statement.setLong(1, neighbor.toLong())
+                    statement.setObject(2, start.atOffset(ZoneOffset.UTC))
+                    statement.setObject(3, end.atOffset(ZoneOffset.UTC))
+                    statement.executeUpdate()
+                }
+            }
+            assertEquals("1", source.scalar("SELECT COUNT(*) FROM tables WHERE club_id=$club"))
+        }
+        return clubs
+    }
+
     @Test
     fun `onboarding prepares future booking current mixed deposit and reuse without seeding`() =
         database { source ->
