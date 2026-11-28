@@ -227,6 +227,7 @@ export default function ClubLayout({
                     key={selectedHall.id + ':' + refresh}
                     clubId={id}
                     hallId={selectedHall.id}
+                    hallName={selectedHall.name}
                     api={api.editor}
                     clientMode
                     savedPlan={Boolean(selectedHall.plan)}

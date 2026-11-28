@@ -18,6 +18,7 @@ export async function onboardingRequest<T>(
     signal?: AbortSignal;
     key?: string;
     isCurrent?: () => boolean;
+    responseType?: 'blob';
   } = {},
 ): Promise<T> {
   if (!credential) throw new OnboardingError(401, 'unauthorized');
@@ -86,7 +87,7 @@ export async function onboardingRequest<T>(
           : undefined,
       );
     }
-    return (await response.json()) as T;
+    return (await (options.responseType === 'blob' ? response.blob() : response.json())) as T;
   } catch (error) {
     if (error instanceof OnboardingError) throw error;
     throw new OnboardingError(0, 'unknown_outcome');

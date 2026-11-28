@@ -12,6 +12,16 @@ export type TableCreation = {
 const maxNumber = 2_147_483_647;
 const maxBatch = 100;
 
+export function tableDepositRubles(input: string): string | undefined {
+  const rubles = input.trim().replace(',', '.');
+  return /^\d{1,10}(\.\d{1,2})?$/.test(rubles) ? rubles : undefined;
+}
+
+export function tableDepositLabel(rubles: string) {
+  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB',
+    minimumFractionDigits: Number(rubles) % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 }).format(Number(rubles));
+}
+
 function validNumber(text: string) {
   const value = Number(text);
   return /^\d+$/.test(text) && value >= 1 && value <= maxNumber ? value : 0;
@@ -39,12 +49,14 @@ function proposedNumbers(
 
 export default function ClubTableCreationForm({
   reserved,
+  hallName,
   locations = {},
   busy,
   onSave,
   onClose,
 }: {
   reserved: number[];
+  hallName?: string;
   locations?: Record<number, string>;
   busy: boolean;
   onSave: (creation: TableCreation) => void;
@@ -72,14 +84,15 @@ export default function ClubTableCreationForm({
     ),
   ];
   const capacityValue = validNumber(capacity);
-  const validDeposit = !deposit || /^\d{1,10}(\.\d{1,2})?$/.test(deposit);
+  const rubles = tableDepositRubles(deposit);
+  const depositLabel = mode === 'single' ? 'Минимальный депозит за стол, ₽' : 'Минимальный депозит за каждый стол, ₽';
   const valid =
     numbers.length > 0 &&
     numbers.every(Boolean) &&
     duplicates.length === 0 &&
     capacityValue >= 1 &&
     capacityValue <= 50 &&
-    (mode !== 'single' || validDeposit);
+    rubles !== undefined;
   const inputClass =
     'block min-h-[44px] w-full rounded border border-gray-300 bg-white px-3 text-gray-900';
   return (
@@ -88,16 +101,18 @@ export default function ClubTableCreationForm({
       className="club-table-creation space-y-3 rounded-lg border border-gray-200 p-3 text-sm"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!valid || busy) return;
+        if (!valid || busy || rubles === undefined) return;
         onSave({
           mode,
           numbers,
           capacity: capacityValue,
           label: label.trim(),
-          minDeposit: deposit,
+          minDeposit: rubles,
         });
       }}
     >
+      {hallName && <p className="club-table-context">{hallName}</p>}
+      <h3>{mode === 'single' ? 'Новый стол' : 'Новые столы'}</h3>
       <div>
         <label htmlFor={modeId}>Способ добавления</label>
         <select
@@ -168,7 +183,7 @@ export default function ClubTableCreationForm({
         </label>
       )}
       <label className="block">
-        {mode === 'single' ? 'Мест в новом столе' : 'Мест в каждом столе'}
+        {mode === 'single' ? 'Количество посадочных мест' : 'Количество посадочных мест на каждый стол'}
         <input
           className={inputClass}
           inputMode="numeric"
@@ -178,24 +193,30 @@ export default function ClubTableCreationForm({
         />
       </label>
       <p>Допустимая вместимость — от 1 до 50 мест.</p>
-      {mode === 'single' && (
-        <label className="block">
-          Минимальный депозит в единицах booking
-          <input
-            className={inputClass}
-            inputMode="decimal"
-            aria-invalid={!validDeposit}
-            aria-describedby={!validDeposit ? depositHint : undefined}
-            disabled={busy}
-            value={deposit}
-            onChange={(event) => setDeposit(event.target.value)}
-          />
-          {!validDeposit && (
-            <span role="alert" id={depositHint}>
-              Укажите число с точкой и не более двух знаков после неё.
-            </span>
-          )}
-        </label>
+      <label className="block">
+        {depositLabel}
+        <input
+          className={inputClass}
+          inputMode="decimal"
+          aria-label={depositLabel}
+          required
+          aria-invalid={Boolean(deposit && rubles === undefined)}
+          aria-describedby={depositHint}
+          disabled={busy}
+          value={deposit}
+          onChange={(event) => setDeposit(event.target.value)}
+        />
+        <small id={depositHint}>
+          {deposit && rubles === undefined
+            ? 'Укажите сумму в рублях, до двух знаков после запятой.'
+            : '0 ₽ — без минимального депозита.'}
+        </small>
+      </label>
+      {rubles !== undefined && capacityValue >= 1 && capacityValue <= 50 && (
+        <dl className="club-table-summary">
+          <div><dt>Вместимость{mode !== 'single' && ' на стол'}</dt><dd>{capacityValue} чел.</dd></div>
+          <div><dt>Минимум{mode !== 'single' && ' на стол'}</dt><dd>{tableDepositLabel(rubles)}</dd></div>
+        </dl>
       )}
       <p aria-live="polite">
         Номера для создания:{' '}

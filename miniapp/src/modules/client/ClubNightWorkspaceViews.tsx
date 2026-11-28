@@ -28,13 +28,14 @@ const metrics = [
   { status: 'reserved', label: 'Ждём брони' },
 ] as const;
 
-export function WorkspaceHeader({ name, view, timezone, menu, clubs, chooseClub }: {
+export function WorkspaceHeader({ name, view, timezone, menu, clubs, chooseClub, manage }: {
   name: string;
   view?: Desk;
   timezone: string;
   menu: { label: string; run: () => void }[];
   clubs: { id: string; name: string }[];
   chooseClub?: (id: string) => void;
+  manage?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const night = view?.night;
@@ -59,6 +60,7 @@ export function WorkspaceHeader({ name, view, timezone, menu, clubs, chooseClub 
           {view.blocked
             ? 'Недоступна' : view.future ? 'Запланирована' : view.historical ? 'Завершена' : 'Открыта'}</span>}
       </div>
+      {manage && <button type="button" className="ob-button club-management-entry" onClick={manage}>Управление клубом</button>}
       {expanded && (
         <div className="night-work-menu-panel">
           {chooseClub && clubs.length > 1 && (

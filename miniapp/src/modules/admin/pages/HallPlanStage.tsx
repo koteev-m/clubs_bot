@@ -27,6 +27,7 @@ export type HallPlanStageProps<Id extends LayoutId = number> = {
   selectedTableId: Id | null;
   readOnly?: boolean;
   markerSize?: number;
+  onImageError?: () => void;
   tableBadge?: (table: EditorTable<Id>) => TableBadge;
   moveOnEmptyClick?: boolean;
   onSelectTable: (tableId: Id) => boolean | void;
@@ -40,6 +41,7 @@ export default function HallPlanStage<Id extends LayoutId = number>({
   selectedTableId,
   readOnly = false,
   markerSize = 28,
+  onImageError,
   tableBadge,
   moveOnEmptyClick = true,
   onSelectTable,
@@ -261,6 +263,7 @@ export default function HallPlanStage<Id extends LayoutId = number>({
         alt="План зала"
         className="absolute inset-0 h-full w-full object-contain"
         onLoad={handleImageLoad}
+        onError={onImageError}
         data-testid="hall-plan-image"
       />
       {tables.map((table) => {

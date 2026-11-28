@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PlatformOnboarding from './PlatformOnboarding';
@@ -126,13 +127,15 @@ describe('owner UX and client navigation', () => {
     await screen.findByRole('heading', { name: 'Клуб A' });
     expect(location.search).toContain('screen=clubs');
     expect(screen.getByText('Не опубликован')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Доступы' }));
+    expect(screen.getByText('Для гостей')).toBeTruthy();
+    expect(screen.getByText(/Готовность внутренних операций/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Клиенты' }));
     await screen.findByLabelText('Список организаций');
     expect(location.search).toContain('screen=clients');
     expect(screen.queryByRole('heading', { name: 'Клуб A' })).toBeNull();
     expect(
       screen
-        .getByRole('button', { name: 'Доступы' })
+        .getByRole('button', { name: 'Клиенты' })
         .getAttribute('aria-current'),
     ).toBe('page');
   });
@@ -209,8 +212,19 @@ describe('owner UX and client navigation', () => {
       }),
     );
     render(<PlatformOnboarding credential="signed-owner" />);
+    await screen.findByText('Организация активна');
+    const sections = within(screen.getByRole('navigation', {
+      name: 'Разделы карточки клиента',
+    }));
+    expect(sections.getAllByRole('button').map(button => button.textContent)).toEqual([
+      'Обзор', 'Клубы', 'Люди и доступы', 'Приглашения',
+    ]);
+    expect(screen.queryByText('Доступ отозван')).toBeNull();
+    expect(screen.getByText(/Пока нельзя архивировать: есть связанные заведения/)).toBeTruthy();
+    fireEvent.click(sections.getByRole('button', { name: 'Люди и доступы' }));
     await screen.findByText('Доступ отозван');
-    expect(screen.getByText('Организация активна')).toBeTruthy();
+    expect(location.search).toContain('section=people');
+    expect(screen.queryByText(/Пока нельзя архивировать/)).toBeNull();
     for (const name of [
       'чтение клуба',
       'редактирование профиля',
@@ -220,9 +234,9 @@ describe('owner UX and client navigation', () => {
     expect(
       screen.queryByRole('button', { name: 'Архивировать организацию' }),
     ).toBeNull();
-    expect(
-      screen.getByText(/Пока нельзя архивировать: есть связанные заведения/),
-    ).toBeTruthy();
+    fireEvent.click(sections.getByRole('button', { name: 'Приглашения' }));
+    expect(location.search).toContain('section=invitations');
+    expect(screen.queryByText('Доступ отозван')).toBeNull();
   });
 
   it('retains the archive command across Back/Forward and retries its original version and key', async () => {
@@ -379,7 +393,7 @@ it('requires a separate decision for every ambiguous grant before attaching a hi
   history.replaceState(
     {},
     '',
-    '/app?mode=platform-owner&screen=client&resource=20',
+    '/app?mode=platform-owner&screen=client&resource=20&section=people',
   );
   const reviewed = [
     {
@@ -457,7 +471,7 @@ it('shows platform confirmation only for a member the server allows to become th
   history.replaceState(
     {},
     '',
-    '/app?mode=platform-owner&screen=client&resource=20',
+    '/app?mode=platform-owner&screen=client&resource=20&section=people',
   );
   const members = ['31', '32'].map((userId, index) => ({
     active: true,

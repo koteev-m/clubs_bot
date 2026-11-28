@@ -27,6 +27,18 @@ internal class LegacyBookingAdmission {
 
     fun lock(clubId: Long): Boolean = sql.lockBookingAdmission(clubId)
 
+    // Called after admission and the idempotent replay check, before a new legacy reservation.
+    fun exceedsMappedCapacity(
+        tableId: Long,
+        guests: Int,
+    ): Boolean =
+        sql.row(
+            "SELECT t.id FROM tables t JOIN client_clubs c ON c.club_id=t.club_id " +
+                "WHERE t.id=? AND t.capacity<?",
+            tableId,
+            guests,
+        ) != null
+
     fun fencesReservation(
         clubId: Long,
         tableId: Long,

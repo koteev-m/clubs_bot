@@ -35,12 +35,22 @@ internal class CanonicalBookingH2Test {
             assertEquals(1, flyway(source, "80").migrate().migrationsExecuted)
             assertEquals(1, flyway(source, "81").migrate().migrationsExecuted)
             assertEquals(1, flyway(source, "82").migrate().migrationsExecuted)
-            assertEquals(5, flyway(source).migrate().migrationsExecuted)
-            flyway(source).validate()
+            assertEquals(5, flyway(source, "87").migrate().migrationsExecuted)
             source.seedPhysicalTable()
             assertEquals("0", source.count("canonical_booking_commands"))
             val bookingRepo = BookingRepository(db, CLOCK)
-            assertEquals(LEGACY, bookingRepo.confirmFromHold(oldHold.id, "legacy-confirm").success().eventId)
+            val legacyBooking = bookingRepo.confirmFromHold(oldHold.id, "legacy-confirm").success()
+            assertEquals(LEGACY, legacyBooking.eventId)
+            source.write("UPDATE bookings SET total_deposit=1250.75 WHERE id='${legacyBooking.id}'")
+            assertEquals(1, flyway(source).migrate().migrationsExecuted)
+            flyway(source).validate()
+            assertEquals(
+                "1",
+                source.count(
+                    "bookings WHERE id='${legacyBooking.id}' AND total_deposit=1250.75 " +
+                        "AND staff_booking_deposit_minor IS NULL",
+                ),
+            )
             assertEquals("0", source.count("canonical_booking_commands"))
 
             val hold = legacy.protectedHold().success()

@@ -196,6 +196,7 @@ describe('cabinet uses the shared layout editor', () => {
     fireEvent.change(screen.getByLabelText('Номер нового стола'), {
       target: { value: '1' },
     });
+    fireEvent.change(screen.getByLabelText('Минимальный депозит за стол, ₽'), { target: { value: '0' } });
     fireEvent.click(screen.getByRole('button', { name: 'Создать стол' }));
     await screen.findByRole('button', { name: '#1 · Стол 1' });
     expect(stored.halls[0].tables[0].x).toBeNull();

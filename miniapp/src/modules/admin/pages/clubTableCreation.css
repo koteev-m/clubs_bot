@@ -50,3 +50,20 @@
   color: #a9b8b9;
   background: #2e3b3d;
 }
+
+.club-table-creation h3 { font-size: 1.125rem; font-weight: 700; }
+.club-table-context { color: var(--po-muted); }
+.club-table-summary {
+  display: grid;
+  gap: .375rem;
+  border-top: 1px solid var(--po-line, #d1d5db);
+  padding-top: .65rem;
+}
+.club-table-summary div { display: flex; justify-content: space-between; gap: .5rem; }
+.club-table-summary dd { font-weight: 650; text-align: end; }
+.client-layout .club-table-creation button[type='submit']:enabled,
+.client-layout .club-table-edit-save:enabled {
+  background: var(--po-accent, #d5f58b);
+  color: var(--ob-primary-text, #10191b);
+  flex: 1;
+}

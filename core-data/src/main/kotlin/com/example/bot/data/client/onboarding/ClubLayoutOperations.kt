@@ -47,18 +47,29 @@ internal class ClubLayoutOperations(
         clubId: Long,
         body: JsonObject,
     ): JsonObject {
-        body.only(listOf("hallId"))
-        val clientId = session.requireClubGrant(clubId)
-        session.requireFloorSection(clientId, clubId, READ_FLOOR_LAYOUT)
+        body.only(listOf("hallId", "layoutRevision", "sha256"))
+        val working = "layoutRevision" in body || "sha256" in body
+        val clientId = session.requireClubGrant(clubId, READ_NIGHT_DESK.takeIf { working })
+        if (!working) session.requireFloorSection(clientId, clubId, READ_FLOOR_LAYOUT)
         val hallId = body.id("hallId")
-        hall(clubId, hallId)
+        val revision = if (working) body.id("layoutRevision") else null
+        val digest = if (working) body.string("sha256") ?: fail("validation_error") else null
+        val hall = hall(clubId, hallId)
+        if (working && !hall.active()) fail("not_found")
+        val byRevision = if (working) " AND h.layout_revision=? AND p.sha256=? AND h.is_active=TRUE" else ""
         return sql.connection
             .prepareStatement(
-                "SELECT bytes,content_type,sha256,size_bytes FROM hall_plans WHERE hall_id=?",
+                "SELECT p.bytes,p.content_type,p.sha256,p.size_bytes FROM hall_plans p " +
+                    "JOIN halls h ON h.id=p.hall_id WHERE p.hall_id=? AND h.club_id=?" + byRevision,
             ).use { statement ->
                 statement.setLong(1, hallId)
+                statement.setLong(2, clubId)
+                if (revision != null) {
+                    statement.setLong(PLAN_REVISION_PARAM, revision)
+                    statement.setString(PLAN_DIGEST_PARAM, digest)
+                }
                 statement.executeQuery().use { rows ->
-                    if (!rows.next()) fail("not_found")
+                    if (!rows.next()) fail(if (working) "version_conflict" else "not_found")
                     buildJsonObject {
                         put("bytesBase64", Base64.getEncoder().encodeToString(rows.getBytes("bytes")))
                         put("contentType", rows.getString("content_type"))
@@ -76,7 +87,7 @@ internal class ClubLayoutOperations(
     ): MutationResult {
         val clientId = session.requireClubGrant(clubId, WRITE_LAYOUT)
         val automatic = sql.automaticWorkingClub(clientId, clubId)
-        if (automatic) check(sql.lockBookingAdmission(clubId))
+        if (automatic || operation == OnboardingMutation.CLUB_TABLE_UPDATE) check(sql.lockBookingAdmission(clubId))
         session.calendarClub(clubId, lock = true)
         var tableIds = emptyList<Long>()
         var zoneId: Long? = null
@@ -212,6 +223,8 @@ internal class ClubLayoutOperations(
     }
 
     private companion object {
+        const val PLAN_REVISION_PARAM = 3
+        const val PLAN_DIGEST_PARAM = 4
         const val HALL_NAME_LIMIT = 255
         const val BASE_GEOMETRY = "{\"zones\":[{\"id\":\"main\",\"name\":\"Основная зона\"}]}"
     }

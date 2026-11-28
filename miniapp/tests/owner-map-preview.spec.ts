@@ -228,6 +228,7 @@ test('mobile editor places saved physical tables and keeps the original command 
     .getByRole('textbox', { name: 'Первый номер', exact: true })
     .fill('101');
   await page.getByLabel('Количество столов').fill('15');
+  await page.getByLabel('Минимальный депозит за каждый стол, ₽').fill('1000,50');
   await expect(
     page.getByText(/Номера для создания: 101, 102, 103/),
   ).toBeVisible();

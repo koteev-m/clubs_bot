@@ -428,8 +428,8 @@ export function createClientLayoutApi(
         ) ??
         [],
       create: createOne,
-      createBatch: (id, tableNumbers, capacity) =>
-        createTables(id, '/batch', { tableNumbers, capacity }),
+      createBatch: (id, tableNumbers, capacity, minDeposit) =>
+        createTables(id, '/batch', { tableNumbers, capacity, minDeposit }),
       update: patchTable,
       place: (id, table, point) =>
         patchTable(id, table, point ?? { x: null, y: null }),

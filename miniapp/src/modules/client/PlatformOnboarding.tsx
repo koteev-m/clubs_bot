@@ -1,6 +1,7 @@
 import InvitationDelivery, { invitationScope, invitationRole } from './InvitationDelivery';
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Building2, LayoutGrid, Users } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Building2, ClipboardList, LayoutGrid, Users } from 'lucide-react';
 import { ApplicationList } from './ClientAccess';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
@@ -25,9 +26,23 @@ import {
 import { authorityLost, errorMessage } from './onboarding.api';
 import { InvitationDraft, useInvitationDraft } from './useInvitationDraft';
 
+const platformSections = [
+  { type: 'overview', label: 'Обзор', Icon: LayoutGrid },
+  { type: 'clients', label: 'Клиенты', Icon: Users },
+  { type: 'clubs', label: 'Клубы', Icon: Building2 },
+  { type: 'applications', label: 'Заявки', Icon: ClipboardList },
+] as const;
+const clientSections = [
+  { label: 'Обзор', value: undefined },
+  { label: 'Клубы', value: 'clubs' },
+  { label: 'Люди и доступы', value: 'people' },
+  { label: 'Приглашения', value: 'invitations' },
+] as const;
+type ClientSection = (typeof clientSections)[number]['value'];
 type OwnerScreen =
-  | { type: 'overview' | 'invite' | 'clubs' | 'clients' | 'applications' }
-  | { type: 'invitation' | 'client' | 'application'; id: string };
+  | { type: (typeof platformSections)[number]['type'] | 'invite' }
+  | { type: 'invitation' | 'application'; id: string }
+  | { type: 'client'; id: string; section?: ClientSection };
 function currentScreen(): OwnerScreen {
   const params = new URLSearchParams(window.location.search);
   const type = params.get('screen');
@@ -39,12 +54,13 @@ function currentScreen(): OwnerScreen {
     type === 'applications'
   )
     return { type };
-  if (
-    (type === 'invitation' || type === 'client' || type === 'application') &&
-    id &&
-    /^[1-9][0-9]*$/.test(id)
-  )
-    return { type, id };
+  if (id && /^[1-9][0-9]*$/.test(id)) {
+    if (type === 'client') {
+      const section = clientSections.find(({ value }) => value === params.get('section'))?.value;
+      return section ? { type, id, section } : { type, id };
+    }
+    if (type === 'invitation' || type === 'application') return { type, id };
+  }
   return { type: 'overview' };
 }
 
@@ -132,6 +148,8 @@ function PlatformNavigation({
     else url.searchParams.set('screen', next.type);
     if ('id' in next) url.searchParams.set('resource', next.id);
     else url.searchParams.delete('resource');
+    if (next.type === 'client' && next.section) url.searchParams.set('section', next.section);
+    else url.searchParams.delete('section');
     const trail: string[] = window.history.state?.ownerTrail ?? [];
     const state = { onboarding: true, ownerTrail: replace ? trail : [...trail, JSON.stringify(current)] };
     if (replace) window.history.replaceState(state, '', url);
@@ -167,10 +185,33 @@ function PlatformNavigation({
   };
   const home = () => returnTo({ type: 'overview' });
   const back = () => {
-    if (screen.type === 'client' || screen.type === 'invitation') returnTo({ type: 'clients' });
+    if (screen.type === 'client') {
+      const trail: string[] = window.history.state?.ownerTrail ?? [];
+      const clients = trail.lastIndexOf(JSON.stringify({ type: 'clients' }));
+      const clubs = trail.lastIndexOf(JSON.stringify({ type: 'clubs' }));
+      returnTo({ type: clubs > clients ? 'clubs' : 'clients' });
+    } else if (screen.type === 'invitation') returnTo({ type: 'clients' });
     else if (screen.type === 'application') returnTo({ type: 'applications' });
     else home();
   };
+  const activeSection = screen.type === 'client' || screen.type === 'invitation' ? 'clients'
+    : screen.type === 'application' ? 'applications'
+      : screen.type === 'invite' ? 'overview' : screen.type;
+  const onSection = (type: (typeof platformSections)[number]['type']) => {
+    if (type === 'overview') home();
+    else navigate({ type }, !overview && !('id' in screen) && screen.type !== 'invite');
+  };
+  const navigation = (
+    <nav className="po-nav" aria-label="Навигация платформы">
+      {platformSections.map(({ type, label, Icon }) => (
+        <button key={type} type="button" aria-current={activeSection === type ? 'page' : undefined}
+          onClick={() => onSection(type)}>
+          <Icon size={21} aria-hidden="true" />
+          <span>{label}</span>
+        </button>
+      ))}
+    </nav>
+  );
   const openInvitation = (invitation: Invitation) => {
     if (navigate({ type: 'invitation', id: invitation.id }, screen.type === 'invite' || screen.type === 'invitation')) {
       invite.forgetLink();
@@ -198,7 +239,8 @@ function PlatformNavigation({
     return (
       <OwnerInvite
         draft={invite}
-        back={receipt ? () => returnTo({ type: 'client', id: receipt.clientId }) : back}
+        navigation={navigation}
+        back={receipt ? () => returnTo({ type: 'client', id: receipt.clientId, section: 'invitations' }) : back}
         open={openInvitation}
         another={() => {
           invite.reset();
@@ -213,7 +255,8 @@ function PlatformNavigation({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={(clientId) => clientId ? returnTo({ type: 'client', id: clientId }) : back()}
+        navigation={navigation}
+        back={(clientId) => clientId ? returnTo({ type: 'client', id: clientId, section: 'invitations' }) : back()}
         open={openInvitation}
       />
     );
@@ -225,6 +268,12 @@ function PlatformNavigation({
         key={screen.id}
         credential={credential}
         id={screen.id}
+        navigation={navigation}
+        section={screen.section}
+        select={(section) => {
+          if (section !== screen.section) navigate(section ? { type: 'client', id: screen.id, section } :
+            { type: 'client', id: screen.id }, true);
+        }}
         back={back}
         open={openInvitation}
       />
@@ -232,6 +281,7 @@ function PlatformNavigation({
   if (screen.type === 'application')
     return (
       <OwnerApplication
+        navigation={navigation}
         key={screen.id}
         credential={credential}
         id={screen.id}
@@ -240,80 +290,25 @@ function PlatformNavigation({
     );
   return (
     <Shell
-      title={
-        overview
-          ? 'Управление платформой'
-          : screen.type === 'clubs'
-            ? 'Клубы платформы'
-            : screen.type === 'applications'
-              ? 'Заявки на подключение'
-              : 'Клиенты и доступы'
-      }
-      subtitle={
-        overview ? 'Клиенты, приглашения и разрешённые заведения.' : undefined
-      }
+      title={overview ? 'Управление платформой' : screen.type === 'clubs' ? 'Клубы платформы'
+        : screen.type === 'applications' ? 'Заявки на подключение' : 'Клиенты'}
       owner
       back={overview ? undefined : back}
-      navigation={
-        <nav className="po-nav" aria-label="Навигация платформы">
-          <button aria-current={overview ? 'page' : undefined} onClick={home}>
-            <LayoutGrid size={21} />
-            <span>Обзор</span>
-          </button>
-          <button
-            aria-current={screen.type === 'clubs' ? 'page' : undefined}
-            onClick={() => navigate({ type: 'clubs' }, !overview)}
-          >
-            <Building2 size={21} />
-            <span>Клубы</span>
-          </button>
-          <button
-            aria-current={screen.type === 'clients' ? 'page' : undefined}
-            onClick={() => navigate({ type: 'clients' }, !overview)}
-          >
-            <Users size={21} />
-            <span>Доступы</span>
-          </button>
-        </nav>
-      }
+      navigation={navigation}
     >
       {overview && (
-        <>
-          <div className="po-context">
-            <strong>Платформа</strong>
-            <span className="po-context-badge">Обзор</span>
-          </div>
-          <OwnerOverview credential={credential} />
-          <button
-            className="po-primary"
-            onClick={() => {
-              if (invite.invitation && !invite.command.blocked) {
-                invite.reset();
-                setReceiptId(undefined);
-              }
-              navigate({ type: 'invite' });
-            }}
-          >
-            Пригласить клиента
-          </button>
-          <button
-            className="ob-button"
-            onClick={() => navigate({ type: 'clients' })}
-          >
-            Клиенты и доступы
-          </button>
-          <button
-            className="ob-button"
-            onClick={() => navigate({ type: 'applications' })}
-          >
-            История заявок
-          </button>
-        </>
+        <OwnerOverview credential={credential} inviteClient={() => {
+          if (invite.invitation && !invite.command.blocked) {
+            invite.reset();
+            setReceiptId(undefined);
+          }
+          navigate({ type: 'invite' });
+        }} />
       )}
       {screen.type === 'clubs' && (
         <OwnerClubs
           credential={credential}
-          open={(id) => navigate({ type: 'client', id })}
+          open={(id) => navigate({ type: 'client', id, section: 'clubs' })}
         />
       )}
       {screen.type === 'clients' && (
@@ -339,11 +334,13 @@ function OwnerInvite({
   draft,
   back,
   open,
+  navigation,
 }: {
   draft: ReturnType<typeof useInvitationDraft>;
   another: () => void;
   back: () => void;
   open: (invitation: Invitation) => void;
+  navigation: ReactNode;
 }) {
   const {
     clientName,
@@ -362,6 +359,7 @@ function OwnerInvite({
       subtitle="Доступ к кабинету с разрешённым количеством заведений."
       owner
       back={back}
+      navigation={navigation}
     >
       {!invitation ? (
         <form
@@ -521,11 +519,13 @@ function OwnerInvitation({
   id,
   back,
   open,
+  navigation,
 }: {
   credential: string;
   id: string;
   back: (clientId?: string) => void;
   open: (invitation: Invitation) => void;
+  navigation: ReactNode;
 }) {
   const remote = useRemote<Invitation>(
     credential,
@@ -551,7 +551,7 @@ function OwnerInvitation({
     );
   };
   return (
-    <Shell title="Приглашение клиента" owner back={() => back(invitation?.clientId)} backDisabled={command.blocked}>
+    <Shell title="Приглашение клиента" owner back={() => back(invitation?.clientId)} backDisabled={command.blocked} navigation={navigation}>
       <RemoteState {...remote} />
       {invitation && (
         <>
@@ -659,7 +659,7 @@ function OwnerInvitation({
   );
 }
 
-function OwnerOverview({ credential }: { credential: string }) {
+function OwnerOverview({ credential, inviteClient }: { credential: string; inviteClient: () => void }) {
   const remote = useRemote<{
     clients: number;
     archivedClients: number;
@@ -668,7 +668,8 @@ function OwnerOverview({ credential }: { credential: string }) {
     openInvitations: number;
   }>(credential, '/api/platform/onboarding/summary');
   return (
-    <section aria-label="Сводка платформы">
+    <section className="po-owner-overview" aria-label="Сводка платформы">
+      <button type="button" className="po-primary" onClick={inviteClient}>Пригласить клиента</button>
       <RemoteState {...remote} />
       {remote.data && (
         <dl className="po-stats">
@@ -708,8 +709,7 @@ function OwnerClubs({
   return (
     <section aria-label="Заведения платформы">
       <p className="po-muted">
-        Сохранённые заведения и их клиентские организации. Публичность и доступ
-        пользователей — разные состояния.
+        Здесь показана публикация для гостей. Готовность внутренних операций проверяется в рабочем кабинете клуба.
       </p>
       <RemoteState {...remote} />
       {remote.data?.items.length === 0 && (
@@ -718,13 +718,11 @@ function OwnerClubs({
       {remote.data?.items.map((club) => (
         <section className="po-card ob-card" key={club.id}>
           <h2>{club.name}</h2>
-          <p>Организация: {club.clientName}</p>
-          <p>{club.published ? 'Опубликован' : 'Не опубликован'}</p>
-          {!club.published && (
-            <p className="po-muted">
-              Заведение пока недоступно гостям и для бронирования.
-            </p>
-          )}
+          <p>{club.clientName}</p>
+          <div className="po-club-guest-status">
+            <span className="po-muted">Для гостей</span>
+            <strong>{club.published ? 'Опубликован' : 'Не опубликован'}</strong>
+          </div>
           <p>
             Организация:{' '}
             {club.clientArchived
@@ -734,7 +732,7 @@ function OwnerClubs({
                 : 'Ожидает подтверждения'}
           </p>
           <button className="ob-button" onClick={() => open(club.clientId)}>
-            Доступы организации «{club.clientName}»
+            Клубы организации «{club.clientName}»
           </button>
         </section>
       ))}
@@ -837,6 +835,9 @@ function OwnerClient({
   open,
   limitDraft,
   lifecycle,
+  section,
+  select,
+  navigation,
 }: {
   lifecycle: ReturnType<typeof useClientLifecycle>;
   limitDraft: ReturnType<typeof useClientLimitDraft>;
@@ -844,82 +845,81 @@ function OwnerClient({
   id: string;
   back: () => void;
   open: (invitation: Invitation) => void;
+  section?: ClientSection;
+  select: (section: ClientSection) => void;
+  navigation: ReactNode;
 }) {
   const remote = useRemote<ClientDetail>(
     credential,
     '/api/platform/onboarding/clients/' + id,
   );
+  const client = remote.data;
+  const sectionNavigation = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    sectionNavigation.current?.closest('main')?.scrollTo?.(0, 0);
+  }, [section]);
   return (
-    <Shell title={remote.data?.name ?? 'Клиент и доступы'} owner back={back}>
+    <Shell title={client?.name ?? 'Клиент'} owner back={back} navigation={navigation}>
       <RemoteState {...remote} />
-      {remote.data && (
+      {client && (
         <>
-          <section className="po-card ob-card">
-            <h2>{organizationLabel(remote.data)}</h2>
-            <p>
-              Активных пользователей:{' '}
-              {remote.data.activeMembers ??
-                remote.data.members.filter((member) => member.active).length}
-            </p>
-            <p className="po-muted">
-              Отзыв доступа отключает пользователя. Организация, заведения и
-              история сохраняются.
-            </p>
-          </section>
-          <ClientLifecycle
-            draft={lifecycle}
-            client={remote.data}
-            updated={remote.refresh}
-          />
-          {!remote.data.archived && (
-            <>
-              <ClientLimit
-                draft={limitDraft}
-                client={remote.data}
-                updated={remote.refresh}
-              />
-            </>
-          )}
-          <section className="ob-section">
-            <h2>Доступы</h2>
-            {remote.data.members.length === 0 && <p>Доступы ещё не выданы</p>}
-            {remote.data.members.map((member) => (
-              <MemberAccess
-                key={member.userId + ':' + member.version}
-                member={member}
-                clubs={remote.data?.clubs ?? []}
-                clientId={id}
-                credential={credential}
-                updated={remote.refresh}
-                readOnly={remote.data?.archived}
-              />
-            ))}
-          </section>
-          <section className="ob-section">
-            <h2>Приглашения</h2>
-            {remote.data.invitations.map((invitation) => (
-              <button
-                key={invitation.id}
-                className="po-card ob-card ob-row"
-                onClick={() => open(invitation)}
-              >
-                <strong>{invitation.recipientLabel}</strong>
-                <small>{invitationLabels[invitation.status]}</small>
+          <nav ref={sectionNavigation} className="po-client-nav" aria-label="Разделы карточки клиента">
+            {clientSections.map(({ label, value }) => (
+              <button key={label} type="button" className="ob-button"
+                aria-current={section === value ? 'page' : undefined} onClick={() => select(value)}>
+                {label}
               </button>
             ))}
-          </section>
-          <section className="ob-section">
-            <h2>Клубы клиента</h2>
-            {remote.data.clubs.length === 0 ? (
-              <p>Клубов пока нет</p>
-            ) : (
-              remote.data.clubs.map((club) => (
-                <p className="po-card ob-card" key={club.id}>
-                  {club.name}
-                </p>
-              ))
-            )}
-          </section>
+          </nav>
+          {section === undefined && (
+            <>
+              <section className="po-card ob-card">
+                <h2>{organizationLabel(client)}</h2>
+                <p>Активных пользователей: {client.activeMembers ?? client.members.filter((member) => member.active).length}</p>
+              </section>
+              {!client.archived && <ClientLimit draft={limitDraft} client={client} updated={remote.refresh} />}
+              <ClientLifecycle draft={lifecycle} client={client} updated={remote.refresh} />
+            </>
+          )}
+          {section === 'clubs' && (
+            <section className="ob-section">
+              <h2>Клубы клиента</h2>
+              {client.clubs.length === 0 && <p>Клубов пока нет</p>}
+              {client.clubs.map((club) => <p className="po-card ob-card" key={club.id}>{club.name}</p>)}
+            </section>
+          )}
+          {section === 'people' && (
+            <section className="ob-section">
+              <h2>Люди и доступы</h2>
+              <p className="po-muted">
+                Отзыв доступа отключает пользователя. Организация, заведения и история сохраняются.
+              </p>
+              {client.members.length === 0 && <p>Доступы ещё не выданы</p>}
+              {client.members.map((member) => (
+                <MemberAccess
+                  key={member.userId + ':' + member.version}
+                  member={member}
+                  clubs={client.clubs}
+                  clientId={id}
+                  credential={credential}
+                  updated={remote.refresh}
+                  readOnly={client.archived}
+                />
+              ))}
+            </section>
+          )}
+          {section === 'invitations' && (
+            <section className="ob-section">
+              <h2>Приглашения</h2>
+              {client.invitations.length === 0 && <p>Приглашений пока нет</p>}
+              {client.invitations.map((invitation) => (
+                <button key={invitation.id} className="po-card ob-card ob-row" onClick={() => open(invitation)}>
+                  <strong>{invitation.recipientLabel}</strong>
+                  <small>{invitationLabels[invitation.status]}</small>
+                </button>
+              ))}
+            </section>
+          )}
         </>
       )}
     </Shell>
@@ -1362,10 +1362,12 @@ function OwnerApplication({
   credential,
   id,
   back,
+  navigation,
 }: {
   credential: string;
   id: string;
   back: () => void;
+  navigation: ReactNode;
 }) {
   const remote = useRemote<ClubApplication>(
     credential,
@@ -1419,6 +1421,7 @@ function OwnerApplication({
       title={application?.venueName || 'Рассмотрение заявки'}
       owner
       back={back}
+      navigation={navigation}
     >
       <RemoteState {...remote} />
       {application && (

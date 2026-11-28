@@ -41,6 +41,8 @@ internal abstract class ControlHeadContract {
             assertEquals(1, db.migrate("85"))
             assertEquals(1, db.migrate("86"))
             assertEquals(1, db.migrate("87"))
+            assertEquals(1, db.migrate("88"))
+            assertEquals(before, tables.associateWith { db.rows("SELECT * FROM $it ORDER BY 1") })
             assertEquals(0, db.migrate())
         }
     }

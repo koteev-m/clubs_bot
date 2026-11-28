@@ -311,6 +311,7 @@ test('upgraded clubs keep independent setup and preparation access, while creati
     .getByRole('button', { name: 'Добавить столы', exact: true })
     .click();
   await staff.getByLabel('Номер нового стола').fill('1');
+  await staff.getByLabel('Минимальный депозит за стол, ₽').fill('0');
   await staff
     .getByRole('button', { name: 'Создать стол', exact: true })
     .click();
@@ -560,6 +561,7 @@ test('verified business owner assigns a network manager who assigns and revokes 
     platform,
     '/app?mode=platform-owner&screen=client&resource=' + issued.clientId,
   );
+  await issuer.getByRole('button', { name: 'Люди и доступы' }).click();
   await issuer
     .getByRole('button', { name: 'Подтвердить владельца бизнеса' })
     .click();
@@ -787,9 +789,51 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
   });
   const destination = completeLayout.halls[0].tables[1];
   const main = completeLayout.halls[0];
-  const mainExtra = await api(request, clubManager, clubApi + '/halls/' + main.id + '/tables/batch', {
-    expectedVersion: main.layoutRevision, tableNumbers: Array.from({ length: 16 }, (_, index) => 3 + index), capacity: 6,
-  });
+  const width = process.env.CLB_WORKSPACE_WIDTH === '390' ? 390 : 320;
+  const mobile = {
+    baseURL,
+    locale: 'ru-RU',
+    viewport: { width, height: width === 390 ? 844 : 740 },
+    isMobile: true,
+    hasTouch: true,
+  };
+  const editor = await browser.newPage(mobile);
+  const takeTableShot = async (part: 'table-create' | 'table-edit' | 'table-batch', selector: ReturnType<Page['locator']>) => {
+    const dir = process.env.CLB_WORKSPACE_SCREENSHOTS;
+    const name = test.info().project.name + '-' + width + '-' + part + '.png';
+    await selector.screenshot({ path: dir ? join(dir, name) : test.info().outputPath(name) });
+  };
+  try {
+    await open(editor, clubManager, '/app?mode=client&screen=layout&resource=' + club.id + '&hall=' + main.id);
+    await telegramTheme(editor, 'dark');
+    await editor.getByRole('button', { name: 'Добавить столы' }).click();
+    const form = editor.getByRole('form', { name: 'Создание столов' });
+    await form.getByLabel('Номер нового стола').fill('4');
+    await form.getByLabel('Название нового стола').fill('Стол 4');
+    await form.getByLabel('Количество посадочных мест', { exact: true }).fill('6');
+    await expect(form.getByRole('button', { name: 'Создать стол', exact: true })).toBeDisabled();
+    await form.getByLabel('Минимальный депозит за стол, ₽').fill('30000');
+    await takeTableShot('table-create', form);
+    await form.getByRole('button', { name: 'Создать стол', exact: true }).click();
+    await editor.getByRole('button', { name: '#4 · Стол 4', exact: true }).click();
+    const tableDeposit = editor.getByLabel('Минимальный депозит за стол, ₽');
+    await expect(tableDeposit).toHaveValue('30000.00');
+    await expect(editor.getByLabel('Вместимость')).toHaveValue('6');
+    await tableDeposit.fill('30000,00');
+    await takeTableShot('table-edit', tableDeposit.locator('../..'));
+    await editor.getByRole('button', { name: 'Сохранить и завершить' }).click();
+    await editor.getByRole('button', { name: 'Добавить столы' }).click();
+    await form.getByLabel('Способ добавления').selectOption('list');
+    await form.getByLabel('Номера столов').fill([3, ...Array.from({ length: 14 }, (_, i) => 5 + i)].join(', '));
+    await form.getByLabel('Количество посадочных мест на каждый стол').fill('6');
+    await form.getByLabel('Минимальный депозит за каждый стол, ₽').fill('12500,50');
+    await takeTableShot('table-batch', form);
+    await form.getByRole('button', { name: 'Создать столы' }).click();
+    await expect(editor.getByRole('button', { name: '#18 · Стол 18', exact: true })).toBeVisible();
+  } finally {
+    await editor.close();
+  }
+  const mainExtra = await api(request, clubManager, clubApi + '/layout');
   const demoTables = [...mainExtra.halls[0].tables];
   for (const [name, first, count] of [['Лаунж', 101, 6], ['Терраса', 201, 6]] as const) {
     const added = await api(request, clubManager, clubApi + '/halls', { name });
@@ -800,6 +844,27 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     demoTables.push(...batch.halls.find((value: { name: string }) => value.name === name).tables);
   }
   expect(demoTables).toHaveLength(30);
+  expect(demoTables[3]).toMatchObject({ bookingDeposit: '30000.00', capacity: 6 });
+  expect(demoTables[2]).toMatchObject({ bookingDeposit: '12500.50', capacity: 6 });
+  const planPage = await browser.newPage({ viewport: { width: 520, height: 290 } });
+  await planPage.setContent(`<body style="margin:0;background:#102b2d;color:#e7f8dc;font:20px sans-serif">
+    <div style="position:absolute;inset:14px;border:3px solid #5d8882;border-radius:12px;padding:18px">Основной зал</div>
+    <div style="position:absolute;left:32px;top:83px;width:125px;height:160px;border:3px solid #91aa76;padding:10px">Бар</div>
+    <div style="position:absolute;left:207px;top:84px;width:267px;height:156px;border:2px dashed #7b9b98;border-radius:20px;padding:10px">Столы</div>
+    <div style="position:absolute;left:225px;bottom:0;background:#aac1ad;color:#16312c;padding:5px 20px">Вход</div>
+  </body>`);
+  const planBytes = await planPage.screenshot({ type: 'png' });
+  await planPage.close();
+  const upload = await request.post(clubApi + '/halls/' + main.id + '/plan', {
+    headers: {
+      'X-Telegram-Init-Data': clubManager,
+      'X-Layout-Version': mainExtra.halls[0].layoutRevision,
+      'Idempotency-Key': randomUUID(),
+      'Content-Type': 'image/png',
+    },
+    data: planBytes,
+  });
+  expect(upload.ok()).toBe(true);
   const calendar = await api(request, clubManager, clubApi + '/calendar');
   const startAt = new Date(Date.now() - 5 * 60_000);
   const endAt = new Date(startAt.getTime() + 6 * 3600_000);
@@ -810,8 +875,9 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     timeZone: calendar.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   });
   const businessDate = date.format(startAt);
-  const futureStart = new Date(startAt.getTime() + 24 * 3600_000);
-  const futureEnd = new Date(endAt.getTime() + 24 * 3600_000);
+  const futureStart = new Date(startAt.getTime() + 3 * 24 * 3600_000);
+  const futureBusinessDate = date.format(futureStart);
+  const afterMidnightDate = new Date(Date.parse(futureBusinessDate + 'T00:00:00Z') + 86400_000).toISOString().slice(0, 10);
   const scheduled = await api(request, clubManager, clubApi + '/calendar', {
     expectedVersion: calendar.version,
     timezone: calendar.timezone,
@@ -824,16 +890,16 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
       close: time.format(endAt),
       nextDay: date.format(endAt) !== businessDate,
     }, {
-      date: date.format(futureStart),
+      date: futureBusinessDate,
       mode: 'open',
-      open: time.format(futureStart),
-      close: time.format(futureEnd),
-      nextDay: date.format(futureStart) !== date.format(futureEnd),
+      open: '22:00',
+      close: '05:00',
+      nextDay: true,
     }],
   }, 'PATCH');
   const nightId = scheduled.nights.find((night: { businessDate: string }) => night.businessDate === businessDate)?.nightId;
   expect(nightId).toBeTruthy();
-  const futureNight = scheduled.nights.find((night: { businessDate: string }) => night.businessDate === date.format(futureStart))?.nightId;
+  const futureNight = scheduled.nights.find((night: { businessDate: string }) => night.businessDate === futureBusinessDate)?.nightId;
   expect(futureNight).toBeTruthy();
   expect(table.id).toBeTruthy();
   const configuration = await api(request, clubManager, clubApi + '/deposit-configuration');
@@ -844,13 +910,6 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     extras: [{ name: 'Шары', active: true }],
   }, 'PATCH');
 
-  const width = process.env.CLB_WORKSPACE_WIDTH === '390' ? 390 : 320;
-  const mobile = {
-    baseURL,
-    viewport: { width, height: width === 390 ? 844 : 740 },
-    isMobile: true,
-    hasTouch: true,
-  };
   let page = await browser.newPage(mobile);
   page.setDefaultTimeout(10_000);
   try {
@@ -942,7 +1001,18 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
         await phone.fill('');
         await details.click();
       }
-      await shot(page, 'floor-new-booking.png');
+      if (tableLabel === 'Стол 4') {
+        const deposit = bookingForm.getByLabel('Депозит по брони, ₽');
+        await expect(deposit).toHaveValue(/30.?000/);
+        await deposit.fill('50000');
+        await bookingForm.getByLabel(/Ожидаемый приход/).fill('00:30');
+        await expect(bookingForm.locator('input[type="datetime-local"]')).toHaveCount(0);
+        const arrivalLabel = bookingForm.getByText(/Приход:.*00:30/);
+        await expect(arrivalLabel).toBeVisible();
+        await bookingForm.getByLabel(/Ожидаемый приход/).blur();
+        await arrivalLabel.scrollIntoViewIfNeeded();
+        await shot(page, 'floor-new-booking.png');
+      }
       const result = page.waitForResponse((response) =>
         response.url().endsWith(operations) && response.request().method() === 'POST');
       await bookingForm.getByRole('button', { name: 'Создать бронь' }).click();
@@ -974,7 +1044,11 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     await expect(desk.getByLabel('Операционная ночь')).toHaveValue(futureNight);
     await newReservation('Стол 4', 'На будущую ночь');
     const futureDesk = await api(request, floor, operations + '/nights/' + futureNight);
-    expect(futureDesk.bookings.map((item: { guestName: string }) => item.guestName)).toContain('На будущую ночь');
+    const futureBooking = futureDesk.bookings.find((item: { guestName: string }) => item.guestName === 'На будущую ночь');
+    expect(futureBooking.bookingDepositMinor).toBe('5000000');
+    const arrival = new Date(futureBooking.arrivalBy);
+    expect(date.format(arrival)).toBe(afterMidnightDate);
+    expect(time.format(arrival)).toBe('00:30');
     await nav.getByRole('button', { name: 'Смена' }).click();
     await desk.getByRole('button', { name: 'Посадить гостей', exact: true }).click();
     await expect(desk.getByText('Посадка · выберите стол')).toBeVisible();
@@ -1083,8 +1157,51 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     await desk.getByRole('button', { name: 'Занятые' }).click();
     await expect(tiles).toHaveCount(11);
     await desk.getByRole('button', { name: 'Все', exact: true }).click();
+    const workingPlan = '**' + operations + '/halls/' + main.id + '/plan/**';
+    let finishPlanRequest!: () => void;
+    const firstPlanRequest = new Promise<void>((resolve) => { finishPlanRequest = resolve; });
+    await page.route(workingPlan, async (route) => {
+      await firstPlanRequest;
+      await route.abort();
+    }, { times: 1 });
     await desk.getByRole('button', { name: 'Схема' }).click();
-    await expect(desk.getByLabel('Схема · Основной зал')).toBeVisible();
+    try {
+      await expect(desk.getByText('Загружаем план зала…')).toBeVisible();
+    } finally {
+      finishPlanRequest();
+    }
+    await expect(desk.getByText('Не удалось загрузить сохранённый план.')).toBeVisible();
+    await expect(desk.locator('.night-grid-tile')).toHaveCount(30);
+    await desk.getByRole('button', { name: 'Загрузить повторно' }).click();
+    const plan = desk.getByLabel('Схема · Основной зал');
+    const image = plan.getByAltText('План зала');
+    await expect(image).toBeVisible();
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(520);
+    const marker = plan.getByTestId('table-marker-' + destination.id);
+    const markerPosition = () => marker.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const image = element.parentElement!.querySelector('img')!;
+      const stage = image.getBoundingClientRect();
+      const scale = Math.min(stage.width / image.naturalWidth, stage.height / image.naturalHeight);
+      const pictureWidth = image.naturalWidth * scale;
+      const pictureHeight = image.naturalHeight * scale;
+      return {
+        x: (bounds.x + bounds.width / 2 - stage.x - (stage.width - pictureWidth) / 2) / pictureWidth,
+        y: (bounds.y + bounds.height / 2 - stage.y - (stage.height - pictureHeight) / 2) / pictureHeight,
+      };
+    });
+    const checkMarker = () => expect.poll(async () => {
+      const position = await markerPosition();
+      return Math.max(Math.abs(position.x - 0.7), Math.abs(position.y - 0.65));
+    }).toBeLessThan(0.015);
+    await checkMarker();
+    await shot(page, 'floor-plan.png');
+    await plan.getByRole('button', { name: 'Увеличить схему' }).click();
+    await expect(plan.getByText('150%')).toBeVisible();
+    await checkMarker();
+    await desk.getByRole('combobox', { name: 'Зал', exact: true }).selectOption({ label: 'Терраса' });
+    await expect(desk.getByText(/План зала не загружен/)).toBeVisible();
+    await desk.getByRole('combobox', { name: 'Зал', exact: true }).selectOption('');
     await desk.getByRole('button', { name: 'Сетка' }).click();
     await desk.getByRole('button', { name: 'Стол 1', exact: true }).click();
     await expect(desk.getByRole('region', { name: 'Карточка стола' })).toHaveCount(1);
@@ -1137,6 +1254,25 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     await expect(seat.getByText('Стол 2', { exact: false })).toBeVisible();
 
     await seat.getByRole('button', { name: 'Закрыть форму' }).click();
+    const managementPage = await browser.newPage(mobile);
+    try {
+      await open(managementPage, clubManager, '/app?mode=cabinet');
+      await telegramTheme(managementPage, 'dark');
+      const managerDesk = managementPage.getByRole('region', { name: 'Рабочая ночь' });
+      await expect(managerDesk.getByRole('heading', { name: club.name, exact: true })).toBeVisible();
+      await expect(managementPage.getByRole('heading', { name: 'Мои заведения' })).toHaveCount(0);
+      await managerDesk.getByRole('button', { name: 'Управление клубом' }).click();
+      await expect(managementPage.getByRole('heading', { name: 'Управление клубом' })).toBeVisible();
+      await expect(managementPage.getByRole('button', { name: 'Расписание' })).toBeVisible();
+      await expect(managementPage.getByRole('button', { name: 'Команда' })).toBeVisible();
+      await expect(managementPage.getByRole('button', { name: 'Настройки клуба' })).toBeVisible();
+      await shot(managementPage, 'floor-management.png');
+      await managementPage.getByRole('button', { name: 'Показатели' }).click();
+      await expect(managementPage.getByRole('heading', { name: 'Операционные данные' })).toBeVisible();
+      await expect(managementPage.getByRole('heading', { name: 'Финансовые итоги' })).toHaveCount(0);
+    } finally {
+      await managementPage.close();
+    }
     const secondClub = await api(request, owner, '/api/client/clients/' + issued.clientId + '/clubs', {
       venueName: 'Другой клуб ' + suffix, countryCode: 'RU', cityId: '524901', address: 'Второй синтетический адрес',
     });
@@ -1155,8 +1291,12 @@ test('mobile manager opens the floor desk after ordinary setup and records mixed
     await desk.getByRole('button', { name: 'Меню кабинета' }).click();
     await desk.getByRole('combobox', { name: 'Клуб', exact: true }).selectOption(secondClub.id);
     await expect(desk.getByRole('heading', { name: secondClub.name, exact: true })).toBeVisible();
+    await desk.getByRole('button', { name: 'Управление клубом' }).click();
+    await expect(page.getByRole('heading', { name: 'Управление клубом' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Показатели' })).toBeVisible();
+    await shot(page, 'floor-management-no-night.png');
+    await page.getByRole('button', { name: 'Назад к клубу' }).click();
     await desk.getByRole('button', { name: 'Меню кабинета' }).click();
-    await expect(desk.getByRole('button', { name: 'Настройки клуба' })).toBeVisible();
     await desk.getByRole('combobox', { name: 'Клуб', exact: true }).selectOption(club.id);
     await expect(desk.getByRole('heading', { name: club.name, exact: true })).toBeVisible();
 

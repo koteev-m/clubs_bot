@@ -45,6 +45,7 @@ type Screen =
   | { type: 'club'; id: string }
   | { type: 'profile'; id: string }
   | { type: 'settings'; id: string }
+  | { type: 'management' | 'management-reports'; id: string }
   | { type: 'deposit-configuration'; id: string }
   | { type: 'operational-reports'; id: string }
   | { type: 'financial-report-access'; id: string }
@@ -98,6 +99,8 @@ function savedScreen(): Screen {
   for (const type of [
     'profile',
     'settings',
+    'management',
+    'management-reports',
     'readiness',
     'preparation-choice',
     'deposit-configuration',
@@ -259,6 +262,7 @@ function ClientWorkspace({
       // Shortcuts can bypass the settings hub. Give it one real entry so
       // browser Forward also opens the section the user just left.
       if (!replace && 'id' in next && next.id && settingsSections.has(next.type) &&
+          savedScreen().type !== 'management' &&
           !(next.type === 'layout' && next.hallId)) {
         const settings: Screen = { type: 'settings', id: next.id };
         if (!nextTrail.includes(screenKey(settings))) {
@@ -373,6 +377,13 @@ function ClientWorkspace({
       navigate({ type: 'club', id: invitation.clubId }, true);
     else navigate({ type: 'space', id: invitation.clientId }, true);
   }, [navigate, onTokenConsumed]);
+  function directParent(id: string, fallback: 'club' | 'settings'): Screen {
+    const trail: string[] = window.history.state?.clientTrail ?? [];
+    for (const parent of ['management', 'management-reports'] as const) {
+      if (trail.at(-1) === screenKey({ type: parent, id })) return { type: parent, id };
+    }
+    return { type: fallback, id };
+  }
   if (screen.type === 'invitation' || screen.type === 'manager-invitation')
     return (
       <InvitationScreen
@@ -444,7 +455,7 @@ function ClientWorkspace({
         receiptId={receiptId}
         issued={(invitationId) => navigate({ type: 'managers', id: screen.id, invitationId }, true)}
         openInvite={() => navigate({ type: 'invite-manager', id: screen.id })}
-        back={() => goBack({ type: inviting || receiptId ? 'managers' : 'club', id: screen.id })}
+        back={() => goBack(inviting || receiptId ? { type: 'managers', id: screen.id } : directParent(screen.id, 'club'))}
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
       />
@@ -467,7 +478,7 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={() => goBack({ type: 'club', id: screen.id })}
+        back={() => goBack(directParent(screen.id, 'club'))}
       />
     );
   if (screen.type === 'financial-report-access')
@@ -529,7 +540,7 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={() => goBack({ type: 'settings', id: screen.id })}
+        back={() => goBack(directParent(screen.id, 'settings'))}
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
       />
@@ -556,7 +567,7 @@ function ClientWorkspace({
       />
     );
   if (
-    ['club', 'settings', 'readiness', 'preparation-choice'].includes(
+    ['club', 'settings', 'management', 'management-reports', 'readiness', 'preparation-choice'].includes(
       screen.type,
     ) &&
     'id' in screen &&
@@ -570,7 +581,9 @@ function ClientWorkspace({
         mode={
           screen.type === 'settings'
             ? 'settings'
-            : screen.type === 'readiness'
+            : screen.type === 'management' || screen.type === 'management-reports'
+              ? screen.type
+              : screen.type === 'readiness'
               ? 'readiness'
               : screen.type === 'preparation-choice'
                 ? 'choice'
@@ -582,7 +595,7 @@ function ClientWorkspace({
               ? clientId
                 ? { type: 'space', id: clientId }
                 : { type: 'home' }
-              : { type: 'club', id: screen.id! },
+              : directParent(screen.id!, 'club'),
           )
         }
         open={(type) => navigate({ type, id: screen.id! })}

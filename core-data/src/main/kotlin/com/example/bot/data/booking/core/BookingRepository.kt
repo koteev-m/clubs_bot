@@ -166,6 +166,9 @@ class BookingRepository(
                         BookingCoreError.IdempotencyConflict,
                     )
                 }
+                if (LegacyBookingAdmission().exceedsMappedCapacity(tableId, guests)) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.TableOccupied)
+                }
                 val activeExists =
                     BookingsTable
                         .selectAll()
@@ -717,6 +720,9 @@ class BookingHoldRepository(
                     return@legacyBookingTransaction BookingCoreResult.Success(
                         existingByKey.toBookingHold(),
                     )
+                }
+                if (LegacyBookingAdmission().exceedsMappedCapacity(tableId, guestsCount)) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.TableOccupied)
                 }
                 val existingBooking =
                     BookingsTable

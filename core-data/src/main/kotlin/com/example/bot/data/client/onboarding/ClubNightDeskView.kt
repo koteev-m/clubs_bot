@@ -114,7 +114,12 @@ internal class ClubNightDeskView(
             put("closesAt", this@nightView.instant("end_at").toString())
         }
 
-    private fun halls() = sql.rows("SELECT id,name,is_active FROM halls WHERE club_id=? ORDER BY id", clubId)
+    private fun halls() =
+        sql.rows(
+            "SELECT h.id,h.name,h.is_active,h.layout_revision,p.sha256 AS plan_sha256 FROM halls h " +
+                "LEFT JOIN hall_plans p ON p.hall_id=h.id WHERE h.club_id=? ORDER BY h.id",
+            clubId,
+        )
 
     private fun hallView(
         hall: DbRow,
@@ -125,10 +130,21 @@ internal class ClubNightDeskView(
         buildJsonObject {
             put("id", hall["id"])
             put("name", hall["name"])
+            if (hall.active()) {
+                hall["plan_sha256"]?.let { hash ->
+                    put(
+                        "plan",
+                        buildJsonObject {
+                            put("sha256", hash)
+                            put("layoutRevision", hall["layout_revision"])
+                        },
+                    )
+                }
+            }
             val tables =
                 sql.rows(
                     "SELECT ht.id,ht.label,ht.table_number,ht.capacity,ht.booking_club_id,ht.booking_table_id," +
-                        "ht.x,ht.y,ht.is_placed,t.id AS verified_table_id,t.active AS booking_active " +
+                        "ht.x,ht.y,ht.is_placed,t.id AS verified_table_id,t.active AS booking_active,t.min_deposit " +
                         "FROM hall_tables ht " +
                         "LEFT JOIN tables t ON " +
                         "t.id=ht.booking_table_id AND t.club_id=ht.booking_club_id AND t.club_id=? " +
@@ -182,6 +198,7 @@ internal class ClubNightDeskView(
             put("number", row.long("table_number"))
             put("label", row["label"])
             put("capacity", row.long("capacity"))
+            put("minDeposit", row["min_deposit"])
             if (row.placed()) {
                 put("x", checkNotNull(row["x"]).toDouble())
                 put("y", checkNotNull(row["y"]).toDouble())
@@ -283,7 +300,7 @@ internal class ClubNightDeskView(
             """
             SELECT b.id,b.guest_user_id,COALESCE(b.guest_name,u.display_name) AS guest_name,
                 u.username,b.phone_e164,b.guests_count,b.arrival_by,b.status,b.min_deposit,
-                b.staff_note,b.staff_cancellation_reason,b.staff_wait_until,b.updated_at,b.staff_created,
+                b.staff_booking_deposit_minor,b.staff_note,b.staff_cancellation_reason,b.staff_wait_until,b.updated_at,b.staff_created,
                 h.name AS hall_name,ht.id AS hall_table_id,CASE
                     WHEN b.slot_start=e.start_at AND b.slot_end=e.end_at THEN 'true' ELSE 'false' END AS exact_slot
             FROM bookings b JOIN events e ON e.id=b.event_id AND e.club_id=b.club_id
@@ -312,6 +329,7 @@ internal class ClubNightDeskView(
             put("status", row["status"])
             put("entryStatus", state.bookings.entry(row))
             put("minDeposit", row["min_deposit"])
+            put("bookingDepositMinor", row["staff_booking_deposit_minor"])
             put("source", if (row.active("staff_created")) "CLUB" else null)
             put("waitUntil", state.bookings.deadline(row)?.toString())
             put("note", row["staff_note"])

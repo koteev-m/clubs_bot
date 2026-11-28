@@ -50,8 +50,14 @@ export type Table = {
   y?: number;
   payments?: Payment[];
   salesStopped?: boolean;
+  minDeposit?: string | null;
 };
-export type Hall = { id: string; name: string; tables: Table[] };
+export type Hall = {
+  id: string;
+  name: string;
+  tables: Table[];
+  plan?: { sha256: string; layoutRevision: string };
+};
 export type Night = {
   id: string;
   businessDate: string;
@@ -69,6 +75,7 @@ export type Booking = {
   status: string;
   entryStatus?: string | null;
   minDeposit?: string | null;
+  bookingDepositMinor?: string | null;
   source?: string | null;
   waitUntil?: string | null;
   note?: string | null;
@@ -124,6 +131,7 @@ export type Command = {
   phone?: string;
   arrivalBy?: string;
   expectedUpdatedAt?: string;
+  bookingDepositMinor?: string;
   destinationTableId?: string;
   reason?: string;
   waitUntil?: string;
