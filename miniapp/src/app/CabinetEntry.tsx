@@ -4,19 +4,23 @@ import {
   onboardingRequest,
   OnboardingError,
 } from "../modules/client/onboarding.api";
+import type { ClientSummary } from "../modules/client/onboarding.types";
 import ClientAccess from "../modules/client/ClientAccess";
 import PlatformOwnerAccess from "../modules/platform-owner/PlatformOwnerAccess";
 import SupportShell from "../modules/support/pages/SupportShell";
 import { setInitData } from "../shared/api/http";
 
 type Destination = "owner" | "client" | "support" | "guest";
+type CabinetDestination =
+  | { destination: "client"; clients: ClientSummary[] }
+  | { destination: Exclude<Destination, "client"> };
 
 /** Each response is signed-identity scoped; URL modes and claimed roles are never consulted. */
 export async function resolveCabinet(
   credential: string,
   signal: AbortSignal,
   previousDestination?: Destination,
-): Promise<Destination> {
+): Promise<CabinetDestination> {
   try {
     const owner = await onboardingRequest<{ platformOwner: boolean }>(
       credential,
@@ -25,19 +29,19 @@ export async function resolveCabinet(
     );
     if (owner.platformOwner !== true)
       throw new Error("Invalid access response");
-    return "owner";
+    return { destination: "owner" };
   } catch (error) {
     if (!(error instanceof OnboardingError) || error.status !== 403)
       throw error;
   }
-  const context = await onboardingRequest<{ clients: unknown[] }>(
+  const context = await onboardingRequest<{ clients: ClientSummary[] }>(
     credential,
     "/api/client/context",
     { signal },
   );
   if (!Array.isArray(context.clients))
     throw new Error("Invalid client context");
-  if (context.clients.length) return "client";
+  if (context.clients.length) return { destination: "client", clients: context.clients };
   if (previousDestination === "client")
     throw new OnboardingError(403, "access_lost");
   try {
@@ -47,10 +51,10 @@ export async function resolveCabinet(
       { signal },
     );
     if (!Array.isArray(clubs)) throw new Error("Invalid staff context");
-    return clubs.length ? "support" : "guest";
+    return { destination: clubs.length ? "support" : "guest" };
   } catch (error) {
     if (error instanceof OnboardingError && error.status === 403)
-      return "guest";
+      return { destination: "guest" };
     throw error;
   }
 }
@@ -64,10 +68,7 @@ export default function CabinetEntry() {
   }>();
   if (initData || !document.hidden) lastCredential.current = initData;
   const [attempt, setAttempt] = useState(0);
-  const [mounted, setMounted] = useState<{
-    credential: string;
-    destination: Destination;
-  }>();
+  const [mounted, setMounted] = useState<CabinetDestination & { credential: string }>();
   const [access, setAccess] = useState({
     credential: "",
     epoch: -1,
@@ -94,11 +95,12 @@ export default function CabinetEntry() {
           ? lastAuthorized.current.destination
           : undefined,
       )
-        .then((destination) => {
+        .then((result) => {
+          const { destination } = result;
           if (controller.signal.aborted) return;
           setInitData(initData);
           lastAuthorized.current = { credential: initData, destination };
-          setMounted({ credential: initData, destination });
+          setMounted({ credential: initData, ...result });
           setAccess({
             credential: initData,
             epoch: refreshEpoch,
@@ -144,7 +146,7 @@ export default function CabinetEntry() {
         <div hidden={status !== "allowed"} key={current.credential}>
           {current.destination === "owner" && <PlatformOwnerAccess />}
           {current.destination === "client" && (
-            <ClientAccess initialToken={null} />
+            <ClientAccess initialToken={null} initialClients={current.clients} />
           )}
           {current.destination === "support" && <SupportShell />}
         </div>

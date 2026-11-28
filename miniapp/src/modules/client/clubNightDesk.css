@@ -31,16 +31,11 @@
   color: var(--po-accent);
 }
 
-.night-desk-tables,
 .night-desk-booking-list {
   display: grid;
   gap: 0.55rem;
   list-style: none;
   padding: 0;
-}
-
-.night-desk-tables {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
 }
 
 .night-desk-table,
@@ -169,7 +164,6 @@
     var(--tg-content-safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--po-line);
 }
-.night-work-seat { width: 100%; min-height: 48px; margin-bottom: 8px; }
 .night-work-nav { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; }
 .night-work-nav button {
   display: grid; justify-items: center; align-content: center; gap: 3px; color: var(--po-muted);
@@ -191,14 +185,12 @@
 }
 .night-work-reservation small { display: block; color: var(--po-muted); }
 .night-desk [hidden] { display: none; }
-.night-work-table-button { min-height: 44px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; }
 .night-work-map { min-height: 160px; position: relative; border: 1px solid var(--po-line); border-radius: 12px; }
 .night-work-map button { position: absolute; transform: translate(-50%,-50%); border-radius: 50%; width: 44px; height: 44px;
   border: 1px solid var(--po-line); background: var(--po-card); color: inherit; }
 .night-work-map button[data-status='free'] { border-color: var(--po-accent); }
 .night-work-map button[data-status='reserved'] { border-style: dashed; }
 .night-work-map button[data-status='seated'] { background: color-mix(in srgb, var(--po-accent) 30%, var(--po-bg)); }
-.night-workspace .night-desk-tables { grid-template-columns: 1fr; }
 .night-workspace .po-details { margin: 0; }
 .night-workspace .ob-field input, .night-workspace .ob-field select,
 .night-workspace .ob-field textarea { font-size: 16px; }
@@ -368,4 +360,174 @@
 
 .night-work-content:has(.night-work-form-submit) {
   scroll-padding-bottom: 70px;
+}
+
+.night-work-quick-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.night-work-quick-actions .ob-button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  min-height: 56px;
+  padding: 6px;
+  text-align: center;
+}
+
+.night-work-select,
+.night-work-booking-controls {
+  display: grid;
+  gap: 6px;
+}
+
+.night-work-select select,
+.night-work-booking-controls :is(input, select) {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--po-line);
+  border-radius: 10px;
+  background-color: var(--po-card);
+  padding: 6px 10px;
+  color: inherit;
+}
+
+.night-work-select select,
+.night-work-booking-controls select {
+  padding-right: 28px;
+}
+
+.night-work-night-select {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: .86rem;
+}
+
+.night-work-night-select > span {
+  color: var(--po-muted);
+}
+
+.night-work-booking-controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.night-work-booking-controls .ob-field {
+  margin: 0;
+}
+
+.night-grid-filters {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-block: 8px;
+}
+
+.night-grid-filters .ob-button,
+.night-grid-map-toggle.ob-button {
+  margin: 0;
+  gap: 5px;
+  padding: 5px 8px;
+  font-size: .82rem;
+}
+
+.night-grid-filters .ob-button {
+  color: var(--po-muted);
+  background: var(--po-card);
+}
+
+.night-grid-filters .ob-button[aria-pressed='true'] {
+  border-color: var(--po-accent);
+  color: var(--po-accent);
+  background: var(--ob-soft);
+}
+
+.night-grid-hall-select {
+  margin-top: 7px;
+}
+
+.night-grid-hall {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.night-grid-hall h4,
+.night-work-table-card h3 {
+  margin: 0;
+}
+
+.night-grid-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 90px), 1fr));
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.night-grid-tile {
+  --tile-color: var(--po-muted);
+  width: 100%;
+  min-height: 62px;
+  display: grid;
+  place-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border: 1px solid color-mix(in srgb, var(--tile-color) 38%, var(--po-line));
+  border-radius: 10px;
+  color: var(--tile-color);
+  background: color-mix(in srgb, var(--tile-color) 13%, var(--po-bg));
+  font-size: .74rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.night-grid-tile strong {
+  font-size: 1.03rem;
+  line-height: 1.15;
+}
+
+.night-grid-tile[data-status='free'] { --tile-color: #a3e8b7; }
+.night-grid-tile[data-status='reserved'] { --tile-color: #f7d486; }
+.night-grid-tile[data-status='seated'] { --tile-color: #ffa7af; }
+.night-grid-tile[data-status='stopped'] { --tile-color: #d2bdf9; }
+[data-theme='light'] .night-grid-tile[data-status='free'] { --tile-color: #226139; }
+[data-theme='light'] .night-grid-tile[data-status='reserved'] { --tile-color: #795208; }
+[data-theme='light'] .night-grid-tile[data-status='seated'] { --tile-color: #92243a; }
+[data-theme='light'] .night-grid-tile[data-status='stopped'] { --tile-color: #5f3d8b; }
+
+.night-work-table-card > .po-back {
+  width: fit-content;
+  margin: 0;
+  min-height: 44px;
+}
+
+.night-grid-prompt {
+  color: var(--po-accent);
+  margin: 0 0 8px;
+}
+
+.night-work-shift h3,
+.night-work-section-title h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.night-desk-bookings .night-desk-booking-list .ob-button {
+  margin: 0;
+  justify-content: stretch;
+  background: var(--po-card);
+  color: var(--ob-text);
+}
+
+.night-work-form-submit .po-notice {
+  margin-bottom: 6px;
 }

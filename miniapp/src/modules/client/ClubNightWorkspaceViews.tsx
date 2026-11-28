@@ -13,6 +13,7 @@ export type WorkspaceLocation = {
   tableId?: string;
   bookingId?: string;
   tableMap: boolean;
+  hallId?: string;
   status?: TableStatus;
 };
 const sections = [

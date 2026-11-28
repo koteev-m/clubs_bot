@@ -149,10 +149,12 @@ const settingsSections = new Set<Screen['type']>([
 
 export default function ClientAccess({
   initialToken,
+  initialClients,
   invitationKind,
   onTokenConsumed,
 }: {
   initialToken: string | null;
+  initialClients?: ClientSummary[];
   invitationKind?: InvitationKind | null;
   onTokenConsumed?: () => void;
 }) {
@@ -182,6 +184,7 @@ export default function ClientAccess({
         key={credential}
         credential={credential}
         initialToken={initialToken}
+        initialClients={initialClients}
         invitationKind={invitationKind}
         onTokenConsumed={onTokenConsumed}
       />
@@ -192,11 +195,13 @@ export default function ClientAccess({
 function ClientWorkspace({
   credential,
   initialToken,
+  initialClients,
   invitationKind,
   onTokenConsumed,
 }: {
   credential: string;
   initialToken: string | null;
+  initialClients?: ClientSummary[];
   invitationKind?: InvitationKind | null;
   onTokenConsumed?: () => void;
 }) {
@@ -617,6 +622,7 @@ function ClientWorkspace({
       credential={credential}
       navigate={navigate}
       offerShortcut={offerInitialShortcut.current}
+      initialClients={initialClients}
     />
   );
 }
@@ -625,28 +631,33 @@ function ClientHome({
   credential,
   navigate,
   offerShortcut,
+  initialClients,
 }: {
   credential: string;
   navigate: (screen: Screen, replace?: boolean) => void;
   offerShortcut: boolean;
+  initialClients?: ClientSummary[];
 }) {
+  const entryContext = offerShortcut ? initialClients : undefined;
+  const entryClubs = new Set(entryContext?.flatMap(({ clubs = [] }) => clubs.map(({ id }) => id)));
+  const routedAtEntry = entryClubs.size === 1 || (entryClubs.size === 0 && entryContext?.length === 1);
   const remote = useRemote<{ clients: ClientSummary[] }>(
     credential,
-    '/api/client/context',
+    routedAtEntry ? null : '/api/client/context',
   );
-  const operatingClubs = remote.data?.clients.flatMap((client) => client.clubs ?? []) ?? [];
+  const clients = remote.data?.clients ?? entryContext;
+  const operatingClubs = Array.from(new Map(
+    clients?.flatMap(({ clubs = [] }) => clubs.map((club) => [club.id, club] as const)),
+  ).values());
   const directClub = operatingClubs.length === 1 ? operatingClubs[0].id : undefined;
+  const directSpace = operatingClubs.length === 0 && clients?.length === 1 ? clients[0].id : undefined;
   useEffect(() => {
     if (!offerShortcut || savedScreen().type !== 'home') return;
-    if (directClub) {
-      navigate({ type: 'club', id: directClub }, true);
-    } else if (!operatingClubs.length && remote.data?.clients.length === 1) {
-      const client = remote.data.clients[0];
-      navigate(client.clubs?.length === 1
-        ? { type: 'club', id: client.clubs[0].id }
-        : { type: 'space', id: client.id }, true);
-    }
-  }, [remote.data, directClub, operatingClubs.length, navigate, offerShortcut]);
+    if (directClub) navigate({ type: 'club', id: directClub }, true);
+    else if (directSpace) navigate({ type: 'space', id: directSpace }, true);
+  }, [directClub, directSpace, navigate, offerShortcut]);
+  if (offerShortcut && (directClub || directSpace || (!clients && !remote.error)))
+    return <Shell title="Проверяем доступ к кабинету…" closeAtRoot>{null}</Shell>;
   return (
     <Shell
       title="Мои заведения"
@@ -654,7 +665,7 @@ function ClientHome({
       closeAtRoot
     >
       <RemoteState {...remote} />
-      {remote.data?.clients.length === 0 && (
+      {clients?.length === 0 && (
         <section className="po-card po-empty">
           <h2>Нет доступных клиентских пространств</h2>
           <p>
@@ -671,7 +682,7 @@ function ClientHome({
           ))}
         </section>
       )}
-      {remote.data?.clients.map((client) => (
+      {clients?.map((client) => (
         <button
           key={client.id}
           className="po-card ob-card ob-row"
