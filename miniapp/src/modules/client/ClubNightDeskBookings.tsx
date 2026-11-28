@@ -148,18 +148,18 @@ export function BookingsList({
   });
   return (
     <section className="night-desk-bookings" aria-label="Бронирования">
-      <div className="night-desk-fields" hidden={Boolean(selectedBooking)}>
+      <div className="night-work-booking-controls" hidden={Boolean(selectedBooking)}>
         <label className="ob-field">
-          Поиск брони
+          <span className="sr-only">Поиск брони</span>
           <input
             type="search"
             value={search}
-            placeholder="Имя, телефон или стол"
+            placeholder="Гость / стол"
             onChange={(event) => setSearch(event.target.value)}
           />
         </label>
         <label className="ob-field">
-          Статус
+          <span className="sr-only">Статус</span>
           <select
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
@@ -472,16 +472,24 @@ export function BookingForm({
     execute(body, table, night);
   }
 
+  const notice = (validation || problem) && <p className="po-notice" role="alert">{validation || problem}</p>;
   return (
     <form
       aria-label={titles[action]}
-      className="night-desk-form"
+      className={action === 'create_booking' ? 'night-desk-form night-work-seat-form' : 'night-desk-form'}
       onSubmit={(event) => {
         event.preventDefault();
         submit();
       }}
     >
-      <h3>{titles[action]}</h3>
+      {action === 'create_booking' ? (
+        <div className="night-work-form-heading">
+          <h3>{titles[action]}</h3>
+          <button type="button" className="ob-button" aria-label="Закрыть форму" disabled={blocked} onClick={close}>
+            Закрыть
+          </button>
+        </div>
+      ) : <h3>{titles[action]}</h3>}
       <p>
         <strong>{tableName(table)}</strong> · {dateFormat(night.businessDate)}
         {booking?.guestName && ' · ' + booking.guestName}
@@ -502,23 +510,6 @@ export function BookingForm({
                 maxLength={120}
                 required
                 onChange={(event) => update({ guestName: event.target.value })}
-              />
-            </label>
-            <label className="ob-field">
-              Телефон для брони (по желанию)
-              <input
-                type="tel"
-                value={draft.phone}
-                maxLength={30}
-                onChange={(event) => update({ phone: event.target.value })}
-              />
-            </label>
-            <label className="ob-field">
-              Пожелания (по желанию)
-              <textarea
-                value={draft.note}
-                maxLength={500}
-                onChange={(event) => update({ note: event.target.value })}
               />
             </label>
           </>
@@ -589,6 +580,28 @@ export function BookingForm({
               {' · '}{draft.localTime.replace('T', ' ') || 'время не задано'}</p>
           </>
         )}
+        {action === 'create_booking' && (
+          <details>
+            <summary>Телефон и пожелания (по желанию)</summary>
+            <label className="ob-field">
+              Телефон для брони (по желанию)
+              <input
+                type="tel"
+                value={draft.phone}
+                maxLength={30}
+                onChange={(event) => update({ phone: event.target.value })}
+              />
+            </label>
+            <label className="ob-field">
+              Пожелания (по желанию)
+              <textarea
+                value={draft.note}
+                maxLength={500}
+                onChange={(event) => update({ note: event.target.value })}
+              />
+            </label>
+          </details>
+        )}
         {action === 'cancel_booking' && (
           <>
             <label className="ob-field">
@@ -608,12 +621,9 @@ export function BookingForm({
           </>
         )}
       </fieldset>
-      {(validation || problem) && (
-        <p className="po-notice" role="alert">
-          {validation || problem}
-        </p>
-      )}
-      <div className="night-desk-actions">
+      {action !== 'create_booking' && notice}
+      <div className={action === 'create_booking' ? 'night-work-form-submit' : 'night-desk-actions'}>
+        {action === 'create_booking' && notice}
         <button
           type="submit"
           className="ob-button po-primary"
@@ -621,14 +631,16 @@ export function BookingForm({
         >
           {titles[action]}
         </button>
-        <button
-          type="button"
-          className="ob-button"
-          disabled={blocked}
-          onClick={close}
-        >
-          Закрыть форму
-        </button>
+        {action !== 'create_booking' && (
+          <button
+            type="button"
+            className="ob-button"
+            disabled={blocked}
+            onClick={close}
+          >
+            Закрыть форму
+          </button>
+        )}
       </div>
     </form>
   );
