@@ -23,10 +23,7 @@ class ClientWorkingNightMaintenance(
                 dataSource.connection.use { connection ->
                     val sql = OnboardingSql(connection)
                     if (!sql.workingOperationsSchema) return@withContext
-                    sql.rows(
-                        "SELECT w.client_id,w.club_id FROM client_working_clubs w JOIN clubs c ON c.id=w.club_id " +
-                            "WHERE c.is_active=FALSE ORDER BY w.club_id",
-                    )
+                    sql.workingClubCandidates()
                 }
             clubs.forEach { refreshClub(it.long("client_id"), it.long("club_id")) }
         }
@@ -63,6 +60,20 @@ class ClientWorkingNightMaintenance(
         if (!client.active() || client["archived_at"] != null || !sql.lockBookingAdmission(clubId)) return
         val club = session.calendarClub(clubId, lock = true)
         if (club.active()) return
+        if (sql.automaticWorkingClub(clientId, clubId)) {
+            rollSavedCalendar(session, clientId, clubId, club)
+        } else {
+            PreexistingClientWorkingClub(sql, clientId, clubId).adopt(session.now)
+        }
+    }
+
+    private fun rollSavedCalendar(
+        session: OnboardingSession,
+        clientId: Long,
+        clubId: Long,
+        club: DbRow,
+    ) {
+        val sql = session.sql
         val today = session.now.atZone(ZoneId.of(checkNotNull(club["timezone"]))).toLocalDate()
         val marker =
             sql.row(

@@ -454,6 +454,10 @@ function Cabinet({
         <ClubNightDesk credential={credential} profile={profile} reportDirty={trackDirty}
           reportPending={trackPending} reportBack={(handler) => { deskBack.current = handler; }}
           openClub={openClub ? (clubId) => { if (canLeave()) openClub(clubId); } : undefined}
+          openLayout={profile.permissions.includes('client.club.layout.write') ? callbacks.openLayout : undefined}
+          openCalendar={profile.permissions.some((permission) =>
+            permission === 'client.club.calendar.write' || permission === 'client.club.night.create')
+            ? callbacks.openCalendar : undefined}
           menu={menu} workspaceMemory={workspaceMemory}
           financialReport={permits('financial_reports.read')
             ? <BusinessOverview credential={credential} profile={profile} financialOnly /> : undefined} />

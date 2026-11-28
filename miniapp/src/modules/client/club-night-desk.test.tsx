@@ -620,3 +620,24 @@ it('drops a remembered card when the server returns a closed work night', async 
   expect(screen.getByRole('button', { name: 'Все брони' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: 'Карточка брони' })).toBeNull();
 });
+
+
+it('shows the relevant setup action and hides unavailable shift metrics', async () => {
+  const current = view();
+  current.night = {
+    id: '7', businessDate: '2026-11-27',
+    opensAt: '2026-11-27T21:00:00Z', closesAt: '2026-11-28T09:00:00Z',
+  };
+  current.blocked = 'working_layout_review_required';
+  const openLayout = vi.fn();
+  useServer(() => current, vi.fn());
+  const desk = render(<ClubNightDesk profile={profile} credential="synthetic" />);
+  const notice = await screen.findByRole('region', { name: 'Готовность рабочих операций' });
+  expect(within(notice).getByText(/несовместимых настроек столов/)).toBeTruthy();
+  expect(screen.getByText(/27\.11\.2026 · 28\.11\.2026, 00:00–12:00/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Свободны|Ждём брони|Посадить гостей/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Открыть залы и столы' })).toBeNull();
+  desk.rerender(<ClubNightDesk profile={profile} credential="synthetic" openLayout={openLayout} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Открыть залы и столы' }));
+  expect(openLayout).toHaveBeenCalledTimes(1);
+});
