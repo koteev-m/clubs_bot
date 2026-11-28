@@ -646,7 +646,7 @@ open class ClubTableCapacityRoutesTest : ClientManagerRoutesFixture() {
                 val savedTable = createdHall["tables"]!!.jsonArray.single().jsonObject
                 val table = savedTable.string("id")
                 val bookingTable = source.scalar("SELECT booking_table_id FROM hall_tables WHERE id=$table").toLong()
-                val start = clock.instant().plusSeconds(60)
+                val start = clock.instant().truncatedTo(ChronoUnit.SECONDS).plusSeconds(60)
                 val end = start.plusSeconds(3600)
                 source.connection.use { connection ->
                     connection.createStatement().use { statement ->
